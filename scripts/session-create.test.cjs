@@ -25,7 +25,7 @@ function harness() {
       return Promise.resolve({ status: 'idle', busy: false, entries: [], approvals: [] });
     }
   });
-  for (const file of ['session-history.js', 'session-chat.js', 'session-create.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../web', file), 'utf8'), context);
+  for (const file of ['features/sessions/session-history.js', 'features/sessions/session-chat.js', 'features/sessions/session-create.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../web', file), 'utf8'), context);
   return { context, $, creates, get timers() { return timers; }, current: () => vm.runInContext('sessionHistoryState', context) };
 }
 const created = () => ({ session: { id: 'created', name: 'Created', cwd: '/work/main' }, chat: { id: 'request-1', status: 'completed', busy: false, turn_id: 'turn', entries: [], approvals: [] } });

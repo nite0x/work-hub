@@ -53,8 +53,8 @@ function harness({ fullPage = false, readOnly = false } = {}) {
   });
   const scripts = fullPage
     ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer><\/script>/g)].map(match => match[1])
-      .filter(file => !readOnly || !['session-chat.js', 'session-create.js'].includes(file))
-    : ['core.js', 'projects.js', 'requirements.js', 'app.js'];
+      .filter(file => !readOnly || !['features/sessions/session-chat.js', 'features/sessions/session-create.js'].includes(file))
+    : ['core/core.js', 'features/projects/projects.js', 'features/tasks/requirements.js', 'core/app.js'];
   for (const file of scripts) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../web', file), 'utf8'), context, { filename: file });
   }

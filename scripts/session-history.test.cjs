@@ -26,7 +26,7 @@ function harness() {
     api: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject }))
   });
   function $(selector) { return element(selector); }
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/session-history.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/features/sessions/session-history.js'), 'utf8'), context);
   return { context, requests, element, timers, listeners, tick() { for (const timer of timers.values()) timer.callback(); } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -39,7 +39,7 @@ function enablePush(h) {
     sessionReadOnly: true, token: 'csrf', activeEnvironment: 'wsl', TextDecoder,
     fetch: (url, options) => new Promise((resolve, reject) => streams.push({ url, options, resolve, reject }))
   });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/session-history-live.js'), 'utf8'), h.context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/features/sessions/session-history-live.js'), 'utf8'), h.context);
   return streams;
 }
 

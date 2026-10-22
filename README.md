@@ -177,15 +177,59 @@ Codex 启动、打开 Git 终端、在终端获取分支及认证失败后的终
 
 ## 代码结构
 
-后端保留单个 Go 包，按职责和业务拆文件：
+后端按任务、项目、会话、工作区划分业务包，应用入口负责组装，前端按业务功能组织目录：
 
-- `main.go`：命令行参数、进程启动和服务退出。
-- `app.go`：应用依赖、数据库打开与本机 / WSL 初始化。
-- `routes.go`：HTTP 路由表、嵌入静态资源和首页；`middleware.go`：本地访问校验、页面令牌、会话模式和执行环境分发；`http.go`：JSON 请求与响应。
-- `store.go`：数据模型、迁移和项目存储；`requirements*.go` / `requirement_projects.go`、`worktrees.go`、`git*.go`：任务、项目工作目录和 Git 操作。
-- `workspace.go` / `environments.go`：WSL 辅助程序协议与执行环境；`session*.go` / `codex*.go`：会话和 Codex 协议；`terminal*.go` / `desktop*.go`：终端与桌面集成。
+```text
+main.go                      # 程序入口，转交 app.Run；保留 go run . / go build .
+internal/
+├─ app/                      # 服务组装、总路由、环境分发、启动和退出
+│  ├─ app.go / routes.go / middleware.go
+│  └─ run.go / desktop_service.go / environments.go / agent.go
+├─ task/                     # 任务创建、重试、归档、关联项目及启动目录校验
+│  ├─ service.go / routes.go
+│  └─ requirements.go / requirement_projects.go / launch.go
+├─ project/                  # 仓库登记、Git 操作、Worktree、状态缓存和 master 更新
+│  ├─ service.go / routes.go / projects.go
+│  └─ git*.go / worktrees.go / state_cache.go / master_sync.go / credentials.go
+├─ session/                  # 会话关联、历史、实时对话、终端占用和交接
+│  ├─ service.go / routes.go / sessions.go / launch.go
+│  └─ session*.go / terminal_bridge.go / bridge_peer_*.go
+├─ workspace/                # 同一执行环境的根目录、存储、写锁及本机 / WSL 执行
+│  ├─ service.go / routes.go / client.go / stream.go / agent.go / wsl.go
+│  └─ files.go / git.go / terminal*.go / sessions.go / credentials.go / names.go
+├─ overview/                 # 页面状态汇总：组合项目、任务、终端和定时更新的只读数据
+├─ model/                    # 项目、任务、Worktree、终端参数、更新结果等共享数据结构
+├─ store/                    # SQLite 打开、迁移、恢复、查询和元数据导入导出
+├─ codex/                    # Codex JSONL / WebSocket 客户端、事件分发与代理
+├─ platform/                 # 跨平台路径、命令引用、进程隐藏、实例锁与桌面窗口
+├─ httpx/                    # JSON 请求响应、本地访问、令牌和会话模式校验
+└─ testutil/                 # 各模块测试共用的临时 Git 仓库和 HTTP 请求夹具
+web/
+├─ assets.go / handler.go    # 嵌入前端资源、注入页面令牌和会话模式
+├─ index.html
+├─ core/                     # 共享状态、API、导航与基础样式
+└─ features/
+   ├─ tasks/                 # 任务页面与关联项目
+   ├─ projects/              # 项目、Worktree、Git 操作
+   ├─ settings/              # 环境、终端与 master 更新设置
+   └─ sessions/              # 会话、历史、实时显示和兼容模式对话
+scripts/                     # 启动、发布与前端测试脚本
+winres/                      # Windows 程序图标资源配置
+```
 
-前端继续使用原生脚本，按 `web/index.html` 中的 `defer` 顺序加载：先加载 `core.js`（共享状态、API 和显示工具），再加载 `projects.js` / `requirements.js`（各自的页面渲染与表单），随后加载 `app.js`（导航、刷新、页面框架和公共操作）及已有功能脚本。启动读取放在 `DOMContentLoaded` 中，确保所有功能脚本已就绪；新增脚本时同时维护首页加载顺序和相关前端测试入口。
+依赖方向为 `main → app → task / project / session / workspace / overview`。任务、项目和会话均通过具名的 `Workspace` 字段使用执行环境，不匿名嵌入工作区服务，避免将工作区的 HTTP 入口和生命周期方法提升为各业务模块的方法。会话只依赖自己声明的 `LaunchPlanner` 小接口，组装层注入任务服务；启动计划使用 `context.Context`，不将 HTTP 请求传入跨模块业务调用。任务、项目、会话之间没有具体包依赖；所有下层包均不依赖 `app`。
+
+每个执行环境创建一个 `workspace.Service`，任务、项目和会话服务共享其中的存储、工作区根目录和写锁，保留创建 worktree、手动 Git 操作、定时更新之间的互斥。项目服务仅持有项目和 worktree 的私有状态缓存及更新调度状态，通过 `Snapshot`、`Close` 等操作供外部使用；终端可用性缓存由工作区持有，独立于 Git 扫描，每个环境同时只进行一次终端检查，设置变化时合并待检查项并丢弃旧结果。会话服务持有聊天、审批、终端占用和交接状态。
+
+`overview` 通过项目状态接口汇总 `/api/state`，在响应中关联任务和 worktree；项目模块不再读取任务清单或组装整个工作台。工作区实时通道只传递 JSON，历史消息模型与格式转换由会话模块提供。各业务包通过 `RegisterRoutes` 注册自己的 HTTP 入口；任务写操作由组装层接入项目缓存失效回调。
+
+终端启动失败通知作为单次启动参数传入，不在工作区上保存全局会话回调，构造另一个会话服务不会覆盖已有终端的失败处理。应用通过可重复调用的 `Close` 统一关闭会话、缓存、连接和数据库，环境重连和初始化失败复用同一个清理入口；调度器仍由启动它的组装层先停止。
+
+`app` 只组装服务、分发执行环境和管理进程生命周期。业务流程及其事务放入对应业务包，基础查询与元数据迁移集中在 `store`，公共请求响应放入 `httpx`。新增功能应先明确所属业务模块，避免重新把业务状态放回 `App`。任务在代码和数据库中的既有 `Requirement` / `requirements` 名称继续沿用，API 和数据格式保持兼容。
+
+前端继续使用原生脚本和共享作用域，按 `web/index.html` 中的 `defer` 顺序加载：先加载 `core/core.js`，再加载项目和任务页面，随后加载 `core/app.js` 及各功能脚本。启动读取放在 `DOMContentLoaded` 中，确保所有功能脚本已就绪。目录调整不引入 Node 构建步骤；新增脚本时同时维护首页加载顺序、`web/assets.go` 的嵌入范围和相关前端测试入口。`scripts/state-refresh.test.cjs` 按首页真实脚本顺序检查两种会话模式；后端测试检查首页引用的脚本、样式和图标都可从嵌入资源访问。
+
+Go 测试与对应包放在一起：任务创建和项目添加测试在 `internal/task`，Git 和项目缓存测试在 `internal/project`，会话与终端交接测试在 `internal/session`，终端缓存和传输测试在 `internal/workspace`，应用组装、认证、环境分发和生命周期测试在 `internal/app`，独立通信协议测试在 `internal/codex`。测试通过各模块的正式路由注册入口组装最小服务，公共路由、状态汇总、安全校验、仓库和 HTTP 夹具由 `internal/testutil` 复用。在仓库根目录运行测试时使用 `./...`，以覆盖子包。
 
 ## 验证
 
@@ -194,17 +238,18 @@ export PATH="$HOME/.local/bin:$PATH"
 go test -race ./...
 go vet ./...
 go build -o bin/work-hub .
+node --test scripts/*.test.cjs
 ```
 
 集成测试使用临时真实 Git 仓库，覆盖 master 基线、已有 worktree 发现、跨仓库预检查、分支/目录冲突、部分失败及重试、SQLite 重启、Codex 目录映射、分支漂移、命令参数引用和归档保留。
 
 Git 操作测试另外使用本地裸仓库作为远端，覆盖单分支克隆获取 master、跟踪关系、保留未提交文件、分支占用、快进更新、分歧拒绝、终端目录范围与凭证脱敏。
 
-会话测试覆盖跨任务隔离、自动发现与分页、手动关联和重启保留、元数据不可读取、恢复目录与附加目录、命令参数引用、协议通知及进程超时。历史测试覆盖新旧历史格式、消息顺序、命令输出与退出码、内部记录过滤、关联范围和失败处理。`node --test scripts/session-history.test.cjs` 额外验证分页、重试、文本安全显示、实时推送、中文分片解码、断线恢复和旧请求隔离（仅此开发测试需要 Node）。可选运行 `WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test -run TestInstalledCodexSessionProtocol -v` 检查历史读取协议；运行 `WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test -run 'TestInstalledCodex(Workspace)?HistoryPush' -v` 通过可丢弃的测试会话和简单输出命令验证本机及辅助程序的实时通道，不调用模型，不操作已有会话。
+会话测试覆盖跨任务隔离、自动发现与分页、手动关联和重启保留、元数据不可读取、恢复目录与附加目录、命令参数引用、协议通知及进程超时。历史测试覆盖新旧历史格式、消息顺序、命令输出与退出码、内部记录过滤、关联范围和失败处理。`node --test scripts/session-history.test.cjs` 额外验证分页、重试、文本安全显示、实时推送、中文分片解码、断线恢复和旧请求隔离（仅此开发测试需要 Node）。可选运行 `WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test ./... -run TestInstalledCodexSessionProtocol -v` 检查历史读取协议；运行 `WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test ./... -run 'TestInstalledCodex(Workspace)?HistoryPush' -v` 通过可丢弃的测试会话和简单输出命令验证本机及辅助程序的实时通道，不调用模型，不操作已有会话。
 
-对话测试覆盖实时事件与 RPC 请求分发、重复发送、审批失效和拒绝、临时权限范围、问题回答、文件差异、停止、终端重新接入、任务隔离和 SSE 快照。前端测试运行 `node --test scripts/session-history.test.cjs scripts/session-chat.test.cjs`。`WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test -run TestInstalledCodexLiveReadOnly -v` 检查共享后台连接；显式运行 `WORKTREE_HUB_TEST_CODEX_TURN=1 go test -run TestInstalledCodexEphemeralTextTurn -v` 会在临时目录中的临时会话发起一次真实文字请求（可能使用账户额度），不调用工具。
+对话测试覆盖实时事件与 RPC 请求分发、重复发送、审批失效和拒绝、临时权限范围、问题回答、文件差异、停止、终端重新接入、任务隔离和 SSE 快照。前端测试运行 `node --test scripts/session-history.test.cjs scripts/session-chat.test.cjs`。`WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test ./... -run TestInstalledCodexLiveReadOnly -v` 检查共享后台连接；显式运行 `WORKTREE_HUB_TEST_CODEX_TURN=1 go test ./... -run TestInstalledCodexEphemeralTextTurn -v` 会在临时目录中的临时会话发起一次真实文字请求（可能使用账户额度），不调用工具。
 
-新建与交接测试覆盖创建去重、未确认结果、项目范围、归档限制、交接等待、取消、终端请求门禁与审批回复保留、无法识别的终端拒绝接管。`WORKTREE_HUB_TEST_CODEX_TURN=1 go test -run TestInstalledCodexNewSessionAndManagedTerminalHandoff -v` 在独立测试任务中创建真实会话，并用真实 TUI 流式输出验证等待结束后交接、完整回复保留；会使用账户额度，结束时仅清理测试创建的会话。
+新建与交接测试覆盖创建去重、未确认结果、项目范围、归档限制、交接等待、取消、终端请求门禁与审批回复保留、无法识别的终端拒绝接管。`WORKTREE_HUB_TEST_CODEX_TURN=1 go test ./... -run TestInstalledCodexNewSessionAndManagedTerminalHandoff -v` 在独立测试任务中创建真实会话，并用真实 TUI 流式输出验证等待结束后交接、完整回复保留；会使用账户额度，结束时仅清理测试创建的会话。
 
 ## 设计边界
 
