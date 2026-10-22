@@ -35,7 +35,6 @@
 .session-history-scroll { padding: 24px 28px 32px; overflow: auto; flex: 1; min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .history-entry { margin-bottom: 20px; padding: 18px 20px; background: #fff; border: 1px solid #e9ecf3; border-radius: 12px; }
 .history-user { margin-left: 36px; background: #eef1fc; border-color: #e0e5f6; }
-.history-assistant { padding: 14px 4px; background: transparent; border-color: transparent; }
 .history-assistant + .history-command { margin-top: -4px; }
 .history-entry-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .history-entry-heading strong { font-size:13px; color: var(--ink); font-weight: 600; }
@@ -99,7 +98,6 @@
   .session-history-toolbar { align-items: flex-start; flex-direction: column; }
   .history-entry { padding: 14px; }
   .history-user { margin-left: 20px; }
-  .history-assistant { padding: 12px 0; }
   .history-command { padding: 0; }
   .history-command-details > summary { gap: 7px; padding-left: 10px; }
   .history-command-body { padding: 12px; }

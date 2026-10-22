@@ -175,6 +175,18 @@ Codex 启动、打开 Git 终端、在终端获取分支及认证失败后的终
 
 工作区总目录是普通目录；各子目录保留独立 Git 状态。不会改变原始仓库目录的当前分支。
 
+## 代码结构
+
+后端保留单个 Go 包，按职责和业务拆文件：
+
+- `main.go`：命令行参数、进程启动和服务退出。
+- `app.go`：应用依赖、数据库打开与本机 / WSL 初始化。
+- `routes.go`：HTTP 路由表、嵌入静态资源和首页；`middleware.go`：本地访问校验、页面令牌、会话模式和执行环境分发；`http.go`：JSON 请求与响应。
+- `store.go`：数据模型、迁移和项目存储；`requirements*.go` / `requirement_projects.go`、`worktrees.go`、`git*.go`：任务、项目工作目录和 Git 操作。
+- `workspace.go` / `environments.go`：WSL 辅助程序协议与执行环境；`session*.go` / `codex*.go`：会话和 Codex 协议；`terminal*.go` / `desktop*.go`：终端与桌面集成。
+
+前端继续使用原生脚本，按 `web/index.html` 中的 `defer` 顺序加载：先加载 `core.js`（共享状态、API 和显示工具），再加载 `projects.js` / `requirements.js`（各自的页面渲染与表单），随后加载 `app.js`（导航、刷新、页面框架和公共操作）及已有功能脚本。启动读取放在 `DOMContentLoaded` 中，确保所有功能脚本已就绪；新增脚本时同时维护首页加载顺序和相关前端测试入口。
+
 ## 验证
 
 ```bash

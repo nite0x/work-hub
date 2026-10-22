@@ -14,13 +14,14 @@ function snapshot(updatedAt = '2026-10-22T05:23:13Z', refreshing = false) {
   };
 }
 
-function harness() {
+function harness({ fullPage = false, readOnly = false } = {}) {
   const elements = new Map();
   const element = selector => {
     if (!elements.has(selector)) {
       let html = '';
       elements.set(selector, {
-        content: 'token', value: '', checked: false, hidden: false, writes: 0,
+        content: selector === 'meta[name="session-mode"]' ? (readOnly ? 'read-only' : 'interactive') : 'token',
+        value: '', checked: false, hidden: false, writes: 0,
         classList: { toggle() {}, remove() {} }, addEventListener() {},
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
@@ -30,6 +31,7 @@ function harness() {
   };
   const times = [];
   const timers = [];
+  const ready = [];
   let result;
   let failure;
   const context = vm.createContext({
@@ -38,19 +40,28 @@ function harness() {
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
-    window: { addEventListener() {} }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams,
+    window: { addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams,
     setTimeout: (callback, delay) => { timers.push(delay); return timers.length; },
     clearTimeout() {}, renderSettings() {}, refreshRequirementProjectPicker() {},
     renderRequirementSessions() { return ''; }, refreshRequirementSessions() {},
-    fetch: async () => {
+    fetch: async url => {
       if (failure) throw failure;
+      if (url === '/api/environments') return { ok: true, json: async () => ({ environments: [{ id: 'local', name: '本机' }], distributions: [] }) };
+      if (url.endsWith('/sessions')) return { ok: true, json: async () => ({ sessions: [] }) };
       return { ok: true, json: async () => structuredClone(result) };
     }
   });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8'), context);
+  const scripts = fullPage
+    ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer><\/script>/g)].map(match => match[1])
+      .filter(file => !readOnly || !['session-chat.js', 'session-create.js'].includes(file))
+    : ['core.js', 'projects.js', 'requirements.js', 'app.js'];
+  for (const file of scripts) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../web', file), 'utf8'), context, { filename: file });
+  }
   context.readRoute();
   return {
     context, element, times, timers,
+    async start(data) { result = data; ready.forEach(handler => handler()); await new Promise(resolve => setImmediate(resolve)); },
     async refresh(data, force = false) { result = data; failure = null; await context.refresh(force); },
     async fail() { failure = new Error('offline'); await context.refresh(); }
   };
@@ -118,3 +129,21 @@ test('connection failures retain the last table and recover without rebuilding i
   assert.equal(h.element('#content').writes, 1);
   assert.equal(h.element('#offlineBanner').hidden, true);
 });
+
+for (const readOnly of [true, false]) {
+  test(`the page starts with its actual script order in ${readOnly ? 'read-only' : 'interactive'} mode`, async () => {
+    const h = harness({ fullPage: true, readOnly });
+    await h.start(snapshot());
+    assert.equal(vm.runInContext('state.loaded', h.context), true);
+    assert.equal(vm.runInContext('sessionReadOnly', h.context), readOnly);
+    assert.equal(h.element('#offlineBanner').hidden, true);
+    assert.match(h.element('#content').innerHTML, /打开终端/);
+    assert.match(h.element('#content').innerHTML, /关联会话/);
+    assert.equal(vm.runInContext('typeof openSessionChat', h.context), readOnly ? 'undefined' : 'function');
+    // Navigation must still find both domain renderers after splitting the entry script.
+    vm.runInContext("state.view = 'projects'; state.selectedProject = 'app'; render()", h.context);
+    assert.match(h.element('#content').innerHTML, /Git 操作 · 分支管理/);
+    vm.runInContext("state.view = 'requirements'; state.selectedRequirement = null; render()", h.context);
+    assert.match(h.element('#content').innerHTML, /打开任务 Task/);
+  });
+}

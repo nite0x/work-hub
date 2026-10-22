@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type Project struct {
@@ -312,4 +314,18 @@ func projectMap(ctx context.Context, a *App) (map[string]Project, error) {
 		out[p.ID] = p
 	}
 	return out, nil
+}
+
+func mustAffected(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("记录不存在")
+	}
+	return nil
 }
