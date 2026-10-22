@@ -134,7 +134,10 @@ document.addEventListener('click', async event => {
   const action = button.dataset.action;
   if (action === 'git-open') return openGit(button.dataset.id, button.dataset.path);
   if (action === 'git-prepare-project') {
-    $('#requirementDialog').close(); state.selectedProject = button.dataset.id; navigate('/projects'); return openGit(button.dataset.id);
+    const environment = $('#requirementEnvironment').value;
+    $('#requirementDialog').close();
+    await selectEnvironment(environment, '/projects');
+    state.selectedProject = button.dataset.id; render(); return openGit(button.dataset.id);
   }
   if (!gitState) return;
   if (action === 'git-reload') {

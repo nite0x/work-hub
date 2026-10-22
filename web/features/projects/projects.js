@@ -16,20 +16,27 @@ function renderProjects() {
   return html;
 }
 
-function openProject(onAdded = null) {
+function openProject(onAdded = null, environment = activeEnvironment) {
   if (state.busy) return;
   projectAddedCallback = onAdded;
   $('#projectForm').reset(); $('#projectError').hidden = true; $('#projectDialog').showModal();
+  $('#projectEnvironmentSelect').innerHTML = environmentOptions();
+  $('#projectEnvironmentSelect').value = environment;
+  $('#projectEnvironmentSelect').disabled = !!onAdded;
 }
 
 $('#projectForm').addEventListener('submit', async event => {
   event.preventDefault(); const data = new FormData(event.target);
   const onAdded = projectAddedCallback;
+  const environment = $('#projectEnvironmentSelect').value;
   let added;
   await mutation('正在登记并扫描仓库', async () => {
-    added = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name: data.get('name'), path: data.get('path') }) });
-    if (!onAdded) { state.selectedProject = added.id; navigate('/projects'); $('#search').value = ''; }
+    added = await api('/api/projects', { environment, method: 'POST', body: JSON.stringify({ name: data.get('name'), path: data.get('path') }) });
     $('#projectDialog').close(); toast('项目已登记，正在扫描 worktree');
   }, $('#projectError'));
-  if (added && onAdded) onAdded(added.id);
+  if (added && onAdded) await onAdded(added.id);
+  else if (added) {
+    await selectEnvironment(environment, '/projects');
+    state.selectedProject = added.id; $('#search').value = ''; render();
+  }
 });

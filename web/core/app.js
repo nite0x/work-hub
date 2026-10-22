@@ -7,27 +7,52 @@ async function refresh(force = false) {
   clearTimeout(refreshTimer);
   let nextRefresh = 10000;
   state.refreshing = true;
+  const revision = environmentRevision;
+  const needsScopedState = state.view !== 'requirements' || !!state.selectedRequirement;
   $('#refreshButton').disabled = true;
   try {
-    const data = await api('/api/state' + (force ? '?refresh=1' : ''));
-    const changed = !state.loaded || renderStateKey(state) !== renderStateKey(data);
-    Object.assign(state, data, { loaded: true });
-    $('#offlineBanner').hidden = true;
-    nextRefresh = data.status_refreshing ? 1000 : 10000;
-    $('#syncText').textContent = data.status_refreshing ? '状态更新中 · 显示最近结果' : data.refreshed_at ? '已同步 · ' + new Date(data.refreshed_at).toLocaleTimeString('zh-CN', { hour12: false }) : '已读取任务';
+    const suffix = force ? '?refresh=1' : '';
+    const [scoped, inventory] = await Promise.allSettled([
+      needsScopedState ? api('/api/state' + suffix) : Promise.resolve(null),
+      api('/api/task-inventory' + suffix, { environment: 'local' }),
+    ]);
+    if (revision !== environmentRevision) return;
+    let changed = false;
+    if (inventory.status === 'fulfilled') {
+      changed = renderStateKey(taskInventory) !== renderStateKey(inventory.value);
+      taskInventory = { ...inventory.value, loaded: true };
+    }
+    if (scoped.status === 'fulfilled' && scoped.value) {
+      const data = scoped.value;
+      changed = changed || !state.loaded || renderStateKey(state) !== renderStateKey(data);
+      Object.assign(state, data, { loaded: true });
+      if (typeof data.read_only_sessions === 'boolean') sessionReadOnly = data.read_only_sessions;
+    }
+    const failures = [];
+    if (inventory.status === 'rejected') failures.push('全部任务刷新失败：' + inventory.reason.message);
+    if (scoped.status === 'rejected') failures.push('当前环境连接失败：' + scoped.reason.message);
+    for (const e of taskInventory.environments) if (e.error) failures.push(e.name + '：' + e.error);
+    $('#offlineBanner').textContent = failures.join('\n');
+    $('#offlineBanner').hidden = !failures.length;
+    const pending = scoped.status === 'fulfilled' && scoped.value?.status_refreshing || inventory.status === 'fulfilled' && inventory.value.status_refreshing;
+    nextRefresh = pending ? 1000 : 10000;
+    $('#syncText').textContent = failures.length ? '部分环境暂不可用' : pending ? '状态更新中 · 显示最近结果' : '已读取任务';
     $('#syncDot').classList.remove('offline');
-    if (changed) { render(); refreshRequirementProjectPicker(); }
+    if (changed || !state.loaded) { render(); refreshRequirementProjectPicker(); }
     else {
       updateCheckTimes();
       if (state.view === 'requirements' && state.selectedRequirement) refreshRequirementSessions(state.selectedRequirement, false);
     }
   } catch (error) {
+    if (revision !== environmentRevision || error.name === 'AbortError') return;
     $('#offlineBanner').textContent = '状态刷新失败：' + error.message;
     $('#offlineBanner').hidden = false;
     $('#syncText').textContent = '连接中断';
     if (!state.loaded) $('#content').innerHTML = '<div class="empty"><h2>暂时无法连接执行环境</h2><p>请检查本机服务；WSL 环境可在设置页重新连接恢复。</p><a class="button secondary" href="#/settings">打开设置</a></div>';
   } finally {
+    if (revision !== environmentRevision) return;
     state.refreshing = false; $('#refreshButton').disabled = false;
+    if (!needsScopedState && (state.view !== 'requirements' || state.selectedRequirement)) nextRefresh = 0;
     refreshTimer = setTimeout(() => { if (!document.hidden) refresh(); }, nextRefresh);
   }
 }
@@ -35,7 +60,7 @@ async function refresh(force = false) {
 function renderStateKey(data) {
   // Once a result exists, polling metadata must not rebuild the workspace.
   // The first completed check still changes the key and enables its actions.
-  return JSON.stringify([data.projects, data.requirements, data.terminal, data.master_sync, data.root], function (key, value) {
+  return JSON.stringify([data.projects, data.requirements, data.terminal, data.master_sync, data.root, data.environments, data.project_count, data.read_only_sessions], function (key, value) {
     if (key === 'refreshing' && this.status_updated_at) return undefined;
     if (key === 'status_updated_at') return Boolean(value);
     return value;
@@ -67,6 +92,7 @@ function navigate(route) {
 window.addEventListener('hashchange', () => {
   readRoute(); $('#search').value = '';
   render(); window.scrollTo(0, 0); $('#pageTitle').focus({ preventScroll: true });
+  refresh();
 });
 function render() {
   const settingsView = state.view === 'settings';
@@ -80,8 +106,8 @@ function render() {
   $('#newButton').hidden = detailView || settingsView;
   $('#settingsPage').hidden = !settingsView;
   $('#workContent').hidden = settingsView;
-  $('#reqCount').textContent = state.requirements.filter(q => q.state !== 'archived').length;
-  $('#projectCount').textContent = state.projects.length;
+  $('#reqCount').textContent = taskInventory.requirements.filter(q => q.state !== 'archived').length;
+  $('#projectCount').textContent = taskInventory.project_count;
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
   $('#breadcrumbTitle').textContent = settingsView ? '设置' : detailView ? '任务 / ' + (requirement?.name || '任务不存在') : reqView ? '任务' : '项目与 Worktree';
   $('#eyebrow').textContent = settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
@@ -91,15 +117,16 @@ function render() {
   $('#panelTitle').textContent = reqView ? '全部任务' : '已登记项目';
   $('#search').placeholder = reqView ? '搜索任务名称、分支…' : '搜索项目名称、目录…';
   $('#archiveFilterWrap').hidden = !reqView;
+  $('#projectEnvironmentWrap').hidden = reqView;
   renderSettings();
-  $('#rootPath').textContent = 'WORKSPACE ROOT  ' + state.root;
+  $('#rootPath').textContent = reqView && !detailView ? '全部执行环境' : 'WORKSPACE ROOT  ' + state.root;
   if (settingsView) return;
   const trees = allTrees();
   $('#stats').innerHTML = reqView
-    ? stat('进行中的任务', state.requirements.filter(q => q.state !== 'archived').length, '集中管理跨项目工作', '▤') + stat('已就绪任务', state.requirements.filter(q => q.state === 'ready').length, '所有项目已准备完成', '✓') + stat('关联项目', state.projects.length, '复用已登记的 Git 仓库', '◇') + stat('任务工作目录', trees.filter(t => t.requirement_id).length, '与本地 Git 状态保持同步', '⑂')
+    ? stat('进行中的任务', taskInventory.requirements.filter(q => q.state !== 'archived').length, '汇总所有执行环境', '▤') + stat('已就绪任务', taskInventory.requirements.filter(q => q.state === 'ready').length, '所有项目已准备完成', '✓') + stat('已登记项目', taskInventory.project_count, '所有环境的 Git 仓库', '◇') + stat('任务工作目录', taskInventory.requirements.reduce((sum, q) => sum + q.members.length, 0), '各任务保留原有目录', '⑂')
     : stat('已登记项目', state.projects.length, '本地独立 Git 仓库', '◇') + stat('全部 Worktree', trees.length, '含主目录及其他工具创建的目录', '⑂') + stat('有修改的目录', trees.filter(t => t.dirty > 0).length, '当前未提交的代码现场', '◌') + stat('未关联任务', trees.filter(t => !t.requirement_id).length, '主目录或其他工作目录', '↳');
   $('#content').innerHTML = detailView
-    ? requirement ? requirementDetail(requirement) : empty('这个任务不存在', '可返回任务列表，重新选择一个任务。')
+    ? requirement ? requirementDetail(requirement) : !state.loaded ? empty('暂时无法读取任务', '请检查任务所属环境的连接，可在设置中重新连接。') : empty('这个任务不存在', '可返回任务列表，重新选择一个任务。')
     : reqView ? renderRequirements() : renderProjects();
   if (requirement) refreshRequirementSessions(requirement.id, false);
 }
@@ -107,6 +134,7 @@ function render() {
 async function handleAction(action, target) {
   if (state.busy) return;
   const id = target.dataset.id;
+  if (action === 'open-requirement') return selectEnvironment(target.dataset.environment, '/requirements/' + id);
   if (action === 'new-project') return openProject();
   if (action === 'new-worktree') return openWorktree(id);
   if (action === 'new-requirement') return openRequirement();
@@ -134,7 +162,12 @@ async function handleAction(action, target) {
   }
 }
 document.addEventListener('click', event => {
-  const action = event.target.closest('[data-action]'); if (action) handleAction(action.dataset.action, action);
+  const action = event.target.closest('[data-action]');
+  if (action?.dataset.action === 'open-requirement') {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+  }
+  if (action) handleAction(action.dataset.action, action);
   const nav = event.target.closest('[data-view]'); if (nav) navigate('/' + nav.dataset.view);
   if (event.target.closest('.close-dialog') && !state.busy) event.target.closest('dialog').close();
 });

@@ -47,6 +47,12 @@ func (a *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httpx.DbError(w, err)
 		return
 	}
+	LinkWorktrees(projects, reqs)
+	httpx.WriteJSON(w, 200, map[string]any{"projects": projects, "requirements": reqs, "root": a.workspace.Root, "refreshed_at": updatedAt, "status_refreshing": refreshing, "terminal": terminal, "master_sync": masterSync, "read_only_sessions": a.workspace.ReadOnlySessions})
+}
+
+// LinkWorktrees attaches the current environment's cached Git state to its tasks.
+func LinkWorktrees(projects []model.Project, reqs []model.Requirement) {
 	index := map[string]*model.Worktree{}
 	for i := range projects {
 		for j := range projects[i].Worktrees {
@@ -65,5 +71,4 @@ func (a *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"projects": projects, "requirements": reqs, "root": a.workspace.Root, "refreshed_at": updatedAt, "status_refreshing": refreshing, "terminal": terminal, "master_sync": masterSync})
 }

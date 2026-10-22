@@ -2,8 +2,14 @@
 
 const $ = (q, root = document) => root.querySelector(q);
 const token = $('meta[name="csrf-token"]').content;
-const sessionReadOnly = $('meta[name="session-mode"]')?.content === 'read-only';
+let sessionReadOnly = $('meta[name="session-mode"]')?.content === 'read-only';
 let activeEnvironment = new URLSearchParams(location.search).get('environment') || 'local';
+let environmentRevision = 0;
+let taskInventory = { requirements: [], environments: [], project_count: 0, loaded: false };
+function environmentName(id = activeEnvironment) {
+  const entries = typeof environmentInventory !== 'undefined' ? environmentInventory : [];
+  return entries.find(e => e.id === id)?.name || taskInventory.environments.find(e => e.id === id)?.name || (id === 'local' ? '本机' : id);
+}
 const state = { view: 'requirements', projects: [], requirements: [], selectedProject: null, selectedRequirement: null, root: '', terminal: {}, busy: false, refreshing: false, loaded: false };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const labels = { ready: '已就绪', partial: '部分就绪', archived: '已归档', creating: '创建中', pending: '待创建', failed: '创建失败' };
@@ -20,12 +26,14 @@ function toast(message, error = false) {
 }
 
 async function api(path, options = {}) {
-  const environment = activeEnvironment;
-  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token, 'X-Environment-ID': environment, ...options.headers } });
-  if (environment !== activeEnvironment) throw new DOMException('执行环境已切换', 'AbortError');
+  const { environment = activeEnvironment, ...requestOptions } = options;
+  const revision = environmentRevision;
+  const scoped = options.environment === undefined;
+  const response = await fetch(path, { ...requestOptions, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token, 'X-Environment-ID': environment, ...requestOptions.headers } });
+  if (scoped && revision !== environmentRevision) throw new DOMException('执行环境已切换', 'AbortError');
   let data;
   try { data = await response.json(); } catch { throw new Error('服务返回了无法读取的响应，请查看服务日志。'); }
-  if (environment !== activeEnvironment) throw new DOMException('执行环境已切换', 'AbortError');
+  if (scoped && revision !== environmentRevision) throw new DOMException('执行环境已切换', 'AbortError');
   if (!response.ok) {
     const error = new Error([data.error, ...(data.details || [])].filter(Boolean).join('\n'));
     error.command = data.command;

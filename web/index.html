@@ -36,7 +36,6 @@
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="Work Hub 首页"><img class="brand-mark" src="/work-hub.svg" alt="" width="36" height="36"><span>Work Hub<small>让每一份工作，各就其位。</small></span></a>
     <div class="nav-label">工作台</div>
-    <div class="environment-picker"><label for="environmentSelect">执行环境</label><select id="environmentSelect" aria-label="执行环境"><option value="local">本机</option></select><small id="environmentStatus" role="status"></small></div>
     <nav aria-label="主导航">
       <button class="nav-item active" data-view="requirements"><span class="nav-icon">▤</span>任务<span class="nav-count" id="reqCount">0</span></button>
       <button class="nav-item" data-view="projects"><span class="nav-icon">◇</span>项目与 Worktree<span class="nav-count" id="projectCount">0</span></button>
@@ -54,7 +53,8 @@
       <section id="stats" class="stats" aria-label="工作台统计"></section>
       <section id="settingsPage" class="settings-page" aria-label="设置" hidden>
         <section class="settings-card" aria-labelledby="environmentSettingsTitle">
-          <div class="settings-card-heading"><div><h2 id="environmentSettingsTitle">执行环境与工作区</h2><p>在侧栏切换执行环境，管理本机或 WSL 中的项目。</p></div><div class="detail-actions"><button type="button" class="button small secondary" id="reconnectEnvironment" hidden>重新连接</button><button type="button" class="button small primary" id="addEnvironment">连接 WSL</button></div></div>
+          <div class="settings-card-heading"><div><h2 id="environmentSettingsTitle">执行环境与工作区</h2><p>任务绑定一个执行环境，项目、终端与 AI 会话均在该环境中操作。任务列表统一展示全部环境。</p></div><div class="detail-actions"><button type="button" class="button small secondary" id="reconnectEnvironment" hidden>重新连接</button><button type="button" class="button small primary" id="addEnvironment">连接 WSL</button></div></div>
+          <label class="field">配置环境<select id="environmentSelect" aria-label="配置环境"><option value="local">本机</option></select><small id="environmentStatus" role="status"></small></label>
           <dl class="settings-facts"><div><dt>当前执行环境</dt><dd id="settingsEnvironment">正在读取…</dd></div><div><dt>新任务工作区根目录</dt><dd><code id="settingsRoot">正在读取…</code></dd></div></dl>
           <p class="settings-help">本机默认使用当前用户的 ~/workspaces，可通过启动参数 --root 指定；连接 WSL 时可指定该环境的根目录。已有任务沿用保存的路径。</p>
         </section>
@@ -90,7 +90,7 @@
         </section>
       </section>
       <section class="content-panel" id="workContent">
-        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle">全部任务</div><div class="toolbar-actions"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索任务名称、分支…" aria-label="搜索"></label><label class="archive-filter" id="archiveFilterWrap"><input type="checkbox" id="archiveFilter">显示归档</label></div></div>
+        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle">全部任务</div><div class="toolbar-actions"><label class="archive-filter" id="projectEnvironmentWrap" hidden>项目环境 <select id="projectEnvironment" aria-label="项目环境"><option value="local">本机</option></select></label><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索任务名称、分支…" aria-label="搜索"></label><label class="archive-filter" id="archiveFilterWrap"><input type="checkbox" id="archiveFilter">显示归档</label></div></div>
         <div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div>
       </section>
       <footer class="page-footer"><span>所有分支和修改状态直接读取本地 Git</span><span id="rootPath"></span></footer>
@@ -113,6 +113,7 @@
     <form id="projectForm">
       <div class="dialog-header"><div><div class="eyebrow">ADD PROJECT</div><h2 id="projectDialogTitle">添加项目</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
       <p class="dialog-description">登记仓库主目录，自动发现它已有的全部 worktree。</p>
+      <label class="field">项目所在环境<select id="projectEnvironmentSelect" required></select><small>仓库路径和 Git 操作均在此环境中执行。</small></label>
       <label class="field">仓库目录 <span class="required">*</span><input name="path" required autocomplete="off" placeholder="D:\project\my-app 或 /home/nite/projects/my-app"><small>填写当前执行环境中的绝对路径；Windows 本机使用盘符路径，WSL 使用 Linux 路径。</small></label>
       <label class="field">项目名称<input name="name" maxlength="80" placeholder="留空则使用仓库目录名"><small>名称会用于任务中的项目目录，建议使用简短、可辨识的名称。</small></label>
       <div class="form-error" id="projectError" role="alert" hidden></div>
@@ -123,15 +124,16 @@
     <form id="requirementForm">
       <div class="dialog-header"><div><div class="eyebrow">NEW TASK</div><h2 id="requirementDialogTitle">创建任务</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
       <p class="dialog-description">围绕一项开发目标，选择主项目与参与项目，准备各项目的独立工作目录。</p>
+      <label class="field">任务执行环境 <span class="required">*</span><select id="requirementEnvironment" required></select><small>只能关联此环境中的项目，创建后任务环境固定。</small></label>
       <div id="masterPreparation" class="banner note" hidden></div>
       <div class="form-grid"><label class="field">任务名称 <span class="required">*</span><input name="name" required maxlength="100" placeholder="例如：订单审批流程"></label><label class="field">目录标识 <span class="required">*</span><input name="slug" required maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}" placeholder="order-approval"><small>仅字母、数字、短横线或下划线，创建后固定。</small></label></div>
       <label class="field">任务说明<textarea name="description" rows="3" maxlength="6000" placeholder="描述开发目标、涉及的修改和完成标准，Codex 会获得这份说明。"></textarea></label>
       <div class="form-grid"><label class="field">新分支 <span class="required">*</span><input name="branch" required placeholder="codex/order-approval"><small>所有选中仓库使用同一个新分支名。</small></label><div class="field">创建基线<div class="base-reference"><span class="branch-icon">⑂</span><strong>master</strong><span class="badge neutral">本地分支</span></div><small>使用本地 master 当前提交，不自动拉取远端。</small></div></div>
       <label class="field">主项目 <span class="required">*</span><select name="primary_project_id" id="primaryProject" required></select><small>Codex 从主项目 worktree 启动，其他项目作为附加目录。</small></label>
-      <div class="field">参与项目<div id="projectPicker" class="project-picker"></div></div>
+      <div class="field"><div class="detail-top"><span>参与项目</span><button type="button" class="button small secondary" id="registerNewTaskProject">＋ 登记新项目</button></div><div id="projectPicker" class="project-picker"></div></div>
       <div class="workspace-preview"><div class="preview-label">即将创建的工作目录</div><pre id="workspacePreview"></pre></div>
       <div class="form-error" id="requirementError" role="alert" hidden></div>
-      <div class="dialog-footer"><span class="footer-note">创建前检查全部仓库，已有目录和分支不会被覆盖。</span><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary">创建任务</button></div>
+      <div class="dialog-footer"><span class="footer-note">创建前检查全部仓库，已有目录和分支不会被覆盖。</span><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary" id="requirementSubmit">创建任务</button></div>
     </form>
   </dialog>
   <dialog id="requirementProjectsDialog" class="wide-dialog" aria-labelledby="requirementProjectsTitle">

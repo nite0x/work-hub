@@ -14,6 +14,26 @@ import (
 
 type Store struct{ DB *sql.DB }
 
+// OpenReadOnly reads saved environment metadata without running migrations or
+// marking in-progress work interrupted. Listing tasks must not start an environment.
+func OpenReadOnly(dataDir string) (*Store, error) {
+	dbPath := filepath.ToSlash(filepath.Join(dataDir, "worktree-hub.db"))
+	if !strings.HasPrefix(dbPath, "/") {
+		dbPath = "/" + dbPath
+	}
+	dbURL := &url.URL{Scheme: "file", Path: dbPath}
+	db, err := sql.Open("sqlite", dbURL.String()+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{DB: db}, nil
+}
+
 // Open initializes the schema and marks work interrupted by a previous process.
 func Open(dataDir string) (*Store, error) {
 	dbPath := filepath.ToSlash(filepath.Join(dataDir, "worktree-hub.db"))

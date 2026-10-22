@@ -19,7 +19,7 @@ function refreshRequirementProjectPicker(selectID = null) {
   const selected = new Set([...$('#requirementProjectPicker').querySelectorAll('input:checked')].map(i => i.value));
   if (selectID) selected.add(selectID);
   const available = state.projects.filter(p => !q.members.some(m => m.project_id === p.id));
-  $('#requirementProjectsDescription').textContent = `为“${q.name}”添加项目，使用任务分支 ${q.branch}。最多关联 30 个项目，当前已有 ${q.members.length} 个。`;
+  $('#requirementProjectsDescription').textContent = `为“${q.name}”添加 ${environmentName()} 中的项目，使用任务分支 ${q.branch}。最多关联 30 个项目，当前已有 ${q.members.length} 个。`;
   $('#requirementProjectPicker').innerHTML = available.length ? available.map(p => {
     const unavailable = !!p.error || (!!p.status_updated_at && !p.has_master);
     return `<label class="project-option"><input type="checkbox" name="project_ids" value="${esc(p.id)}" ${unavailable ? 'disabled' : selected.has(p.id) ? 'checked' : ''}><span>${esc(p.name)}<small>${esc(p.path)}</small></span>${p.error ? badge('failed', '不可用') : !p.status_updated_at ? badge('neutral', '正在检查') : !p.has_master ? badge('warning', '缺少 master') : badge('neutral', 'master')}</label>`;

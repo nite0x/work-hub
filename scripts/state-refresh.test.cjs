@@ -22,7 +22,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       elements.set(selector, {
         content: selector === 'meta[name="session-mode"]' ? (readOnly ? 'read-only' : 'interactive') : 'token',
         value: '', checked: false, hidden: false, writes: 0,
-        classList: { toggle() {}, remove() {} }, addEventListener() {},
+        classList: { toggle() {}, remove() {} }, addEventListener() {}, querySelectorAll() { return []; },
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
       });
@@ -32,6 +32,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
   const times = [];
   const timers = [];
   const ready = [];
+  const requests = [];
   let result;
   let failure;
   const context = vm.createContext({
@@ -40,13 +41,18 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
-    window: { addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams,
+    window: { addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams, DOMException,
     setTimeout: (callback, delay) => { timers.push(delay); return timers.length; },
     clearTimeout() {}, renderSettings() {}, refreshRequirementProjectPicker() {},
     renderRequirementSessions() { return ''; }, refreshRequirementSessions() {},
-    fetch: async url => {
+    fetch: async (url, options) => {
+      requests.push({ url, options });
       if (failure) throw failure;
       if (url === '/api/environments') return { ok: true, json: async () => ({ environments: [{ id: 'local', name: '本机' }], distributions: [] }) };
+      if (url.startsWith('/api/task-inventory')) return { ok: true, json: async () => ({
+        requirements: result.requirements.map(q => ({ ...structuredClone(q), environment_id: 'local', environment_name: '本机', connected: true })),
+        environments: [{ id: 'local', name: '本机', connected: true }], project_count: result.projects.length, status_refreshing: result.status_refreshing,
+      }) };
       if (url.endsWith('/sessions')) return { ok: true, json: async () => ({ sessions: [] }) };
       return { ok: true, json: async () => structuredClone(result) };
     }
@@ -60,12 +66,91 @@ function harness({ fullPage = false, readOnly = false } = {}) {
   }
   context.readRoute();
   return {
-    context, element, times, timers,
+    context, element, times, timers, requests,
     async start(data) { result = data; ready.forEach(handler => handler()); await new Promise(resolve => setImmediate(resolve)); },
     async refresh(data, force = false) { result = data; failure = null; await context.refresh(force); },
     async fail() { failure = new Error('offline'); await context.refresh(); }
   };
 }
+
+test('the unified task list keeps colliding task IDs distinct by environment', () => {
+  const h = harness();
+  const task = snapshot().requirements[0];
+  const requirements = [
+    { ...task, environment_id: 'local', environment_name: 'Windows', connected: true },
+    { ...task, environment_id: 'wsl-ubuntu', environment_name: 'WSL Ubuntu', connected: false },
+  ];
+  vm.runInContext(`taskInventory = ${JSON.stringify({ requirements, environments: [], loaded: true })}`, h.context);
+  const html = h.context.renderRequirements();
+  assert.match(html, /\?environment=local#\/requirements\/task/);
+  assert.match(html, /\?environment=wsl-ubuntu#\/requirements\/task/);
+  assert.match(html, /Windows/);
+  assert.match(html, /WSL Ubuntu/);
+  assert.match(html, /环境未连接/);
+});
+
+test('listing all tasks does not connect the previously selected environment', async () => {
+  const h = harness();
+  vm.runInContext("state.selectedRequirement = null; activeEnvironment = 'wsl-offline'", h.context);
+  await h.refresh(snapshot());
+  assert.deepEqual(h.requests.map(r => r.url), ['/api/task-inventory']);
+  assert.equal(h.requests[0].options.headers['X-Environment-ID'], 'local');
+  assert.match(h.element('#content').innerHTML, /打开任务 Task/);
+});
+
+function prepareEnvironmentPicker(h) {
+  h.element('#requirementDialog').open = true;
+  h.element('#requirementForm').elements = { primary_project_id: h.element('#primaryProject'), slug: { value: 'demo' } };
+}
+
+test('task creation reads only the chosen environment and previews its root', async () => {
+  const h = harness();
+  prepareEnvironmentPicker(h);
+  const local = { ...snapshot(), root: 'D:\\workspaces' };
+  const remote = { root: '/home/user/workspaces', projects: [{ id: 'remote', name: 'Remote project', folder: 'remote', has_master: true, status_updated_at: 'now' }] };
+  const requests = [];
+  h.context.api = async (url, options) => { requests.push(options.environment); return options.environment === 'local' ? local : remote; };
+  h.element('#requirementEnvironment').value = 'wsl-ubuntu';
+  await h.context.loadRequirementProjects();
+  assert.match(h.element('#primaryProject').innerHTML, /Remote project/);
+  assert.doesNotMatch(h.element('#primaryProject').innerHTML, /value="app"/);
+  assert.match(h.element('#workspacePreview').textContent, /^\/home\/user\/workspaces\/demo/);
+  h.element('#requirementEnvironment').value = 'local';
+  await h.context.loadRequirementProjects();
+  assert.match(h.element('#primaryProject').innerHTML, /value="app"/);
+  assert.doesNotMatch(h.element('#primaryProject').innerHTML, /Remote project/);
+  assert.match(h.element('#workspacePreview').textContent, /^D:\\workspaces\\demo/);
+  assert.deepEqual(requests, ['wsl-ubuntu', 'local']);
+});
+
+test('late project responses cannot replace a newly chosen environment', async () => {
+  const h = harness();
+  prepareEnvironmentPicker(h);
+  const pending = [];
+  h.context.api = () => new Promise(resolve => pending.push(resolve));
+  h.element('#requirementEnvironment').value = 'wsl-old';
+  const first = h.context.loadRequirementProjects();
+  h.element('#requirementEnvironment').value = 'local';
+  const second = h.context.loadRequirementProjects();
+  pending[1](snapshot());
+  await second;
+  const html = h.element('#primaryProject').innerHTML;
+  pending[0]({ root: '/old', projects: [{ id: 'old', name: 'Old project' }] });
+  await first;
+  assert.equal(h.element('#primaryProject').innerHTML, html);
+  assert.equal(vm.runInContext('requirementEnvironmentData.environment', h.context), 'local');
+});
+
+test('explicit environment calls survive navigation while old ambient calls are rejected', async () => {
+  const h = harness();
+  await h.refresh(snapshot());
+  const ambient = h.context.api('/api/state');
+  const explicit = h.context.api('/api/state', { environment: 'wsl-ubuntu' });
+  vm.runInContext('environmentRevision += 2', h.context);
+  await assert.rejects(ambient, /执行环境已切换/);
+  await explicit;
+  assert.equal(h.requests.at(-1).options.headers['X-Environment-ID'], 'wsl-ubuntu');
+});
 
 test('background refresh keeps the project table and only updates its check time', async () => {
   const h = harness();
