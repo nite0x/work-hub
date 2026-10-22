@@ -1,0 +1,146 @@
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_signing:
+        description: Require macOS notarization and Windows signing (configure repository secrets first)
+        type: boolean
+        default: false
+  push:
+    tags: ['desktop-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+          rustup target add '${{ matrix.target }}'
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libfuse2
+      - run: npm ci
+      - name: Check version and packaging contract
+        shell: bash
+        run: |
+          npm run desktop:check
+          node --test scripts/*.test.cjs
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "desktop-v$(node -p 'require("./package.json").version')"
+          fi
+      - name: Backend upgrade safety tests
+        shell: bash
+        run: go test ./internal/app -run 'TestPrepareUpgrade|TestDataDirectoryLockAndAuthenticatedStop|TestDesktopHandshake' -count=1
+      - name: Import optional macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then exit 0; fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/work-hub-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
+          export P12_PATH="$RUNNER_TEMP/work-hub-signing.p12"
+          python3 -c 'import os,base64;open(os.environ["P12_PATH"],"wb").write(base64.b64decode(os.environ["APPLE_CERTIFICATE"]))'
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+          security import "$P12_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm -f "$P12_PATH"
+          echo "WORK_HUB_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+      - name: Import optional Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP 'work-hub-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+          "WORK_HUB_WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          Remove-Item -LiteralPath $pfx
+      - name: Build native installers
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          REQUIRE_SIGNING: ${{ inputs.require_signing || startsWith(github.ref, 'refs/tags/') }}
+          NO_STRIP: 'true'
+        run: |
+          args=(--target '${{ matrix.target }}')
+          if [[ "$REQUIRE_SIGNING" == true && '${{ runner.os }}' != Linux ]]; then args+=(--require-signing); fi
+          npm run desktop:package -- "${args[@]}"
+      - name: Rust launcher tests
+        shell: bash
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: macOS DMG install and lifecycle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node scripts/desktop-macos-install-smoke.mjs dist/desktop/*/${{ matrix.target }}/release/*.dmg
+      - name: Windows install, upgrade and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem -Path 'dist/desktop/*/${{ matrix.target }}/release/*-setup.exe').FullName
+          ./scripts/desktop-windows-install-smoke.ps1 -Installer $installer
+      - name: Linux install, upgrade and uninstall
+        if: runner.os == 'Linux'
+        run: node scripts/desktop-linux-install-smoke.mjs dist/desktop/*/${{ matrix.target }}/release/*.deb
+      - name: AppImage launcher lifecycle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          image=$(realpath dist/desktop/*/${{ matrix.target }}/release/*.AppImage)
+          chmod +x "$image"
+          staging=$(mktemp -d)
+          (cd "$staging" && "$image" --appimage-extract >/dev/null)
+          node scripts/desktop-smoke.mjs "$staging/squashfs-root/usr/bin/work-hub-backend" "$image"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: work-hub-${{ matrix.target }}
+          path: dist/desktop/*/${{ matrix.target }}/release/
+          if-no-files-found: error
+      - name: Remove temporary macOS signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ -n "${WORK_HUB_KEYCHAIN:-}" ]]; then security delete-keychain "$WORK_HUB_KEYCHAIN"; fi

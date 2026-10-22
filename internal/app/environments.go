@@ -134,7 +134,7 @@ func (h *environmentHub) listHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		message = err.Error()
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"environments": entries, "distributions": distros, "wsl_message": message})
+	httpx.WriteJSON(w, 200, map[string]any{"environments": entries, "distributions": distros, "wsl_message": message, "platform": runtime.GOOS, "wsl_supported": runtime.GOOS == "windows"})
 }
 func (h *environmentHub) addHandler(w http.ResponseWriter, r *http.Request) {
 	var e Environment

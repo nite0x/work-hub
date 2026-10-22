@@ -19,7 +19,7 @@ import (
 
 func ListWSLDistributions(parent context.Context) ([]string, error) {
 	if runtime.GOOS != "windows" {
-		return []string{}, fmt.Errorf("当前环境原生运行 Linux；WSL 接入在 Windows 桌面端提供")
+		return []string{}, fmt.Errorf("WSL 接入仅在 Windows 桌面端提供")
 	}
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()

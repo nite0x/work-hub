@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "linux": {
+      "deb": {
+        "depends": ["git"],
+        "section": "devel",
+        "preInstallScript": "linux/check-running.sh",
+        "preRemoveScript": "linux/check-running.sh"
+      }
+    }
+  }
+}

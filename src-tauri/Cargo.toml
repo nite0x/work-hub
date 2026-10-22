@@ -1,0 +1,22 @@
+[package]
+name = "work-hub-desktop"
+version = "0.1.0"
+edition = "2021"
+default-run = "work-hub-desktop"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+tauri-plugin-single-instance = "=2.5.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+# Rust 1.95's debuginfo stripping can produce misaligned proc-macro dylibs on
+# newer macOS dyld (rust-lang/rust#157750). Keep build-time metadata intact.
+[profile.release.build-override]
+strip = "none"

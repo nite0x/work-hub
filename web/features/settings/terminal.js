@@ -1,5 +1,31 @@
 'use strict';
 
+const terminalLabels = { 'macos-terminal': 'Terminal（macOS）', 'windows-terminal': 'Windows Terminal', powershell: 'PowerShell（Windows 本机）', otty: 'Otty', custom: '自定义路径', auto: '系统终端' };
+const terminalStyleLabels = { otty: 'Otty', 'windows-terminal': 'Windows Terminal', command: '其他终端（支持 -e 程序 参数）' };
+let terminalOptionsKey = '';
+
+function renderTerminalOptions() {
+  const terminal = state.terminal;
+  const saved = terminal.settings;
+  const kinds = [...(terminal.supported_kinds || ['windows-terminal', 'powershell', 'otty', 'custom', 'auto'])];
+  const styles = [...(terminal.supported_styles || ['otty', 'windows-terminal', 'command'])];
+  if (!kinds.includes(saved.kind)) kinds.push(saved.kind);
+  if (saved.kind === 'custom' && !styles.includes(saved.style)) styles.push(saved.style);
+  $('#terminalKind').innerHTML = kinds.map(kind => `<option value="${esc(kind)}">${esc(kind === 'auto' ? terminal.platform === 'darwin' ? '系统终端（macOS）' : '系统终端（Linux）' : terminalLabels[kind] || kind)}</option>`).join('');
+  $('#terminalStyle').innerHTML = styles.map(style => `<option value="${esc(style)}">${esc(terminalStyleLabels[style] || style)}</option>`).join('');
+  $('#terminalPath').placeholder = terminal.platform === 'darwin' ? '/完整路径/终端命令行程序' : terminal.platform === 'windows' ? 'C:\\完整路径\\terminal.exe' : '/usr/bin/terminal';
+  terminalOptionsKey = JSON.stringify([terminal.platform, terminal.supported_kinds, terminal.supported_styles]);
+}
+
+function refreshTerminalOptions() {
+  const terminal = state.terminal;
+  if (terminalOptionsKey === JSON.stringify([terminal.platform, terminal.supported_kinds, terminal.supported_styles])) return;
+  const kind = $('#terminalKind').value, style = $('#terminalStyle').value;
+  renderTerminalOptions();
+  $('#terminalKind').value = kind;
+  $('#terminalStyle').value = style;
+}
+
 function updateTerminalFields() {
   const kind = $('#terminalKind').value;
   const custom = kind === 'custom';
@@ -7,7 +33,9 @@ function updateTerminalFields() {
   $('#terminalPath').required = custom;
   $('#terminalPath').disabled = !custom;
   $('#terminalStyle').disabled = !custom;
-  $('#terminalHint').textContent = kind === 'otty'
+  $('#terminalHint').textContent = kind === 'macos-terminal' || kind === 'auto' && state.terminal.platform === 'darwin'
+    ? '使用 macOS 系统 Terminal 打开项目工作目录，命令结束后保留终端。Codex 启动后等待你输入。'
+    : kind === 'otty'
     ? '自动检测 Otty 命令行程序，在新标签页打开项目；未运行时会先启动 Otty。未找到时可用自定义路径指定安装目录下的 bin/otty.exe。'
     : kind === 'windows-terminal'
       ? '使用 Windows Terminal 的 wt.exe 打开新窗口。'
@@ -18,10 +46,10 @@ function updateTerminalFields() {
 
 function loadTerminalFields() {
   const saved = state.terminal.settings;
+  renderTerminalOptions();
   $('#terminalKind').value = saved.kind;
   $('#terminalPath').value = saved.path || '';
-  $('#terminalStyle').value = saved.kind === 'custom' ? saved.style : 'otty';
-  $('#terminalAutoOption').hidden = saved.kind !== 'auto';
+  $('#terminalStyle').value = saved.kind === 'custom' ? saved.style : state.terminal.supported_styles?.[0] || 'otty';
   $('#terminalError').hidden = true;
   updateTerminalFields();
 }

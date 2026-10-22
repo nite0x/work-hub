@@ -12,6 +12,9 @@ type LaunchPlan struct {
 	Session               string   `json:"-"`
 }
 type TerminalAvailability struct {
+	Platform  string           `json:"platform"`
+	Kinds     []string         `json:"supported_kinds"`
+	Styles    []string         `json:"supported_styles"`
 	Settings  TerminalSettings `json:"settings"`
 	Available bool             `json:"available"`
 	Codex     bool             `json:"codex"`
@@ -28,6 +31,8 @@ type TerminalSettings struct {
 
 func (s TerminalSettings) Label() string {
 	switch s.Kind {
+	case "macos-terminal":
+		return " macOS Terminal "
 	case "windows-terminal":
 		return " Windows Terminal "
 	case "otty":

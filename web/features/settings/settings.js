@@ -20,6 +20,8 @@ function renderSettings() {
     if (state.terminal.settings) loadTerminalFields();
     if (state.master_sync) loadMasterSyncFields();
     settingsEnvironment = activeEnvironment;
+  } else if (state.terminal.settings) {
+    refreshTerminalOptions();
   }
   $('#terminalStatus').textContent = (state.terminal.message || '') + (state.terminal.launcher ? '\n程序：' + state.terminal.launcher : '');
   updateTerminalFields();

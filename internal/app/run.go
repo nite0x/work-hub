@@ -56,7 +56,39 @@ func Run() {
 	headless := flag.Bool("headless", runtime.GOOS != "windows", "run without the desktop window")
 	interactive := flag.Bool("interactive-sessions", false, "enable legacy sidebar chat (Linux only)")
 	stopService := flag.Bool("stop", false, "stop the background service when no Git operation is running")
+	prepareUpgrade := flag.Bool("prepare-upgrade", false, "safely stop an existing backend before replacing installed files; succeed when already stopped")
+	desktopStart := flag.Bool("desktop-start", false, "start or reuse the desktop backend and print its JSON handshake")
 	flag.Parse()
+	if *prepareUpgrade {
+		if *desktopStart || *stopService || *interactive {
+			log.Fatal("prepare-upgrade 不能与其他运行模式同时使用")
+		}
+		if err := prepareDesktopUpgrade(*data); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	rootExplicit, listenExplicit := false, false
+	flag.Visit(func(f *flag.Flag) {
+		rootExplicit = rootExplicit || f.Name == "root"
+		listenExplicit = listenExplicit || f.Name == "listen"
+	})
+	if *desktopStart {
+		if *stopService || *interactive {
+			log.Fatal("desktop-start 不能与 stop 或 interactive-sessions 同时使用")
+		}
+		if !listenExplicit {
+			*addr = "127.0.0.1:0"
+		}
+		info, err := ensureDesktopService(*data, *root, *addr, rootExplicit)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *stopService {
 		if err := stopDesktopService(*data); err != nil {
 			log.Fatal(err)
@@ -89,12 +121,13 @@ func Run() {
 		log.Fatal("当前数据目录已由另一个实例使用：", err)
 	}
 	defer unlock()
+	platform.ConfigureCommandEnvironment()
 	a, err := openApp(*data, *root)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer a.Close()
-	a.Workspace.ReadOnlySessions = !*interactive || runtime.GOOS == "windows"
+	a.Workspace.ReadOnlySessions = !*interactive || runtime.GOOS != "linux"
 	hub, err := newEnvironmentHub(a)
 	if err != nil {
 		log.Fatal(err)
@@ -114,8 +147,7 @@ func Run() {
 	address := "http://" + listener.Addr().String()
 	_ = os.WriteFile(filepath.Join(*data, "instance-url"), []byte(address), 0600)
 	defer os.Remove(filepath.Join(*data, "instance-url"))
-	info, _ := json.Marshal(desktopServiceInfo{URL: address, Token: a.token, PID: os.Getpid()})
-	if err := os.WriteFile(filepath.Join(*data, "service.json"), info, 0600); err != nil {
+	if err := writeDesktopService(*data, a.desktopInfo(address)); err != nil {
 		log.Fatal(err)
 	}
 	defer os.Remove(filepath.Join(*data, "service.json"))

@@ -1,0 +1,16 @@
+{
+  "name": "work-hub-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:build": "tauri build",
+    "desktop:package": "node scripts/package-desktop.mjs",
+    "desktop:check": "node --test scripts/desktop-packaging.test.mjs",
+    "desktop:test": "npm run desktop:prepare && cargo test --manifest-path src-tauri/Cargo.toml"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

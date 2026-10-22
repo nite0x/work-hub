@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -37,7 +36,9 @@ func (c *terminalCache) snapshot(settings model.TerminalSettings, force bool) (m
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entry == nil || c.entry.value.Settings != settings {
-		c.entry = &terminalEntry{value: model.TerminalAvailability{Settings: settings, Distro: os.Getenv("WSL_DISTRO_NAME"), Message: "正在检查终端可用性…"}}
+		value := terminalPlatformInfo(settings)
+		value.Message = "正在检查终端可用性…"
+		c.entry = &terminalEntry{value: value}
 	}
 	entry := c.entry
 	if !c.closed && !entry.refreshing && (force || time.Since(entry.checkedAt) >= time.Minute) {

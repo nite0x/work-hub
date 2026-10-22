@@ -43,10 +43,22 @@ func WriteTerminalScript(dataDir string, p *model.LaunchPlan) error {
 	ext := ".sh"
 	if runtime.GOOS == "windows" {
 		ext = ".ps1"
+	} else if runtime.GOOS == "darwin" {
+		ext = ".command"
 	}
 	p.Script = filepath.Join(dir, model.NewID()+ext)
 	p.Command = platform.DisplayCommand(p.Tool, p.Args, runtime.GOOS == "windows")
 	script := "#!/usr/bin/env bash\nexport PATH=\"$HOME/.local/bin:$PATH\"\ncd -- " + platform.ShellQuote(p.Cwd) + " || exit 1\n" + p.Command + "\nexec bash -i\n"
+	if runtime.GOOS == "darwin" {
+		// The document is executed inside Terminal's login session, which can
+		// have a different PATH from the GUI. Use the backend's resolved tools
+		// consistently, and return to the user's preferred interactive shell.
+		script = "#!/bin/bash\nexport PATH=" + platform.ShellQuote(os.Getenv("PATH")) + "\n"
+		if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+			script += "export CODEX_HOME=" + platform.ShellQuote(codexHome) + "\n"
+		}
+		script += "cd -- " + platform.ShellQuote(p.Cwd) + " || exit 1\n" + p.Command + "\nexec \"${SHELL:-/bin/zsh}\" -i\n"
+	}
 	if runtime.GOOS == "windows" {
 		script = "\ufeff$ErrorActionPreference = 'Stop'\r\nSet-Location -LiteralPath " + platform.PowershellQuote(p.Cwd) + "\r\n$env:GIT_TERMINAL_PROMPT = '1'\r\n" + p.Command + "\r\nWrite-Host '操作结束，可继续在当前项目目录工作。'\r\n"
 	}

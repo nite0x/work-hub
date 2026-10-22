@@ -48,7 +48,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
     fetch: async (url, options) => {
       requests.push({ url, options });
       if (failure) throw failure;
-      if (url === '/api/environments') return { ok: true, json: async () => ({ environments: [{ id: 'local', name: '本机' }], distributions: [] }) };
+      if (url === '/api/environments') return { ok: true, json: async () => ({ environments: [{ id: 'local', name: '本机' }], distributions: [], platform: result?.terminal?.platform, wsl_supported: result?.terminal?.platform === 'darwin' ? false : undefined }) };
       if (url.startsWith('/api/task-inventory')) return { ok: true, json: async () => ({
         requirements: result.requirements.map(q => ({ ...structuredClone(q), environment_id: 'local', environment_name: '本机', connected: true })),
         environments: [{ id: 'local', name: '本机', connected: true }], project_count: result.projects.length, status_refreshing: result.status_refreshing,
@@ -232,3 +232,24 @@ for (const readOnly of [true, false]) {
     assert.match(h.element('#content').innerHTML, /打开任务 Task/);
   });
 }
+
+test('macOS settings show Terminal and hide WSL without discarding unsaved terminal inputs', async () => {
+  const h = harness({ fullPage: true, readOnly: true });
+  const data = snapshot();
+  data.terminal = { platform: 'darwin', settings: { kind: 'macos-terminal', style: 'macos-terminal' }, supported_kinds: ['macos-terminal', 'custom', 'auto'], supported_styles: ['command'], available: true };
+  await h.start(data);
+  assert.match(h.element('#terminalKind').innerHTML, /Terminal（macOS）/);
+  assert.doesNotMatch(h.element('#terminalKind').innerHTML, /PowerShell|Windows Terminal/);
+  assert.equal(h.element('#addEnvironment').hidden, true);
+  assert.equal(h.element('#platformLabel').textContent, 'macOS');
+  h.element('#terminalKind').value = 'custom';
+  h.element('#terminalStyle').value = 'command';
+  h.element('#terminalPath').value = '/my unsaved terminal';
+  h.context.updateTerminalFields();
+  const next = structuredClone(data);
+  next.terminal.supported_styles.push('otty'); // late capability discovery must preserve the draft.
+  await h.refresh(next);
+  assert.equal(h.element('#terminalKind').value, 'custom');
+  assert.equal(h.element('#terminalStyle').value, 'command');
+  assert.equal(h.element('#terminalPath').value, '/my unsaved terminal');
+});

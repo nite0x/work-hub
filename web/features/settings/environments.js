@@ -14,6 +14,9 @@ async function loadEnvironments() {
   $('#reconnectEnvironment').hidden = activeEnvironment === 'local';
   $('#environmentDistro').innerHTML = data.distributions.map(name => `<option>${esc(name)}</option>`).join('');
   $('#addEnvironment').disabled = !data.distributions.length;
+  $('#addEnvironment').hidden = data.wsl_supported === false;
+  $('#connectEnvironment').hidden = data.wsl_supported === false;
+  $('#platformLabel').textContent = ({ darwin: 'macOS', windows: 'Windows · WSL', linux: 'Linux' })[data.platform] || '本机工作台';
   $('#addEnvironment').title = data.wsl_message || '连接已安装的 WSL 发行版';
   $('#connectEnvironment').disabled = !data.distributions.length;
   $('#environmentStatus').textContent = data.environments.find(e => e.id === activeEnvironment)?.name || '执行环境未登记';

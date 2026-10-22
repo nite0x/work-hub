@@ -3,7 +3,6 @@ package app
 import (
 	"crypto/subtle"
 	"net/http"
-	"os"
 
 	"worktree-hub/internal/httpx"
 	"worktree-hub/internal/overview"
@@ -17,7 +16,9 @@ func (a *App) handler() http.Handler {
 			httpx.WriteError(w, 403, "实例认证失败")
 			return
 		}
-		httpx.WriteJSON(w, 200, map[string]any{"name": "worktree-hub", "pid": os.Getpid()})
+		info := a.desktopInfo("")
+		info.Token = "" // Instance credentials never travel in the health response.
+		httpx.WriteJSON(w, 200, info)
 	})
 	if a.shutdown != nil {
 		mux.HandleFunc("POST /api/service/stop", a.stopServiceHandler)

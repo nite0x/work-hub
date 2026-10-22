@@ -1,10 +1,125 @@
 # Work Hub
 
-以任务组织跨项目开发的个人开发工作台。Windows 安装的是完整应用，可直接管理本机仓库；WSL 作为可选执行环境接入。Go 后端通过 `go:embed` 复用原生 HTML / CSS / JavaScript 页面，SQLite 保存项目和任务关系，不需要 Node 或前端构建工具。
+以任务组织跨项目开发的个人开发工作台。Tauri 桌面端通过独立 Go 后台管理本机仓库；Windows 还可接入 WSL 执行环境。Go 后端通过 `go:embed` 复用 HTML / CSS / JavaScript 页面，SQLite 保存项目和任务关系，运行时不需要 Node 或前端构建工具。
 
 桌面端当前会话范围为：查看会话、历史消息和执行记录，在对应环境的终端新建或继续对话。发送、审批和终端交接控件默认关闭；原有 Linux 交互实现保留在 `--interactive-sessions` 兼容模式中。
 
-## Windows 桌面端
+## Tauri 桌面端
+
+Tauri 2 桌面宿主复用现有 Go 页面、HTTP API、SQLite 和实时事件流，业务页面不获得 Tauri shell 或文件系统权限。支持独立后台、macOS 系统 Terminal，以及各平台原生安装包；关闭窗口后后台继续运行。
+
+开发需要 Go、Rust 和 Node.js，以及 Tauri 对应平台的系统构建依赖：
+
+```bash
+npm ci
+npm run desktop:dev
+# 显式指定数据目录和工作区；相对路径按启动时的目录解释
+npm run desktop:dev -- --data /path/to/data --root /path/to/workspaces
+```
+
+开发命令不启动额外的前端服务器；窗口加载 Go 提供的页面。修改 Go 或 web 源码后，退出并停止后台，再重新运行开发命令。构建脚本用源码摘要标识后台版本，版本不一致时拒绝静默复用旧后台。
+
+```bash
+# 只准备当前目标平台的 Go sidecar；直接 cargo build/test 前也需要执行
+npm run desktop:prepare
+# 直接调用 Tauri 构建；默认使用当前平台安装包配置
+npm run desktop:build
+# macOS 本地调试应用包
+npm run desktop:build -- --debug --bundles app
+```
+
+- 关闭主窗口或选择“退出桌面端（保留后台）”只退出 Tauri，独立 Go 后台和定时任务继续运行；再次打开复用同一后台。
+- 应用菜单提供“重新连接后台”和“退出并停止后台”。停止前由 Go 校验本机及已连接 WSL 环境的写锁；正在操作时拒绝退出，不强杀 Git 或用户终端。
+- 桌面宿主也支持 `--data`、`--root` 和 `--stop`。`--backend-info` 可在不打开窗口时启动/复用后台并输出不含令牌的诊断信息。
+- 后台仅监听 `127.0.0.1` 的随机端口。日志保存在业务数据目录的 `desktop.log`；`service.json` 用于实例发现和认证，不应分享其内容。
+- 数据目录沿用旧版：Windows 为 `%LOCALAPPDATA%\WorktreeHub`，macOS/Linux 为 `~/.local/share/worktree-hub`。默认工作区仍为 `~/workspaces`。已有任务和 worktree 不搬迁。
+- 已有后台的工作区与显式 `--root` 不一致时会报错；未指定 `--root` 时复用后台实际工作区。旧版本或交互模式后台需先通过原程序的 `--stop --data ...` 安全停止。
+- Windows 构建额外携带对应架构的 WSL Linux 辅助程序；Tauri 显式传递资源路径，保留原有 WSL 通信和部署协议。
+
+生命周期验收（使用临时数据目录，不操作已有项目）：
+
+```bash
+npm run desktop:test
+# 将目标后缀换成当前 Rust target triple；也可追加桌面宿主路径，验证完整启动链
+node scripts/desktop-smoke.mjs src-tauri/binaries/work-hub-backend-aarch64-apple-darwin \
+  src-tauri/target/debug/work-hub
+# 双项目任务、真实本地 Git 远端、分支保护、会话历史及归档恢复
+node scripts/desktop-workflow-smoke.mjs src-tauri/binaries/work-hub-backend-aarch64-apple-darwin
+# 对本机安装的 Codex CLI 做只读协议兼容检查
+WORKTREE_HUB_TEST_INSTALLED_CODEX=1 go test ./internal/session -run '^TestInstalledCodexSessionProtocol$' -v
+```
+
+流程脚本使用临时仓库和独立数据目录，Codex 使用确定性测试进程，不发送模型请求。追加 `--keep` 可保留隔离后台和样例任务供原生窗口检查。真实 Codex 检查只读取本机会话列表、元数据和历史，不创建会话。
+
+### macOS 终端
+
+- 默认使用系统 Terminal，旧设置中的“系统终端”也会解析为 Terminal。任务启动、项目终端、Git 终端及继续会话共用此设置；设置页按执行平台显示可选工具，macOS 隐藏 WSL 连接入口。
+- 使用 LaunchServices 打开权限为 `0700` 的 `.command` 文件，无需 AppleScript 自动化授权。脚本进入对应 worktree，Codex 结束后保留交互终端；支持路径中的中文、空格、引号和 shell 特殊字符。
+- Finder 启动时，后台从用户登录 shell 读取 PATH（最多等待 3 秒），保留显式继承的路径优先级，并补充 Homebrew 和常用系统目录。终端脚本沿用后台解析的 PATH 和显式 `CODEX_HOME`，使会话查看与终端使用同一 CLI 配置。安装或切换 CLI 后，安全停止后台再打开应用以重新发现环境。
+- Git 网络操作沿用用户现有 Git 凭证助手；如需认证，在项目终端完成登录。
+
+原 Go 浏览器/headless 入口继续可用。下面的旧版 Windows WebView2 构建和安装脚本仅保留为兼容入口，新桌面版本统一使用 Tauri 安装包。
+
+### 构建安装包
+
+在对应操作系统上构建，不用 macOS 交叉生成 Windows/Linux 安装器。当前提供以下四个目标；不生成 Universal、Windows ARM64、Linux ARM64 或 RPM 包。
+
+| 平台 | Rust target | 安装格式 | 运行基线 |
+| --- | --- | --- | --- |
+| macOS Apple Silicon | `aarch64-apple-darwin` | DMG | macOS 12+ |
+| macOS Intel | `x86_64-apple-darwin` | DMG | macOS 12+ |
+| Windows x64 | `x86_64-pc-windows-msvc` | NSIS `-setup.exe` | Windows 10/11、WebView2 |
+| Linux x64 | `x86_64-unknown-linux-gnu` | DEB、AppImage | 以 Ubuntu 22.04 构建；需要 WebKitGTK 4.1 |
+
+构建机需安装 [Tauri 官方系统依赖](https://v2.tauri.app/start/prerequisites/)、Git、Node.js 22+、Go 和 Rust。CI 固定 Go 1.26.2、Rust 1.95.0；本地建议使用相同版本。Go 模块和 Cargo 依赖首次构建需要下载。Windows 安装器缺少 WebView2 时从微软下载安装，因而首次安装可能需要联网；Git 和 Codex CLI 由用户自行安装。发布包运行时不依赖 Go、Rust 或 Node.js（Codex 自己的安装要求除外）。
+
+```bash
+npm ci
+npm run desktop:check
+# 当前平台的正式优化构建，并收集安装包和校验信息
+npm run desktop:package
+# 构建指定架构；先用 rustup target add 安装对应 target
+npm run desktop:package -- --target x86_64-apple-darwin
+# 仅检查版本、目标、签名配置，不执行编译
+npm run desktop:package -- --dry-run
+# 需要更快的本地安装流程验证时，单独生成 debug 包
+npm run desktop:package -- --debug
+```
+
+产物集中在 `dist/desktop/<版本>/<target>/release/`，debug 包单独放在 `debug/`。包括安装器、`README.md`、Go/Rust 完整依赖许可 `THIRD-PARTY-NOTICES.txt`、记录源码提交及未提交状态的 `release.json`，以及覆盖这些文件的 `SHA256SUMS`。包内也携带许可文本。校验和用于核对文件完整性，不等同发布者签名；Linux 可运行 `sha256sum -c SHA256SUMS`，macOS 可运行 `shasum -a 256 -c SHA256SUMS`，Windows 可用 `Get-FileHash -Algorithm SHA256` 对照。
+
+应用版本以 `package.json` 为准，Tauri 直接读取它；`src-tauri/Cargo.toml` 的版本必须相同，更新版本时也需更新并提交 `Cargo.lock`。后台身份为应用版本加业务源码摘要。打包命令在编译前拒绝版本不一致、错误系统的目标以及不完整的签名配置，清理本次目标的旧安装包，避免误发上一次产物。Go、Tauri、WSL helper 随同一次构建交付。
+
+`.github/workflows/desktop.yml` 在手动运行或推送 `desktop-v<版本>` 标签时构建四个目标，上传 Actions artifacts；不自动创建或公开 GitHub Release。标签必须与应用版本一致。标签构建要求 macOS/Windows 发布签名；手动运行默认允许未签名测试包。Windows/Linux 作业包含实际安装、后台运行时升级保护、设置保留和卸载保留数据的验收脚本；macOS 作业从 DMG 复制应用到临时安装目录，检查宿主与 sidecar 的完整生命周期。这些作业需要在远端实际运行后，才能作为对应平台的验收结论。
+
+### 安装、升级和卸载
+
+- **macOS**：打开对应 CPU 的 DMG，把 `Work Hub.app` 拖到 `/Applications`（或用户自己的 `~/Applications`）后再运行。升级前在应用菜单选择“退出并停止后台”，再替换 `.app`；仅关闭窗口会保留后台，不能作为升级前的停止操作。卸载前同样安全停止，再把应用移入废纸篓。
+- **Windows**：运行 `-setup.exe`，按当前用户安装并创建开始菜单和卸载入口，无需管理员权限。默认应用目录为 `%LOCALAPPDATA%\Work Hub`；旧版脚本安装目录为 `%LOCALAPPDATA%\Programs\WorktreeHub`，二者共用既有 `%LOCALAPPDATA%\WorktreeHub` 业务数据。首次迁移后从新开始菜单入口启动，确认记录正常再清理旧版程序文件。后续运行新安装器会沿用 Tauri 保存的安装位置。覆盖安装和卸载前，安装器从临时目录运行新 helper，认证并安全停止默认后台；正在 Git 写操作、后台启动中或认证失败时中止，不强杀进程。使用过自定义 `--data` 时，必须先逐个安全停止这些后台并关闭窗口，再安装/卸载。
+- **Linux DEB**：`sudo apt install ./work-hub_<版本>_x86_64-unknown-linux-gnu.deb`；包管理器安装 WebKitGTK、GTK 和 Git 依赖，提供应用菜单入口及 `/usr/bin/work-hub`。升级和卸载前选择“退出并停止后台”。维护脚本检测到 `/usr/bin` 中的宿主/后台仍运行会拒绝替换；不会以 root 打开用户数据库或跨用户停止进程。卸载使用 `sudo apt remove work-hub`（以 `dpkg-deb -f <文件.deb> Package` 显示的包名为准）。
+- **Linux AppImage**：放到固定的用户应用目录，例如 `~/Applications`，`chmod +x <文件.AppImage>` 后运行；部分发行版需要 FUSE 2，系统仍需 Git 和可用终端。升级前安全停止后台，再替换同一位置的文件。卸载前安全停止，再删除 AppImage。AppImage 不自动注册系统菜单，也不使用 systemd。
+
+上述安装、升级和卸载不会移动或删除 `~/workspaces`、项目仓库、任务 worktree 或业务数据库；WSL 内的项目目录也保持原状。业务数据默认目录仍是 Windows `%LOCALAPPDATA%\WorktreeHub`、macOS/Linux `~/.local/share/worktree-hub`。手动删除这些数据不属于卸载步骤。新版本遇到正在运行的旧后台会明确拒绝复用，可通过原应用菜单安全停止再重新打开；不要删除 `service.json` 或结束 Git 进程来绕过保护。
+
+如窗口已关闭，可通过已安装的宿主停止指定后台，例如 macOS：
+
+```bash
+"/Applications/Work Hub.app/Contents/MacOS/work-hub" --stop
+"/Applications/Work Hub.app/Contents/MacOS/work-hub" --stop --data /自定义数据目录
+```
+
+Windows 使用安装目录中的 `work-hub.exe --stop`，Linux DEB 使用 `work-hub --stop`。安装 helper 的 `work-hub-backend --prepare-upgrade [--data ...]` 是幂等入口：未启动时成功返回，已启动时只能通过认证和写锁检查后安全退出，不会创建一个新后台。
+
+### 发布签名
+
+本地 `desktop:package` 默认允许测试包。正式交付 macOS/Windows 时使用 `npm run desktop:package -- --require-signing`，缺少凭证会在编译前报错。
+
+- **macOS**：本地钥匙串准备 Developer ID Application 证书，设置 `APPLE_SIGNING_IDENTITY`。公证使用 `APPLE_ID`、应用专用的 `APPLE_PASSWORD`、`APPLE_TEAM_ID`，或使用 `APPLE_API_ISSUER`、`APPLE_API_KEY`、`APPLE_API_KEY_PATH`。Tauri 负责签名、公证和 stapling。CI 另需 `APPLE_CERTIFICATE`（P12 的 base64）及 `APPLE_CERTIFICATE_PASSWORD`，上述身份和 Apple ID 公证参数使用同名 repository secrets。没有证书的本地包不具备 Developer ID 公证资格，不能据此宣称通过 Gatekeeper 验收。[Tauri macOS 签名说明](https://v2.tauri.app/distribute/sign/macos/)
+- **Windows**：本地用户证书库准备代码签名证书，设置 `WORK_HUB_WINDOWS_CERTIFICATE_THUMBPRINT`；打包使用 SHA-256 和时间戳。CI 可配置 `WINDOWS_CERTIFICATE`（PFX 的 base64）及 `WINDOWS_CERTIFICATE_PASSWORD`，作业导入后自动传递指纹。硬件令牌或外部签名服务需按发布环境另外配置 Tauri `signCommand`，当前工作流不假设存在这些服务。[Tauri Windows 签名说明](https://v2.tauri.app/distribute/sign/windows/)
+
+代码库不保存证书、私钥或公证密码；CI 当前只上传构建产物。应用内自动更新、更新服务器和启动时自动替换后台不在本阶段实现，升级继续使用安装器或手动替换应用。
+
+## 旧版 Windows 桌面端
 
 在 Linux/WSL 中生成 Windows x64 发布目录（无需交叉 C 编译器）：
 
@@ -52,7 +167,7 @@ WSL 停止或连接中断后，任务列表仍显示本机保存的任务及其�
 - 在任务页面直接打开各项目的终端或 Git 操作，默认使用该任务中对应项目的工作目录；目录不可用时提示并停用入口，不会回退到仓库主目录。
 - 批量创建前检查 master、分支和目录冲突；中途失败保留成功项，支持重试失败项，不覆盖现有文件。
 - 设置页面：集中管理执行环境连接、终端工具和每日 master 更新；侧栏可随时切换执行环境。配置表单的未保存输入会在后台状态刷新和页面切换时保留。
-- 统一终端设置：支持 Windows Terminal、Otty 和自定义程序路径，所有 Codex / Git / 终端获取入口共用配置，刷新页面和重启服务后保留。
+- 统一终端设置：支持 macOS Terminal、Windows Terminal、Otty 和自定义命令行程序路径，所有 Codex / Git / 终端获取入口共用配置，刷新页面和重启服务后保留。
 - 从任务启动对应执行环境的 Codex 终端：主项目 worktree 作为 `--cd`，打开后等待用户输入，不自动发送任务说明或开始对话。任务说明保存在工作区目录的 `BRIEF.md`。交互兼容模式的可交接终端通过控制连接为 workspace-write 策略追加其他项目目录，避免远程连接与 `--add-dir` 冲突；保留原有沙箱模式和审批策略。独立启动及复制的命令仍使用 `--add-dir`。
 - 任务关联会话：自动发现工作区总目录及各项目 worktree 根目录中的 Codex 会话；支持搜索、选择或粘贴会话 ID 手动关联其他目录中的会话，并在所选终端中一键继续。
 - 会话详情侧栏：在任务页查看历史消息、Codex 回复和命令执行记录；终端中的回复和命令输出通过实时推送边生成边显示，按需加载更早记录，查看退出码及耗时。

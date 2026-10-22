@@ -4,3 +4,11 @@
 *.db-shm
 *.db-wal
 /rsrc_windows_*.syso
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/binaries/
+/src-tauri/agents/
+/src-tauri/backend-version.txt
+/src-tauri/notices/
+/dist/

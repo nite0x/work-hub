@@ -21,6 +21,9 @@ import (
 )
 
 func DefaultTerminalSettings() model.TerminalSettings {
+	if runtime.GOOS == "darwin" {
+		return model.TerminalSettings{Kind: "macos-terminal", Style: "macos-terminal"}
+	}
 	if runtime.GOOS == "windows" {
 		if _, err := exec.LookPath("wt.exe"); err == nil {
 			return model.TerminalSettings{Kind: "windows-terminal", Style: "windows-terminal"}
@@ -54,6 +57,12 @@ func (a *Service) TerminalSettingsHandler(w http.ResponseWriter, r *http.Request
 	}
 	settings.Path = strings.TrimSpace(settings.Path)
 	switch settings.Kind {
+	case "macos-terminal":
+		if runtime.GOOS != "darwin" || a.Remote != nil {
+			httpx.WriteError(w, 400, "macOS Terminal 仅用于 macOS 本机")
+			return
+		}
+		settings.Path, settings.Style = "", settings.Kind
 	case "windows-terminal", "otty", "powershell":
 		settings.Path = ""
 		settings.Style = settings.Kind
@@ -75,7 +84,7 @@ func (a *Service) TerminalSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "auto":
 		settings.Path, settings.Style = "", "command"
 	default:
-		httpx.WriteError(w, 400, "请选择 Windows Terminal、Otty 或自定义终端")
+		httpx.WriteError(w, 400, "请选择当前执行环境支持的终端工具")
 		return
 	}
 	// Save valid preferences even if an app is temporarily unavailable (e.g. before installation).
@@ -103,12 +112,20 @@ func CustomTerminalPath(raw string) (string, error) {
 		}
 	}
 	if !filepath.IsAbs(raw) {
-		return "", fmt.Errorf("请输入终端程序的绝对路径，例如 C:\\Program Files\\Otty\\bin\\otty.exe 或 /mnt/c/...")
+		return "", fmt.Errorf("请输入终端可执行文件的绝对路径，不要添加引号或参数")
 	}
 	return filepath.Clean(raw), nil
 }
 
 func ResolveTerminal(settings model.TerminalSettings) (string, error) {
+	if usesMacTerminal(settings) {
+		for _, app := range []string{"/System/Applications/Utilities/Terminal.app", "/Applications/Utilities/Terminal.app"} {
+			if info, err := os.Stat(app); err == nil && info.IsDir() {
+				return app, nil
+			}
+		}
+		return "", fmt.Errorf("未找到系统 Terminal.app，请检查 macOS 系统终端")
+	}
 	if settings.Kind == "powershell" {
 		if runtime.GOOS != "windows" {
 			return "", fmt.Errorf("独立 PowerShell 终端仅用于 Windows 本机")
@@ -187,6 +204,9 @@ func WindowsLocalAppData() string {
 }
 
 func TerminalCommand(settings model.TerminalSettings, launcher, distro string, p model.LaunchPlan) (*exec.Cmd, error) {
+	if usesMacTerminal(settings) {
+		return exec.Command("/usr/bin/open", "-a", launcher, p.Script), nil
+	}
 	command := []string{"bash", p.Script}
 	if runtime.GOOS == "windows" {
 		command = []string{"powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-ExecutionPolicy", "Bypass", "-File", p.Script}
@@ -231,6 +251,23 @@ func TerminalCommand(settings model.TerminalSettings, launcher, distro string, p
 		return nil, fmt.Errorf("不支持的终端启动方式，请重新保存终端设置")
 	}
 	return exec.Command(launcher, args...), nil
+}
+
+func usesMacTerminal(settings model.TerminalSettings) bool {
+	return runtime.GOOS == "darwin" && (settings.Kind == "macos-terminal" || settings.Kind == "auto")
+}
+
+func terminalChoices(system string, wsl bool) ([]string, []string) {
+	switch {
+	case system == "darwin":
+		return []string{"macos-terminal", "custom", "auto"}, []string{"command"}
+	case system == "windows":
+		return []string{"windows-terminal", "powershell", "otty", "custom"}, []string{"windows-terminal", "otty", "command"}
+	case wsl:
+		return []string{"windows-terminal", "otty", "custom", "auto"}, []string{"windows-terminal", "otty", "command"}
+	default:
+		return []string{"auto", "custom"}, []string{"command"}
+	}
 }
 
 // Quote a Windows argv element for CreateProcess / CommandLineToArgvW, including
