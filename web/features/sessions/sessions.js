@@ -12,13 +12,7 @@ function sessionTime(value) {
 }
 
 function renderRequirementSessions(q) {
-  const data = requirementSessions.get(q.id);
-  const readonly = typeof sessionReadOnly !== 'undefined' && sessionReadOnly;
-  const rows = (data?.sessions || []).map(s => `<tr><td><strong>${esc(s.name)}</strong><div class="path">${esc(s.id)}</div></td><td><div class="path">${esc(s.cwd)}</div>${q.members.some(m => m.path === s.cwd) || s.cwd === q.path ? '' : '<div class="table-message">任务工作目录之外的会话</div>'}</td><td>${esc(sessionTime(s.updated_at))}<div class="comparison">${s.source === 'manual' ? '手动关联' : '自动关联'}</div>${s.error ? `<div class="table-message">${esc(s.error)}</div>` : ''}</td><td><div class="session-row-actions"><button type="button" class="button small secondary" data-session-action="details" data-session="${esc(s.id)}" data-requirement="${esc(q.id)}">查看详情</button><button type="button" class="button small primary" data-session-action="${readonly ? 'resume' : 'details'}" data-session="${esc(s.id)}" data-requirement="${esc(q.id)}" ${s.available && q.state === 'ready' ? '' : 'disabled'}>${readonly ? '在终端继续 ↗' : '继续对话'}</button></div></td></tr>`).join('');
-  const description = readonly ? '在终端中对话，在这里查看已保存的会话内容。任务工作区及各项目根目录中的会话会自动关联。' : '新建会话直接在侧栏开始并自动关联任务。直接在工作区总目录或项目工作目录启动的本地会话也会自动关联。';
-  const newButton = readonly ? `<button type="button" class="button small primary" data-action="launch" data-id="${esc(q.id)}" ${q.state === 'ready' ? '' : 'disabled'}>在终端新建会话 ↗</button>` : `<button type="button" class="button small primary" data-session-action="new" data-requirement="${esc(q.id)}" ${q.state === 'ready' ? '' : 'disabled'}>＋ 新建会话</button>`;
-  const footer = readonly ? '会话列表每 10 秒刷新；详情手动刷新显示已保存的消息和执行记录。' : '直接在任务中发送消息、查看实时回复和确认操作。会话列表每 10 秒刷新。';
-  return `<section id="requirementSessions" class="requirement-sessions" aria-labelledby="sessionsTitle"><div class="detail-top"><div><h2 id="sessionsTitle">关联会话 ${data ? badge('neutral', String(data.sessions.length)) : ''}</h2><p class="session-description">${description}</p></div><div class="detail-actions">${newButton}<button type="button" class="button small secondary" data-session-action="refresh" data-requirement="${esc(q.id)}">刷新会话</button><button type="button" class="button small secondary" data-session-action="picker" data-requirement="${esc(q.id)}">＋ 关联已有会话</button></div></div>${data?.error ? `<div class="form-error" role="alert">${esc(data.error)} <span>可点击“刷新会话”重试。</span></div>` : ''}${rows ? `<div class="table-scroll"><table><thead><tr><th>会话</th><th>继续时的工作目录</th><th>最近活动 / 来源</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="session-empty" role="status">${!data || data.loading ? '正在读取 Codex 会话…' : data.error ? '暂时无法读取会话。' : '暂无关联会话。可在终端新建会话，或关联已有会话。'}</p>`}<p class="session-description">${footer}</p></section>`;
+  return window.WorkHubUI.sessions(q, requirementSessions.get(q.id), typeof sessionReadOnly !== 'undefined' && sessionReadOnly);
 }
 
 function updateRequirementSessionsView(id) {
@@ -44,7 +38,7 @@ async function refreshRequirementSessions(id, force = true) {
 
 function renderSessionPicker() {
   const linked = new Set((requirementSessions.get(sessionPickerRequirement)?.sessions || []).map(s => s.id));
-  $('#sessionPickerResults').innerHTML = sessionPickerItems.length ? sessionPickerItems.map(s => `<div class="session-picker-row"><div><strong>${esc(s.name)}</strong><div class="path">${esc(s.cwd)}</div><small>${esc(sessionTime(s.updatedAt))} · ${esc(s.id)}</small></div><button type="button" class="button small secondary" data-session-action="link" data-session="${esc(s.id)}" ${linked.has(s.id) ? 'disabled' : ''}>${linked.has(s.id) ? '已关联' : '关联'}</button></div>`).join('') : '<p class="session-empty">没有找到会话。可换一个标题搜索，或填写会话 ID。</p>';
+  $('#sessionPickerResults').innerHTML = window.WorkHubUI.sessionPicker(sessionPickerItems, [...linked]);
   $('#sessionPickerMore').hidden = !sessionPickerCursor;
 }
 

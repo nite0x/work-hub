@@ -85,15 +85,16 @@ func TestPreflightAllRepositoriesBeforeCreatingAnything(t *testing.T) {
 	good := repo(t, "good", "master")
 	bad := repo(t, "main-only", "main")
 	p1 := register(t, a, "Good", good)
+	testGit(t, bad, "branch", "codex/conflicting-branch")
 	p2 := register(t, a, "Main only", bad)
-	code, _, raw := create(t, a, p1, []string{p2}, "missing-master")
-	if code != 422 || !strings.Contains(string(raw), "master") {
-		t.Fatalf("expected missing-master failure: %d %s", code, raw)
+	code, _, raw := create(t, a, p1, []string{p2}, "conflicting-branch")
+	if code != 422 || !strings.Contains(string(raw), "已存在") {
+		t.Fatalf("expected branch conflict failure: %d %s", code, raw)
 	}
-	if _, err := os.Stat(filepath.Join(a.Workspace.Root, "missing-master")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(a.Workspace.Root, "conflicting-branch")); !os.IsNotExist(err) {
 		t.Fatal("workspace created before full preflight")
 	}
-	if _, err := workspace.Git(context.Background(), good, "rev-parse", "--verify", "refs/heads/codex/missing-master"); err == nil {
+	if _, err := workspace.Git(context.Background(), good, "rev-parse", "--verify", "refs/heads/codex/conflicting-branch"); err == nil {
 		t.Fatal("branch created despite failed preflight")
 	}
 	qs, _ := a.Workspace.Store.Requirements()

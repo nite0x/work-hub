@@ -10,6 +10,7 @@ import (
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/httpx"
+	"worktree-hub/internal/model"
 	"worktree-hub/internal/platform"
 )
 
@@ -20,12 +21,14 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		Text      string `json:"text"`
 		Project   string `json:"project_id"`
 		RequestID string `json:"request_id"`
+		Purpose   string `json:"purpose"`
+		MergeHead string `json:"merge_head"`
 	}
 	if !httpx.Decode(w, r, &input) {
 		return
 	}
 	input.Text = strings.TrimSpace(input.Text)
-	if input.Text == "" || len(input.Text) > 64000 || input.RequestID == "" || len(input.RequestID) > 100 {
+	if (input.Text == "" && input.Purpose != "merge_conflict") || len(input.Text) > 64000 || input.RequestID == "" || len(input.RequestID) > 100 || (input.Purpose != "" && input.Purpose != "merge_conflict") {
 		httpx.WriteError(w, 400, "请输入第一条消息（最多 64000 字节）并提供创建标识")
 		return
 	}
@@ -49,14 +52,19 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Workspace.Mu.Lock()
-	plan, err := a.plans.MakeLaunchPlan(r.Context(), id)
+	var plan model.LaunchPlan
+	if input.Purpose == "merge_conflict" {
+		plan, input.Text, err = a.mergeConflictPlan(r.Context(), id, input.Project, input.MergeHead)
+	} else {
+		plan, err = a.plans.MakeLaunchPlan(r.Context(), id)
+	}
 	q, qerr := a.Workspace.Store.Requirement(id)
 	a.Workspace.Mu.Unlock()
 	if err != nil || qerr != nil {
 		httpx.WriteError(w, 409, "任务尚未就绪或工作目录不可用")
 		return
 	}
-	if input.Project != "" && input.Project != q.PrimaryProjectID {
+	if input.Purpose == "" && input.Project != "" && input.Project != q.PrimaryProjectID {
 		found := false
 		for _, m := range q.Members {
 			if m.ProjectID == input.Project {

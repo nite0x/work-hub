@@ -15,7 +15,9 @@
   <link rel="stylesheet" href="/features/tasks/workspace.css">
   <link rel="stylesheet" href="/features/sessions/sessions.css">
   <link rel="stylesheet" href="/features/settings/settings.css">
+  <link rel="stylesheet" href="/ui/ui.css">
   <link rel="stylesheet" href="/chat/assistant.css">
+  <script src="/ui/ui.js" defer data-ui-bundle></script>
   <script src="/chat/loader.js" defer></script>
   <script src="/core/core.js" defer></script>
   <script src="/features/projects/projects.js" defer></script>
@@ -47,176 +49,31 @@
     <div class="sidebar-bottom"><span class="live-dot"></span><span>LOCAL FIRST<small id="platformLabel">本机工作台</small></span><span class="version">v0.2</span></div>
   </aside>
   <div class="shell">
-    <header class="topbar"><span class="breadcrumb">工作台 <span>/</span> <b id="breadcrumbTitle">任务</b></span><div class="sync"><span class="live-dot" id="syncDot"></span><span id="syncText" role="status">正在读取本地状态…</span><button class="icon-button" id="refreshButton" title="刷新 Git 状态" aria-label="刷新 Git 状态">↻</button></div></header>
+    <header class="topbar"><span class="breadcrumb">工作台 <span>/</span> <b id="breadcrumbTitle">任务</b></span><div class="sync"><span class="live-dot" id="syncDot"></span><span id="syncText" role="status">正在读取本地状态…</span><span id="refreshControl" class="shadcn-scope"></span></div></header>
     <main>
       <a href="#/requirements" class="workspace-back" id="backToRequirements" hidden>← 返回任务列表</a>
-      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。</p></div><button class="button primary" id="newButton"><span>＋</span> 创建任务</button></div>
-      <div id="offlineBanner" class="banner error" hidden></div>
+      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。</p></div><span id="newTaskButton" class="shadcn-scope"></span></div>
+      <div id="offlineFeedback" class="shadcn-scope"></div>
       <section id="stats" class="stats" aria-label="工作台统计"></section>
-      <section id="settingsPage" class="settings-page" aria-label="设置" hidden>
-        <section class="settings-card" aria-labelledby="environmentSettingsTitle">
-          <div class="settings-card-heading"><div><h2 id="environmentSettingsTitle">执行环境与工作区</h2><p>任务绑定一个执行环境，项目、终端与 AI 会话均在该环境中操作。任务列表统一展示全部环境。</p></div><div class="detail-actions"><button type="button" class="button small secondary" id="reconnectEnvironment" hidden>重新连接</button><button type="button" class="button small primary" id="addEnvironment">连接 WSL</button></div></div>
-          <label class="field">配置环境<select id="environmentSelect" aria-label="配置环境"><option value="local">本机</option></select><small id="environmentStatus" role="status"></small></label>
-          <dl class="settings-facts"><div><dt>当前执行环境</dt><dd id="settingsEnvironment">正在读取…</dd></div><div><dt>新任务工作区根目录</dt><dd><code id="settingsRoot">正在读取…</code></dd></div></dl>
-          <p class="settings-help">本机默认使用当前用户的 ~/workspaces，可通过启动参数 --root 指定；连接 WSL 时可指定该环境的根目录。已有任务沿用保存的路径。</p>
-        </section>
-        <section class="settings-card" aria-labelledby="terminalTitle">
-          <form id="terminalForm">
-            <div class="settings-card-heading"><div><h2 id="terminalTitle">终端工具</h2><p>Codex、Git 终端和在终端获取分支共用此设置，保存后立即生效。</p></div></div>
-            <fieldset id="terminalSettingsFields" disabled>
-              <label class="field">终端工具<select id="terminalKind" name="kind"><option value="auto">系统终端</option></select></label>
-              <div id="terminalCustomFields" hidden>
-                <label class="field">终端程序路径 <span class="required">*</span><input id="terminalPath" name="path" autocomplete="off" spellcheck="false"><small>填写终端可执行文件的完整路径，无需引号或参数。</small></label>
-                <label class="field">启动方式<select id="terminalStyle" name="style"><option value="otty">Otty</option><option value="windows-terminal">Windows Terminal</option><option value="command">其他终端（支持 -e 程序 参数）</option></select></label>
-              </div>
-              <p id="terminalHint" class="settings-help"></p>
-              <div id="terminalStatus" class="banner note" role="status"></div>
-              <div id="terminalError" class="form-error" role="alert" hidden></div>
-              <div class="settings-actions"><button type="submit" class="button primary">保存终端设置</button></div>
-            </fieldset>
-          </form>
-        </section>
-        <section class="settings-card" aria-labelledby="masterSyncTitle">
-          <form id="masterSyncForm">
-            <div class="settings-card-heading"><div><h2 id="masterSyncTitle">每日拉取 master</h2><p>更新当前执行环境中已登记项目的本地 master，为新任务准备基线。</p></div></div>
-            <fieldset id="masterSyncSettingsFields" disabled>
-              <label class="archive-filter"><input type="checkbox" id="masterSyncEnabled">启用每日自动拉取</label>
-              <label class="field settings-time">执行时间（北京时间 · Asia/Shanghai）<input type="time" id="masterSyncTime" required value="09:00"></label>
-              <p class="settings-help">服务需保持运行，关闭浏览器不影响执行；错过时间后启动会补跑当天一次。关闭定时拉取不取消已开始的执行。</p>
-              <details class="settings-details"><summary>更新规则与异常处理</summary><p>仅快进更新 master。未提交修改、分支分歧、缺少 master 或远端配置不明确时跳过；认证或网络失败会记录原因，其他项目继续处理。当天执行过后不重复运行，需重试时可使用项目的 Git 操作。</p></details>
-              <div id="masterSyncError" class="form-error" role="alert" hidden></div>
-              <div class="settings-actions"><button type="submit" class="button primary">保存每日拉取设置</button></div>
-            </fieldset>
-          </form>
-          <div class="settings-results"><h3>最近执行结果</h3><div id="masterSyncResults" aria-live="polite"></div></div>
-        </section>
-      </section>
+      <section id="settingsPage" class="settings-page shadcn-scope" aria-label="设置" hidden></section>
       <section class="content-panel" id="workContent">
-        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle">全部任务</div><div class="toolbar-actions"><label class="archive-filter" id="projectEnvironmentWrap" hidden>项目环境 <select id="projectEnvironment" aria-label="项目环境"><option value="local">本机</option></select></label><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索任务名称、分支…" aria-label="搜索"></label><label class="archive-filter" id="archiveFilterWrap"><input type="checkbox" id="archiveFilter">显示归档</label></div></div>
+        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><div class="shadcn-scope" id="archiveFilterWrap"></div></div></div>
         <div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div>
       </section>
       <footer class="page-footer"><span>所有分支和修改状态直接读取本地 Git</span><span id="rootPath"></span></footer>
     </main>
   </div>
-  <dialog id="environmentDialog" aria-labelledby="environmentTitle">
-    <form id="environmentForm">
-      <div class="dialog-header"><h2 id="environmentTitle">连接 WSL 环境</h2><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-      <p class="dialog-description">应用自动部署并启动辅助程序。Git 和文件操作在所选 WSL 用户内执行，任务记录保存在本机。</p>
-      <label class="field">发行版<select id="environmentDistro" required></select></label>
-      <label class="field">Linux 用户<input id="environmentUser" autocomplete="off" placeholder="留空使用发行版默认用户"></label>
-      <label class="field">新任务的工作区根目录<input id="environmentRoot" autocomplete="off" placeholder="留空使用该用户的 ~/workspaces"></label>
-      <label class="archive-filter"><input type="checkbox" id="environmentImport">导入该用户原有的 Work Hub 项目与任务记录</label>
-      <p class="dialog-description">导入会复制一份当前记录到 Windows；项目和 worktree 保留原路径。之后请通过桌面端维护这些任务。</p>
-      <div id="environmentError" class="form-error" role="alert" hidden></div>
-      <div class="dialog-footer"><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary" id="connectEnvironment">连接并准备环境</button></div>
-    </form>
-  </dialog>
-  <dialog id="projectDialog" aria-labelledby="projectDialogTitle">
-    <form id="projectForm">
-      <div class="dialog-header"><div><div class="eyebrow">ADD PROJECT</div><h2 id="projectDialogTitle">添加项目</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-      <p class="dialog-description">登记仓库主目录，自动发现它已有的全部 worktree。</p>
-      <label class="field">项目所在环境<select id="projectEnvironmentSelect" required></select><small>仓库路径和 Git 操作均在此环境中执行。</small></label>
-      <label class="field">仓库目录 <span class="required">*</span><input name="path" required autocomplete="off" placeholder="填写仓库主目录的绝对路径"><small>填写当前执行环境中的绝对路径；macOS 例如 /Users/用户名/projects/app，Windows 例如 D:\projects\app，Linux/WSL 例如 /home/用户名/projects/app。</small></label>
-      <label class="field">项目名称<input name="name" maxlength="80" placeholder="留空则使用仓库目录名"><small>名称会用于任务中的项目目录，建议使用简短、可辨识的名称。</small></label>
-      <div class="form-error" id="projectError" role="alert" hidden></div>
-      <div class="dialog-footer"><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary">添加并扫描</button></div>
-    </form>
-  </dialog>
-  <dialog id="requirementDialog" class="wide-dialog" aria-labelledby="requirementDialogTitle">
-    <form id="requirementForm">
-      <div class="dialog-header"><div><div class="eyebrow">NEW TASK</div><h2 id="requirementDialogTitle">创建任务</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-      <p class="dialog-description">围绕一项开发目标，选择主项目与参与项目，准备各项目的独立工作目录。</p>
-      <label class="field">任务执行环境 <span class="required">*</span><select id="requirementEnvironment" required></select><small>只能关联此环境中的项目，创建后任务环境固定。</small></label>
-      <div id="masterPreparation" class="banner note" hidden></div>
-      <div class="form-grid"><label class="field">任务名称 <span class="required">*</span><input name="name" required maxlength="100" placeholder="例如：订单审批流程"></label><label class="field">目录标识 <span class="required">*</span><input name="slug" required maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}" placeholder="order-approval"><small>仅字母、数字、短横线或下划线，创建后固定。</small></label></div>
-      <label class="field">任务说明<textarea name="description" rows="3" maxlength="6000" placeholder="描述开发目标、涉及的修改和完成标准，Codex 会获得这份说明。"></textarea></label>
-      <div class="form-grid"><label class="field">新分支 <span class="required">*</span><input name="branch" required placeholder="codex/order-approval"><small>所有选中仓库使用同一个新分支名。</small></label><div class="field">创建基线<div class="base-reference"><span class="branch-icon">⑂</span><strong>master</strong><span class="badge neutral">本地分支</span></div><small>使用本地 master 当前提交，不自动拉取远端。</small></div></div>
-      <label class="field">主项目 <span class="required">*</span><select name="primary_project_id" id="primaryProject" required></select><small>Codex 从主项目 worktree 启动，其他项目作为附加目录。</small></label>
-      <div class="field"><div class="detail-top"><span>参与项目</span><button type="button" class="button small secondary" id="registerNewTaskProject">＋ 登记新项目</button></div><div id="projectPicker" class="project-picker"></div></div>
-      <div class="workspace-preview"><div class="preview-label">即将创建的工作目录</div><pre id="workspacePreview"></pre></div>
-      <div class="form-error" id="requirementError" role="alert" hidden></div>
-      <div class="dialog-footer"><span class="footer-note">创建前检查全部仓库，已有目录和分支不会被覆盖。</span><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary" id="requirementSubmit">创建任务</button></div>
-    </form>
-  </dialog>
-  <dialog id="requirementProjectsDialog" class="wide-dialog" aria-labelledby="requirementProjectsTitle">
-    <form id="requirementProjectsForm">
-      <div class="dialog-header"><div><div class="eyebrow">TASK PROJECTS</div><h2 id="requirementProjectsTitle">添加项目</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-      <p class="dialog-description" id="requirementProjectsDescription"></p>
-      <div class="field"><div class="detail-top"><span>选择尚未关联的项目</span><button type="button" class="button small secondary" id="registerRequirementProject">＋ 登记新项目</button></div><div id="requirementProjectPicker" class="project-picker"></div></div>
-      <div class="workspace-preview"><div class="preview-label">即将新增的工作目录</div><pre id="requirementProjectsPreview"></pre></div>
-      <div class="form-error" id="requirementProjectsError" role="alert" hidden></div>
-      <div class="dialog-footer"><span class="footer-note">沿用任务分支，从各项目的本地 master 创建。</span><button type="button" class="button secondary close-dialog">取消</button><button type="submit" class="button primary" id="requirementProjectsSubmit" disabled>添加项目</button></div>
-    </form>
-  </dialog>
-  <dialog id="worktreeDialog" class="wide-dialog" aria-labelledby="worktreeTitle">
-    <div class="dialog-header"><div><div class="eyebrow">NEW WORKTREE</div><h2 id="worktreeTitle">创建 Worktree</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-    <p class="dialog-description" id="worktreeProject"></p>
-    <div id="worktreeLoading" class="loading" role="status">正在读取分支…</div>
-    <div id="worktreeError" class="form-error" role="alert" hidden></div>
-    <form id="worktreeForm" hidden>
-      <label class="field">工作标识 <span class="required">*</span><input id="worktreeSlug" name="slug" required maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}" placeholder="例如：order-approval"><small>用于总目录名；多个项目使用相同标识可集中到同一目录。已关联任务的目录，请在对应任务页面管理。</small></label>
-      <label class="field">分支方式<select id="worktreeMode" name="mode"><option value="new">新建分支</option><option value="existing">使用已有本地分支</option></select></label>
-      <div id="worktreeNewFields" class="form-grid"><label class="field">新分支名称 <span class="required">*</span><input id="worktreeBranch" name="branch" required maxlength="160" placeholder="codex/order-approval"><small>默认 codex/工作标识，可填写自己的分支名。</small></label><label class="field">来源分支 <span class="required">*</span><select id="worktreeSource" name="source" required></select></label></div>
-      <label class="field" id="worktreeExistingField" hidden>已有本地分支 <span class="required">*</span><select id="worktreeExisting" disabled required></select><small>已被其他 worktree 占用的分支不可重复检出。</small></label>
-      <div id="worktreeSourceNote" class="banner note"></div>
-      <div class="workspace-preview"><div class="preview-label">即将创建的 Worktree 目录</div><pre id="worktreePath"></pre></div>
-      <p class="dialog-description">独立创建后显示为“未关联任务”。创建新目录会保留原目录的分支和未提交修改。</p>
-      <div class="dialog-footer"><button type="button" class="button secondary close-dialog">取消</button><button id="worktreeSubmit" type="submit" class="button primary">创建 Worktree</button></div>
-    </form>
-  </dialog>
-  <dialog id="gitDialog" class="git-dialog" aria-labelledby="gitTitle">
-    <div class="dialog-header"><div><div class="eyebrow">GIT OPERATIONS</div><h2 id="gitTitle">Git 操作</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-    <div id="gitProgress" class="banner note git-progress" role="status" hidden></div>
-    <div class="form-error" id="gitError" role="alert" hidden></div>
-    <div id="gitAuthHelp" class="banner note" hidden><span>在终端完成一次登录，接入的凭证助手会保存并供页面复用。</span><button type="button" class="button primary small" data-action="git-fetch-terminal">在终端登录并获取分支 ↗</button></div>
-    <div id="gitResult" class="git-result" role="status" hidden><strong id="gitResultTitle"></strong><pre id="gitOutput"></pre></div>
-    <div id="gitContent"></div>
-    <div class="dialog-footer"><button class="button secondary close-dialog" type="button">关闭</button></div>
-  </dialog>
-  <dialog id="commandDialog" class="wide-dialog" aria-labelledby="commandTitle"><div class="dialog-header"><div><div class="eyebrow">CODEX LAUNCH</div><h2 id="commandTitle">启动命令</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><p class="dialog-description">在任务所属环境的终端执行。主项目为工作目录，其他项目通过 --add-dir 加入。</p><textarea id="commandText" class="command-text" rows="7" readonly aria-label="Codex 启动命令"></textarea><div class="dialog-footer"><button class="button secondary close-dialog">关闭</button><button class="button primary" id="copyCommand">复制命令</button></div></dialog>
+  <dialog id="environmentDialog" class="shadcn-scope" aria-labelledby="environmentTitle"></dialog>
+  <dialog id="projectDialog" class="shadcn-scope" aria-labelledby="projectDialogTitle"></dialog>
+  <dialog id="requirementDialog" class="wide-dialog shadcn-scope" aria-labelledby="requirementDialogTitle"></dialog>
+  <dialog id="requirementProjectsDialog" class="wide-dialog shadcn-scope" aria-labelledby="requirementProjectsTitle"></dialog>
+  <dialog id="worktreeDialog" class="wide-dialog shadcn-scope" aria-labelledby="worktreeTitle"></dialog>
+  <dialog id="gitDialog" class="git-dialog shadcn-scope" aria-labelledby="gitTitle"></dialog>
+  <dialog id="commandDialog" class="wide-dialog shadcn-scope" aria-labelledby="commandTitle" aria-describedby="commandDescription"></dialog>
   <div class="busy-panel" id="busyPanel" role="status" hidden><span class="spinner"></span><div><strong id="busyTitle">正在创建任务</strong><small>请稍候，正在操作本地仓库…</small></div></div>
-  <div id="toast" class="toast" role="status" hidden></div>
-  <dialog id="sessionDialog" class="wide-dialog" aria-labelledby="sessionDialogTitle">
-    <div class="dialog-header"><div><div class="eyebrow">CODEX SESSIONS</div><h2 id="sessionDialogTitle">关联已有会话</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div>
-    <p class="dialog-description">选择当前 WSL 用户的本地 Codex 会话，或填写会话 ID。继续时会进入会话原工作目录，并加入本任务的各项目目录。</p>
-    <form id="sessionLinkForm" class="session-search"><label class="field">会话 ID<input name="session_id" required maxlength="200" autocomplete="off" placeholder="粘贴会话 ID"></label><button class="button secondary" type="submit">关联 ID</button></form>
-    <form id="sessionSearchForm" class="session-search"><label class="field">按标题查找<input name="search" autocomplete="off" placeholder="搜索本地会话标题"></label><button class="button secondary" type="submit">搜索</button></form>
-    <div id="sessionPickerError" class="form-error" role="alert" hidden></div>
-    <div id="sessionPickerResults" aria-live="polite"></div>
-    <div class="dialog-footer"><button class="button secondary" type="button" id="sessionPickerMore" hidden>加载更多</button><button class="button secondary close-dialog" type="button">关闭</button></div>
-  </dialog>
-  <dialog id="sessionCommandOutputDialog" class="session-command-output-dialog" aria-labelledby="sessionCommandOutputTitle">
-    <div class="dialog-header"><div><div class="eyebrow">COMMAND OUTPUT</div><h2 id="sessionCommandOutputTitle">命令输出</h2></div><button type="button" id="closeSessionCommandOutput" class="icon-button" aria-label="关闭命令输出" autofocus>×</button></div>
-    <pre id="sessionCommandOutputCommand" class="history-command-line"></pre>
-    <div id="sessionCommandOutputMeta" class="session-command-output-meta"></div>
-    <pre id="sessionCommandOutputText" class="session-command-output-text" tabindex="0" aria-label="命令输出内容"></pre>
-    <p class="session-command-output-hint">Esc 关闭 · 输出独立滚动，保留对话位置</p>
-  </dialog>
-  <aside id="sessionHistoryPanel" class="session-history-panel" role="dialog" aria-modal="false" aria-labelledby="sessionHistoryTitle" hidden>
-    <div id="assistantChatRoot"></div>
-    <header class="session-history-header">
-      <div class="dialog-header"><div><div class="eyebrow" id="sessionHistoryEyebrow">SESSION HISTORY</div><h2 id="sessionHistoryTitle" tabindex="-1">会话详情</h2></div><button type="button" id="closeSessionHistory" class="icon-button" aria-label="关闭会话详情">×</button></div>
-      <div id="sessionHistoryMeta" class="session-history-meta"></div>
-      <label id="newSessionProjectField" class="session-project-field" hidden>工作项目<select id="newSessionProject" aria-label="工作项目"></select></label>
-      <div class="session-history-toolbar"><span id="sessionHistoryStatus" role="status" aria-live="polite"></span><div><button type="button" class="button small secondary" id="refreshSessionHistory">刷新详情</button><button type="button" class="button small primary" id="resumeHistorySession" data-session-action="resume">在终端继续 ↗</button></div></div>
-      <section id="sessionHistoryAttention" class="session-history-attention" role="alert" aria-live="polite" tabindex="0" aria-label="终端待确认事项" hidden></section>
-    </header>
-    <div id="sessionHistoryScroll" class="session-history-scroll" tabindex="0" aria-label="会话历史记录">
-      <div class="form-error" id="sessionHistoryError" role="alert" hidden></div>
-      <button type="button" class="button small secondary history-more" id="loadOlderHistory" hidden>加载更早记录</button>
-      <div id="sessionHistoryEntries"></div>
-      <div id="sessionChatLiveEntries"></div>
-    </div>
-    <div id="sessionChatApprovals" class="session-chat-approvals" aria-live="polite"></div>
-    <form id="sessionChatForm" class="session-chat-form">
-      <div id="sessionChatStatus" role="status" aria-live="polite"></div>
-      <p id="sessionHandoffNotice" class="session-description" role="status" hidden></p>
-      <button type="button" id="handoffSessionChat" class="button small secondary" hidden>切换到侧栏（等本轮结束）</button>
-      <div id="sessionChatError" class="form-error" role="alert" hidden></div>
-      <label for="sessionChatInput" id="sessionChatLabel" class="quiet">继续这个会话</label>
-      <textarea id="sessionChatInput" rows="2" maxlength="32000" placeholder="补充说明、询问进展，或交代下一步…" aria-label="会话消息"></textarea>
-      <div class="session-chat-actions"><small>Ctrl+Enter 发送 · 关闭侧栏后仍会继续运行</small><div><button type="button" id="stopSessionChat" class="button small secondary" disabled>停止</button><button type="submit" id="sendSessionChat" class="button small primary" disabled>发送</button></div></div>
-    </form>
-  </aside>
+  <div id="toast" class="toast shadcn-scope" role="status" hidden></div>
+  <dialog id="sessionDialog" class="wide-dialog shadcn-scope" aria-labelledby="sessionDialogTitle"></dialog>
+  <dialog id="sessionCommandOutputDialog" class="session-command-output-dialog shadcn-scope" aria-labelledby="sessionCommandOutputTitle"></dialog>
+  <aside id="sessionHistoryPanel" class="session-history-panel shadcn-scope" role="dialog" aria-modal="false" aria-labelledby="sessionHistoryTitle" hidden></aside>
 </body>
 </html>

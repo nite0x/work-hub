@@ -17,7 +17,8 @@ import (
 
 func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ProjectIDs []string `json:"project_ids"`
+		ProjectIDs []string          `json:"project_ids"`
+		Members    []MemberSelection `json:"members"`
 	}
 	if !httpx.Decode(w, r, &in) {
 		return
@@ -48,6 +49,14 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 		httpx.DbError(w, err)
 		return
 	}
+	selections, err := selectionsByProject(in.Members)
+	if err != nil {
+		httpx.WriteError(w, 400, err.Error())
+		return
+	}
+	for _, selection := range in.Members {
+		in.ProjectIDs = append(in.ProjectIDs, selection.ProjectID)
+	}
 	existing := map[string]bool{}
 	for _, m := range q.Members {
 		existing[m.ProjectID] = true
@@ -69,21 +78,16 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 		selected[id] = true
-		path := platform.JoinWorkspacePath(q.Path, p.Folder)
-		if !platform.Within(q.Path, path) {
-			httpx.WriteError(w, 422, "worktree 路径越过工作区目录")
-			return
+		branch := q.Branch
+		if branch == "" {
+			branch = "codex/" + q.Slug
 		}
-		if _, err := workspace.Stat(r.Context(), path, false); !errors.Is(err, os.ErrNotExist) {
-			problems = append(problems, p.Name+"：工作目录已存在或无法检查，不能覆盖："+path)
-			continue
-		}
-		base, err := preflight(r.Context(), p, q.Branch)
+		m, err := selectedMember(r.Context(), p, q.Path, branch, selections[id])
 		if err != nil {
 			problems = append(problems, p.Name+"："+err.Error())
 			continue
 		}
-		added = append(added, model.Member{ProjectID: id, ProjectName: p.Name, Path: path, BaseCommit: base, State: "pending"})
+		added = append(added, m)
 	}
 	if len(selected) == 0 || len(q.Members)+len(selected) > 30 {
 		httpx.WriteError(w, 400, "请选择要添加的项目，单个任务最多包含 30 个项目")
@@ -100,7 +104,7 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 	}
 	defer tx.Rollback()
 	for _, m := range added {
-		if _, err := tx.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state) VALUES(?,?,?,?,?)`, q.ID, m.ProjectID, m.Path, m.BaseCommit, m.State); err != nil {
+		if _, err := tx.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state,mode,base_ref,branch) VALUES(?,?,?,?,?,?,?,?)`, q.ID, m.ProjectID, m.Path, m.BaseCommit, m.State, m.Mode, m.BaseRef, m.Branch); err != nil {
 			httpx.DbError(w, err)
 			return
 		}
@@ -134,9 +138,9 @@ func appendProjectsBriefContext(ctx context.Context, q model.Requirement, added 
 		return err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n\n## 新增参与项目\n\n任务分支：%s\n基线：各项目添加时的本地 master\n\n", q.Branch)
+	b.WriteString("\n\n## 新增参与项目\n\n")
 	for _, m := range added {
-		fmt.Fprintf(&b, "- %s（参与项目）：%s\n", m.ProjectName, m.Path)
+		fmt.Fprintf(&b, "- %s（参与项目）：%s\n  %s\n", m.ProjectName, m.Path, memberDescription(m))
 	}
 	return workspace.Write(ctx, platform.JoinWorkspacePath(q.Path, "BRIEF.md"), []byte(b.String()), os.O_WRONLY|os.O_APPEND, 0)
 }

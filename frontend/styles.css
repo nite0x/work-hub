@@ -1,0 +1,62 @@
+/* No Preflight: the existing task, project and session pages retain their CSS.
+   Utilities win over legacy element selectors only where components use them. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none) important;
+@source "./";
+
+/* Native hidden state must beat important display utilities on feedback/fields. */
+@layer base {
+  [hidden] { display: none !important; }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Scope shadcn tokens: legacy --accent/--muted have different meanings. */
+.shadcn-scope {
+  --radius: 0.625rem;
+  --background: #fff;
+  --foreground: #334155;
+  --card: #fff;
+  --card-foreground: #334155;
+  --primary: #5964cf;
+  --primary-foreground: #fff;
+  --secondary: #f1f4fc;
+  --secondary-foreground: #454b9b;
+  --muted: #f2f3f9;
+  --muted-foreground: #64748b;
+  --accent: #e4eaff;
+  --accent-foreground: #454b9b;
+  --destructive: #a64f3b;
+  --destructive-foreground: #fff;
+  --border: #e2e6f0;
+  --input: #d7d9e6;
+  --ring: #818cf8;
+}
+
+/* Tailwind's border utilities normally rely on Preflight for border-style. */
+.shadcn-scope:where([data-slot]),
+.shadcn-scope :where([data-slot]) { border-style: solid; border-width: 0; border-color: var(--border); }
+.shadcn-scope :where(button) { background-color: transparent; }

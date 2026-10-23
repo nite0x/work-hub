@@ -21,7 +21,36 @@ export function convertEntry(entry: Entry): ThreadMessageLike {
   if (entry.kind === "user") return { id, role: "user", content: [{type: "text", text: cleanText(entry.text)}] };
   const status = entry.status === "inProgress" ? {type: "running" as const} : {type: "complete" as const, reason: "stop" as const};
   if (entry.kind === "assistant") return { id, role: "assistant", status, content: [{type: "text", text: cleanText(entry.text)}] };
-  return { id, role: "assistant", status, content: [{type: "tool-call", toolCallId: id, toolName: entry.kind, args: {entry: {...entry}}, argsText: "", ...(entry.status !== "inProgress" ? {result: {status: entry.status}} : {})}] };
+  // Feed the official ToolFallback its normal args/result shape. Output is a
+  // result, never a command argument, and remains available after expansion.
+  const args = entry.kind === "change"
+    ? {changes: cleanText(entry.text), ...(entry.cwd ? {cwd: cleanText(entry.cwd)} : {})}
+    : {command: cleanText(entry.command), ...(entry.cwd ? {cwd: cleanText(entry.cwd)} : {})};
+  const result = {status: entry.status || "unknown", ...(entry.output != null ? {output: cleanText(entry.output)} : {}), ...(entry.exit_code != null ? {exit_code: entry.exit_code} : {}), ...(entry.duration_ms != null ? {duration_ms: entry.duration_ms} : {})};
+  return { id, role: "assistant", status, content: [{type: "tool-call", toolCallId: id, toolName: entry.kind, args, argsText: JSON.stringify(args, null, 2), ...(entry.status !== "inProgress" || entry.output != null ? {result} : {}), ...(entry.status === "inProgress" ? {isPreliminary: true} : {}), ...(entry.status === "failed" ? {isError: true} : {})}] };
+}
+
+// One assistant message per turn lets the registry group adjacent tool calls,
+// show one action bar and lay out text/tool parts as a continuous reply.
+export function convertEntries(entries: Entry[]): ThreadMessageLike[] {
+  const messages: ThreadMessageLike[] = [];
+  let previousTurn: string | undefined;
+  for (const entry of entries) {
+    const message = convertEntry(entry);
+    const previous = messages.at(-1);
+    if (previous?.role === "assistant" && message.role === "assistant" && previousTurn === entry.turn_id) {
+      const content = [...(typeof previous.content === "string" ? [{type: "text" as const, text: previous.content}] : previous.content)];
+      const parts = typeof message.content === "string" ? [{type: "text" as const, text: message.content}] : message.content;
+      for (const part of parts) {
+        const last = content.at(-1);
+        if (last?.type === "text" && part.type === "text") content[content.length - 1] = {...last, text: last.text + "\n\n" + part.text};
+        else content.push(part);
+      }
+      messages[messages.length - 1] = {...previous, content, status: previous.status?.type === "running" || message.status?.type === "running" ? {type: "running"} : message.status};
+    } else messages.push(message);
+    previousTurn = entry.turn_id;
+  }
+  return messages;
 }
 export const idleChat = (): ChatState => ({status: "idle", busy: false, entries: [], approvals: []});
 

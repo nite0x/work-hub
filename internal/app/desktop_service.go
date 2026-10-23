@@ -109,7 +109,7 @@ func readDesktopService(dataDir string) (desktopServiceInfo, error) {
 var errDesktopConflict = errors.New("后台配置不兼容")
 
 func compatibleDesktopService(info desktopServiceInfo, dataDir, root string, rootExplicit bool) error {
-	if info.Protocol != desktopProtocol || info.Version != BuildVersion || !info.ReadOnly {
+	if info.Protocol != desktopProtocol || info.Version != BuildVersion {
 		return fmt.Errorf("%w：请先通过原版本的 --stop 安全停止后台，再打开桌面端", errDesktopConflict)
 	}
 	if !info.Ready {
@@ -302,10 +302,16 @@ func (a *App) stopServiceHandler(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		for _, app := range locked {
 			app.Workspace.Mu.Unlock()
+			app.Workspace.GitActivity.Unlock()
 		}
 	}()
 	for _, app := range apps {
+		if !app.Workspace.GitActivity.TryLock() {
+			httpx.WriteError(w, 409, "有 Git 操作正在执行，请完成后重试")
+			return
+		}
 		if !app.Workspace.Mu.TryLock() {
+			app.Workspace.GitActivity.Unlock()
 			httpx.WriteError(w, 409, "有项目操作正在执行，请完成后重试")
 			return
 		}

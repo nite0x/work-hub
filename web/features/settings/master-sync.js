@@ -1,11 +1,7 @@
 'use strict';
 
-const masterSyncLabels = { pending: '等待执行', updated: '已更新', current: '已是最新', skipped: '已跳过', failed: '失败' };
-
 function masterSyncResults(run) {
-  if (!run) return '<p class="quiet">尚未执行每日拉取。</p>';
-  const status = { running: '执行中', completed: '执行完成', interrupted: '执行被中断，未完成项目请手动检查' }[run.status] || run.status;
-  return `<p>${esc(run.date)} · ${esc(status)}</p><div class="table-scroll"><table><thead><tr><th>项目</th><th>结果</th><th>说明</th></tr></thead><tbody>${run.results.map(result => `<tr><td>${esc(result.project_name)}</td><td>${esc(masterSyncLabels[result.status] || result.status)}</td><td>${esc(result.message)}</td></tr>`).join('')}</tbody></table></div>`;
+  return window.WorkHubUI.syncResults(run);
 }
 
 function renderMasterSync() {

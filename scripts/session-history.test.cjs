@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+require('tsx/cjs');
+const { workspaceUI } = require('../frontend/workspace/renderers.tsx');
 
 function harness() {
   const elements = new Map();
@@ -19,7 +21,7 @@ function harness() {
     state: { requirements: [{ id: 'req', state: 'ready' }] },
     requirementSessions: new Map(),
     document: { hidden: false, addEventListener(event, handler) { listeners.set(event, handler); }, querySelector() { return null; } },
-    window: { addEventListener() {} },
+    window: { WorkHubUI: workspaceUI, addEventListener() {} },
     setInterval(callback, delay) { timers.set(++timerID, { callback, delay }); return timerID; },
     clearInterval(id) { timers.delete(id); },
     esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),

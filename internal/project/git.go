@@ -87,19 +87,27 @@ func ScanWorktreeStatus(ctx context.Context, v model.Worktree) model.Worktree {
 		v.StatusUpdatedAt = model.Now()
 		return v
 	}
-	s, err := workspace.Git(ctx, v.Path, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	s, err := workspace.ReadGitState(ctx, v.Path)
 	if err != nil {
 		v.Error = err.Error()
 		return v
 	}
-	v.Dirty = DirtyCount(s)
-	comparison, err := workspace.Git(ctx, v.Path, "rev-list", "--left-right", "--count", "refs/heads/master...HEAD")
+	v.Branch, v.Head, v.Detached, v.Dirty = s.Branch, s.Head, s.Detached, s.Dirty
+	v.Upstream, v.SyncAvailable, v.SyncAhead, v.SyncBehind = s.Upstream, s.SyncAvailable, s.SyncAhead, s.SyncBehind
+	v.Operation, v.MergeHead, v.Conflicts = s.Operation, s.MergeHead, s.Conflicts
+	ref := workspace.DefaultBranchSource(ctx, v.Path)
+	if ref == "HEAD" {
+		v.StatusUpdatedAt = model.Now()
+		return v
+	}
+	comparison, err := workspace.Git(ctx, v.Path, "rev-list", "--left-right", "--count", ref+"...HEAD")
 	if err == nil {
 		parts := strings.Fields(comparison)
 		if len(parts) == 2 {
 			v.Behind, _ = strconv.Atoi(parts[0])
 			v.Ahead, _ = strconv.Atoi(parts[1])
 			v.CompareAvailable = true
+			v.ComparisonRef = strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/remotes/")
 		}
 	}
 	v.StatusUpdatedAt = model.Now()

@@ -5,6 +5,7 @@
 *.db-wal
 /rsrc_windows_*.syso
 /node_modules/
+/web/ui/
 /src-tauri/target/
 /src-tauri/gen/
 /src-tauri/binaries/

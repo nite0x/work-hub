@@ -16,12 +16,13 @@ import (
 )
 
 type CreateRequirement struct {
-	Name             string   `json:"name"`
-	Slug             string   `json:"slug"`
-	Description      string   `json:"description"`
-	Branch           string   `json:"branch"`
-	PrimaryProjectID string   `json:"primary_project_id"`
-	ProjectIDs       []string `json:"project_ids"`
+	Name             string            `json:"name"`
+	Slug             string            `json:"slug"`
+	Description      string            `json:"description"`
+	Branch           string            `json:"branch"`
+	PrimaryProjectID string            `json:"primary_project_id"`
+	ProjectIDs       []string          `json:"project_ids"`
+	Members          []MemberSelection `json:"members"`
 }
 
 func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Request) {
@@ -45,14 +46,6 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	if in.Branch == "" {
 		in.Branch = "codex/" + in.Slug
 	}
-	if len(in.Branch) > 160 || strings.Contains(in.Branch, "@{") {
-		httpx.WriteError(w, 400, "分支名无效")
-		return
-	}
-	if _, err := workspace.Git(r.Context(), a.Workspace.Root, "check-ref-format", "refs/heads/"+in.Branch); err != nil {
-		httpx.WriteError(w, 400, "分支名无效："+err.Error())
-		return
-	}
 	ps, err := a.Workspace.Store.ProjectMap()
 	if err != nil {
 		httpx.DbError(w, err)
@@ -72,6 +65,21 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 			}
 			ids = append(ids, id)
 			seen[id] = true
+		}
+	}
+	selections, err := selectionsByProject(in.Members)
+	if err != nil {
+		httpx.WriteError(w, 400, err.Error())
+		return
+	}
+	for _, selection := range in.Members {
+		if _, ok := ps[selection.ProjectID]; !ok {
+			httpx.WriteError(w, 400, "参与项目不存在，请刷新页面")
+			return
+		}
+		if !seen[selection.ProjectID] {
+			ids = append(ids, selection.ProjectID)
+			seen[selection.ProjectID] = true
 		}
 	}
 	if len(ids) > 30 {
@@ -101,17 +109,23 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	problems := []string{}
 	for _, id := range ids {
 		p := ps[id]
-		path := platform.JoinWorkspacePath(directory, p.Folder)
-		base, err := preflight(r.Context(), p, in.Branch)
+		m, err := selectedMember(r.Context(), p, directory, in.Branch, selections[id])
 		if err != nil {
 			problems = append(problems, p.Name+"："+err.Error())
 			continue
 		}
-		q.Members = append(q.Members, model.Member{ProjectID: id, ProjectName: p.Name, Path: path, BaseCommit: base, State: "pending"})
+		q.Members = append(q.Members, m)
 	}
 	if len(problems) > 0 {
 		httpx.WriteJSON(w, 422, map[string]any{"error": "创建前检查未通过，未创建任何 worktree", "details": problems})
 		return
+	}
+	hasNew := false
+	for _, m := range q.Members {
+		hasNew = hasNew || m.Mode == "new"
+	}
+	if !hasNew {
+		q.Branch = ""
 	}
 	if err := workspace.Mkdir(r.Context(), directory, 0755, false); err != nil {
 		httpx.WriteError(w, 409, "无法创建工作区目录："+err.Error())
@@ -127,7 +141,7 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	_, err = tx.Exec(`INSERT INTO requirements(id,name,slug,description,branch,path,primary_project_id,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, q.ID, q.Name, q.Slug, q.Description, q.Branch, q.Path, q.PrimaryProjectID, q.State, q.CreatedAt)
 	if err == nil {
 		for _, m := range q.Members {
-			_, err = tx.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state) VALUES(?,?,?,?,?)`, q.ID, m.ProjectID, m.Path, m.BaseCommit, m.State)
+			_, err = tx.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state,mode,base_ref,branch) VALUES(?,?,?,?,?,?,?,?)`, q.ID, m.ProjectID, m.Path, m.BaseCommit, m.State, m.Mode, m.BaseRef, m.Branch)
 			if err != nil {
 				break
 			}
@@ -146,25 +160,6 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	httpx.WriteJSON(w, 201, q)
-}
-
-func preflight(ctx context.Context, p model.Project, branch string) (string, error) {
-	common, err := workspace.Git(ctx, p.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return "", err
-	}
-	resolved, err := workspace.Eval(ctx, strings.TrimSpace(common))
-	if err != nil || resolved != p.CommonDir {
-		return "", fmt.Errorf("仓库位置已变更，请检查登记路径")
-	}
-	base, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "refs/heads/master^{commit}")
-	if err != nil {
-		return "", fmt.Errorf("缺少本地 master 分支，请先准备 master；不会自动使用 main 或其他分支")
-	}
-	if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
-		return "", fmt.Errorf("分支 %s 已存在，请使用新分支名", branch)
-	}
-	return strings.TrimSpace(base), nil
 }
 
 func VerifyMember(ctx context.Context, p model.Project, m model.Member, branch string) error {
@@ -190,12 +185,29 @@ func VerifyMember(ctx context.Context, p model.Project, m model.Member, branch s
 	if err != nil || commonPath != p.CommonDir {
 		return fmt.Errorf("该路径属于其他仓库")
 	}
+	if m.Mode == "project" || m.Mode == "worktree" {
+		raw, err := workspace.Git(ctx, p.Path, "worktree", "list", "--porcelain", "-z")
+		if err != nil {
+			return err
+		}
+		for _, field := range strings.Split(raw, "\x00") {
+			if strings.HasPrefix(field, "worktree ") && platform.SameWorkspacePath(strings.TrimPrefix(field, "worktree "), m.Path) {
+				return nil
+			}
+		}
+		return fmt.Errorf("该目录不是此项目的已登记 worktree")
+	}
+	branch = memberBranch(m, branch)
 	actual, err := workspace.Git(ctx, m.Path, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || strings.TrimSpace(actual) != branch {
 		return fmt.Errorf("实际分支与任务分支 %s 不一致，请恢复后再启动", branch)
 	}
-	if _, err := workspace.Git(ctx, m.Path, "merge-base", "--is-ancestor", m.BaseCommit, "HEAD"); err != nil {
-		return fmt.Errorf("worktree 已偏离创建时的 master 基线，请检查后处理")
+	// The creation baseline is a recovery guard, not a restriction on later
+	// explicit branch switches. Keep it intact as historical task metadata.
+	if m.State != "ready" {
+		if _, err := workspace.Git(ctx, m.Path, "merge-base", "--is-ancestor", m.BaseCommit, "HEAD"); err != nil {
+			return fmt.Errorf("worktree 已偏离创建时记录的基线，请检查后处理")
+		}
 	}
 	return nil
 }
@@ -224,6 +236,8 @@ func (a *Service) PrepareMembers(ctx context.Context, q *model.Requirement, ps m
 		var createErr error
 		if briefErr != nil {
 			createErr = briefErr
+		} else if m.Mode == "project" || m.Mode == "worktree" {
+			createErr = VerifyMember(ctx, p, *m, "")
 		} else if !platform.Within(q.Path, m.Path) {
 			createErr = fmt.Errorf("worktree 路径越过工作区目录")
 		} else if _, err := workspace.Stat(ctx, m.Path, false); err == nil {
@@ -231,10 +245,10 @@ func (a *Service) PrepareMembers(ctx context.Context, q *model.Requirement, ps m
 			createErr = VerifyMember(ctx, p, *m, q.Branch)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			createErr = err
-		} else if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+q.Branch); err == nil {
-			createErr = fmt.Errorf("分支 %s 已存在但 worktree 不存在，请先检查残留分支", q.Branch)
+		} else if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+memberBranch(*m, q.Branch)); err == nil {
+			createErr = fmt.Errorf("分支 %s 已存在但 worktree 不存在，请先检查残留分支", memberBranch(*m, q.Branch))
 		} else {
-			_, createErr = workspace.Git(ctx, p.Path, "worktree", "add", "-b", q.Branch, "--", m.Path, m.BaseCommit)
+			_, createErr = workspace.Git(ctx, p.Path, "worktree", "add", "--no-track", "-b", memberBranch(*m, q.Branch), "--", m.Path, m.BaseCommit)
 			if createErr == nil {
 				createErr = VerifyMember(ctx, p, *m, q.Branch)
 			}
@@ -264,13 +278,13 @@ func writeBrief(q model.Requirement) error {
 }
 func WriteBriefContext(ctx context.Context, q model.Requirement) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n\n%s\n\n## 项目与工作目录\n\n任务分支：%s\n所有项目基线：本地 master（创建时提交已记录）\n\n", q.Name, q.Description, q.Branch)
+	fmt.Fprintf(&b, "# %s\n\n%s\n\n## 项目与工作目录\n\n各项目使用下列工作目录；新建工作目录的来源与提交分别记录。\n\n", q.Name, q.Description)
 	for _, m := range q.Members {
 		role := "参与项目"
 		if m.ProjectID == q.PrimaryProjectID {
 			role = "主项目"
 		}
-		fmt.Fprintf(&b, "- %s（%s）：%s\n", m.ProjectName, role, m.Path)
+		fmt.Fprintf(&b, "- %s（%s）：%s\n  %s\n", m.ProjectName, role, m.Path, memberDescription(m))
 	}
 	b.WriteString("\n请分别遵循每个项目内适用的 AGENTS.md。Git、构建和测试命令需在对应项目目录执行。\n")
 	path := platform.JoinWorkspacePath(q.Path, "BRIEF.md")

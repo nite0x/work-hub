@@ -159,12 +159,9 @@ func (a *Service) RunDailyMasterSync(ctx context.Context, at time.Time) error {
 		if ctx.Err() != nil {
 			break
 		}
-		// Share the mutation lock with worktree creation and manual Git actions.
-		a.Workspace.Mu.Lock()
 		projectCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		status, message, syncErr := a.SyncProjectMaster(projectCtx, p.ID)
 		cancel()
-		a.Workspace.Mu.Unlock()
 		if syncErr != nil {
 			status, message = "failed", RedactGitOutput(syncErr.Error())
 		}
@@ -182,10 +179,17 @@ func (a *Service) RunDailyMasterSync(ctx context.Context, at time.Time) error {
 }
 
 func (a *Service) SyncProjectMaster(ctx context.Context, id string) (string, string, error) {
+	a.Workspace.GitActivity.RLock()
+	defer a.Workspace.GitActivity.RUnlock()
+	if a.Workspace.Closing.Load() {
+		return "skipped", "后台正在退出", nil
+	}
 	p, err := a.RegisteredProject(ctx, id)
 	if err != nil {
 		return "", "", err
 	}
+	unlock := a.lockGit(p.CommonDir)
+	defer unlock()
 	old, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "refs/heads/master^{commit}")
 	if err != nil {
 		return "skipped", "缺少本地 master，请在 Git 操作中准备 master 分支", nil
@@ -231,6 +235,10 @@ func (a *Service) SyncProjectMaster(ctx context.Context, id string) (string, str
 	if _, err := workspace.Git(ctx, p.Path, "merge-base", "--is-ancestor", old, target); err != nil {
 		return "skipped", "master 含本地独有提交或已与远端分歧，无法快进", nil
 	}
+	// Metadata changes and worktree creation serialize only the local update;
+	// fetching above does not hold the environment-wide mutation lock.
+	a.Workspace.Mu.Lock()
+	defer a.Workspace.Mu.Unlock()
 	trees, err := ScanWorktrees(ctx, p.Path)
 	if err != nil {
 		return "", "", err

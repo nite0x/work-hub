@@ -30,15 +30,16 @@ function plainHistoryText(value) {
 
 function historyText(value) { return esc(plainHistoryText(value)); }
 
+function historyViewEntry(entry) {
+  return { ...entry, text: plainHistoryText(entry.text), command: plainHistoryText(entry.command), cwd: plainHistoryText(entry.cwd) };
+}
+
+function cleanHistoryApproval(item) {
+  return { ...item, title: plainHistoryText(item.title), details: plainHistoryText(item.details), questions: (item.questions || []).map(q => ({ ...q, header: plainHistoryText(q.header), question: plainHistoryText(q.question), options: q.options?.map(o => ({ ...o, label: plainHistoryText(o.label), description: plainHistoryText(o.description) })) })) };
+}
+
 function renderHistoryEntry(entry) {
-  const time = entry.started_at_ms || entry.completed_at_ms;
-  const when = time ? `<time datetime="${esc(new Date(time).toISOString())}">${esc(new Date(time).toLocaleString('zh-CN', { hour12: false }))}</time>` : '';
-  if (entry.kind === 'user' || entry.kind === 'assistant') {
-    return `<article class="history-entry history-${entry.kind}"><div class="history-entry-heading"><strong>${entry.kind === 'user' ? '你' : 'Codex'}</strong>${when}</div><div class="history-message">${historyText(entry.text) || `<span class="quiet">${entry.status === 'inProgress' ? '正在回复…' : '（空消息）'}</span>`}</div></article>`;
-  }
-  const statusClass = ['completed', 'failed', 'declined', 'inProgress', 'interrupted'].includes(entry.status) ? entry.status : 'unknown';
-  const preview = String(entry.command || '命令未记录').replace(/\s+/g, ' ').trim();
-  return `<article class="history-entry history-command" data-history-entry="${esc(historyEntryKey(entry))}"><details class="history-command-details"><summary><span class="history-command-icon" aria-hidden="true">›_</span><code class="history-command-preview" title="${historyText(preview)}">${historyText(preview)}</code><span class="history-command-badge ${statusClass}">${historyCommandStatus(entry)}</span><span class="history-command-chevron" aria-hidden="true">›</span></summary><div class="history-command-body"><div class="history-entry-heading"><strong>命令执行</strong>${when}</div><pre class="history-command-line">${historyText(entry.command) || '命令未记录'}</pre><div class="history-command-cwd">工作目录 · ${historyText(entry.cwd) || '未记录'}</div><div class="history-command-status ${statusClass}">${esc(historyCommandMetadata(entry))}</div></div></details><button type="button" class="history-output-button" data-command-output aria-label="查看命令输出" aria-haspopup="dialog">输出 ↗</button></article>`;
+  return window.WorkHubUI.historyEntry(historyViewEntry(entry), historyCommandMetadata(entry));
 }
 
 function findHistoryCommand(current, key) {

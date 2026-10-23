@@ -4,5 +4,6 @@ export PATH="$HOME/.local/bin:$PATH"
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 npm run chat:build
 mkdir -p bin
+node scripts/build-frontend.mjs
 go build -o bin/work-hub .
 exec ./bin/work-hub "$@"

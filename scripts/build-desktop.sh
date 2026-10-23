@@ -4,6 +4,7 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 npm run chat:build
 output="${1:-bin/windows-amd64}"
 mkdir -p "$output/agents"
+node scripts/build-frontend.mjs
 # Embed the same multi-resolution icon used by the web UI.
 go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64 --in winres/winres.json
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags '-s -w -H windowsgui' -o "$output/WorkHub.exe" .
@@ -14,6 +15,7 @@ cp scripts/install-desktop.cmd "$output/Install.cmd"
 cp README.md "$output/README.md"
 cp web/work-hub.ico "$output/WorkHub.ico"
 mkdir -p "$output/licenses"
+node scripts/prepare-notices.mjs --frontend-only > "$output/licenses/frontend-NOTICES.txt"
 cp "$(go env GOROOT)/LICENSE" "$output/licenses/Go-LICENSE"
 while IFS='|' read -r moduleName moduleDir; do
   [ -n "$moduleDir" ] || continue

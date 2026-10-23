@@ -48,7 +48,7 @@ async function refresh(force = false) {
     $('#offlineBanner').textContent = '状态刷新失败：' + error.message;
     $('#offlineBanner').hidden = false;
     $('#syncText').textContent = '连接中断';
-    if (!state.loaded) $('#content').innerHTML = '<div class="empty"><h2>暂时无法连接执行环境</h2><p>请检查本机服务；WSL 环境可在设置页重新连接恢复。</p><a class="button secondary" href="#/settings">打开设置</a></div>';
+    if (!state.loaded) $('#content').innerHTML = window.WorkHubUI.offline();
   } finally {
     if (revision !== environmentRevision) return;
     state.refreshing = false; $('#refreshButton').disabled = false;

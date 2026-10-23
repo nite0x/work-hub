@@ -13,7 +13,7 @@ func TestMetadataSnapshotPreservesPathsAndImportsTransactionally(t *testing.T) {
 	source := testApp(t)
 	_, err := source.Workspace.Store.DB.Exec(`INSERT INTO projects VALUES('p','Project','/original/repo','/original/repo/.git','project','now');
 INSERT INTO requirements VALUES('r','Task','task','notes','codex/task','/saved/workspace/task','p','creating','now');
-INSERT INTO members VALUES('r','p','/saved/workspace/task/project','baseline','creating','');
+INSERT INTO members(requirement_id,project_id,path,base_commit,state,error) VALUES('r','p','/saved/workspace/task/project','baseline','creating','');
 INSERT INTO settings VALUES('terminal','{"kind":"windows-terminal"}');
 INSERT INTO requirement_sessions VALUES('r','session','Title','/saved/workspace/task/project',123,456,'manual')`)
 	if err != nil {

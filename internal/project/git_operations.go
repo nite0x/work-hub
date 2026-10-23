@@ -40,12 +40,17 @@ type GitOverview struct {
 	Credentials  CredentialSupport `json:"credentials"`
 }
 type GitAction struct {
-	Action string `json:"action"`
-	Remote string `json:"remote"`
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
-	Track  bool   `json:"track"`
+	Action         string `json:"action"`
+	Remote         string `json:"remote"`
+	Name           string `json:"name"`
+	Source         string `json:"source"`
+	Path           string `json:"path"`
+	Track          bool   `json:"track"`
+	RequirementID  string `json:"requirement_id"`
+	ExpectedBranch string `json:"expected_branch"`
+	ExpectedHead   string `json:"expected_head"`
+	SourceCommit   string `json:"source_commit"`
+	AllowShared    bool   `json:"allow_shared"`
 }
 
 func (a *Service) RegisteredProject(ctx context.Context, id string) (model.Project, error) {
@@ -120,16 +125,7 @@ func InspectGit(ctx context.Context, p model.Project) (GitOverview, error) {
 		u, _ := workspace.Git(ctx, p.Path, "remote", "get-url", name)
 		v.Remotes = append(v.Remotes, GitRemote{Name: name, URL: RedactRemote(strings.TrimSpace(u))})
 	}
-	switch {
-	case v.Project.HasMaster:
-		v.MasterHint = "本地 master 已准备好，可以创建任务。"
-	case v.MasterSource != "":
-		v.MasterHint = "已找到 " + strings.TrimPrefix(v.MasterSource, "refs/remotes/") + "，可创建本地 master 跟踪分支；不会切换当前工作目录。"
-	case len(v.Remotes) > 0:
-		v.MasterHint = "缺少本地 master；请先获取远端分支，再从远端 master 创建本地跟踪分支。如果远端仅有 main，需要明确选择基线，不会自动替代。"
-	default:
-		v.MasterHint = "缺少本地 master，且尚未配置远端。可在 Git 终端配置远端，或明确选择一个已有提交来创建 master。"
-	}
+	v.MasterHint = "创建新分支时可选择任意本地或远端来源；任务也可以直接使用已有工作目录。"
 	return v, nil
 }
 
@@ -143,8 +139,6 @@ func RedactRemote(raw string) string {
 	return raw
 }
 func (a *Service) GitOverviewHandler(w http.ResponseWriter, r *http.Request) {
-	a.Workspace.Mu.Lock()
-	defer a.Workspace.Mu.Unlock()
 	p, err := a.RegisteredProject(r.Context(), r.PathValue("id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, 404, "项目不存在")
@@ -154,12 +148,28 @@ func (a *Service) GitOverviewHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
+	unlock := a.lockGit(p.CommonDir)
+	defer unlock()
 	v, err := InspectGit(r.Context(), p)
 	if err != nil {
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
 	v.Credentials = a.CredentialSupport()
+	qs, err := a.Workspace.Store.Requirements()
+	if err != nil {
+		httpx.DbError(w, err)
+		return
+	}
+	for i := range v.Project.Worktrees {
+		for _, q := range qs {
+			for _, m := range q.Members {
+				if m.ProjectID == p.ID && m.Path == v.Project.Worktrees[i].Path {
+					v.Project.Worktrees[i].Requirements = append(v.Project.Worktrees[i].Requirements, model.TaskLink{ID: q.ID, Name: q.Name})
+				}
+			}
+		}
+	}
 	httpx.WriteJSON(w, 200, v)
 }
 func findBranch(v GitOverview, ref string, kind string) (GitBranch, error) {
@@ -174,12 +184,13 @@ func selectedWorktree(ctx context.Context, p model.Project, path string) (model.
 	if path == "" {
 		path = p.Path
 	}
-	trees, err := ScanWorktrees(ctx, p.Path)
+	raw, err := workspace.Git(ctx, p.Path, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return model.Worktree{}, err
 	}
-	for _, t := range trees {
+	for _, t := range ParseWorktrees(raw) {
 		if t.Path == path {
+			t = ScanWorktreeStatus(ctx, t)
 			if t.Bare || t.Missing || t.Prunable || t.Error != "" {
 				return model.Worktree{}, fmt.Errorf("所选 worktree 不可用，请先修复")
 			}
@@ -202,8 +213,12 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	a.Workspace.Mu.Lock()
-	defer a.Workspace.Mu.Unlock()
+	a.Workspace.GitActivity.RLock()
+	defer a.Workspace.GitActivity.RUnlock()
+	if a.Workspace.Closing.Load() {
+		httpx.WriteError(w, 503, "后台正在退出")
+		return
+	}
 	p, err := a.RegisteredProject(r.Context(), r.PathValue("id"))
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, 404, "项目不存在")
@@ -213,12 +228,29 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
+	unlock := a.lockGit(p.CommonDir)
+	defer unlock()
+	// Only Git actions for this repository serialize; network waits never hold
+	// the environment's metadata lock.
 	v, err := InspectGit(r.Context(), p)
 	if err != nil {
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
 	var output, message string
+	if in.RequirementID != "" {
+		if err := a.validateGitTask(p.ID, in); err != nil {
+			httpx.WriteError(w, 409, err.Error())
+			return
+		}
+	}
+	if in.Path != "" && in.ExpectedBranch != "" {
+		t, e := selectedWorktree(r.Context(), p, in.Path)
+		if e != nil || t.Branch != in.ExpectedBranch {
+			httpx.WriteError(w, 409, "当前分支已变化，请刷新后重新操作")
+			return
+		}
+	}
 	switch in.Action {
 	case "fetch", "fetch_terminal":
 		found := false
@@ -264,7 +296,18 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 				httpx.WriteError(w, 400, "当前 HEAD 不能设为远端跟踪来源")
 				return
 			}
-			_, err = workspace.Git(r.Context(), p.Path, "rev-parse", "--verify", "HEAD^{commit}")
+			path := p.Path
+			if in.Path != "" {
+				t, e := selectedWorktree(r.Context(), p, in.Path)
+				if e != nil {
+					httpx.WriteError(w, 409, e.Error())
+					return
+				}
+				path = t.Path
+			}
+			var commit string
+			commit, err = workspace.Git(r.Context(), path, "rev-parse", "--verify", "HEAD^{commit}")
+			in.Source = strings.TrimSpace(commit)
 		} else {
 			var source GitBranch
 			source, err = findBranch(v, in.Source, "")
@@ -290,16 +333,28 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 		output, err = workspace.Git(r.Context(), p.Path, "branch", tracking, "--", in.Name, in.Source)
 		message = "已创建本地分支 " + in.Name + "，当前工作目录未切换"
 	case "switch":
+		a.Workspace.Mu.Lock()
+		defer a.Workspace.Mu.Unlock()
+		if in.RequirementID != "" {
+			if e := a.validateGitTask(p.ID, in); e != nil {
+				httpx.WriteError(w, 409, e.Error())
+				return
+			}
+		}
+		if e := a.checkSharedSwitch(p.ID, in); e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
 		t, e := selectedWorktree(r.Context(), p, in.Path)
 		if e != nil {
 			httpx.WriteError(w, 409, e.Error())
 			return
 		}
-		if t.Dirty > 0 {
-			httpx.WriteError(w, 409, "所选目录有未提交修改，请先提交或在终端暂存后再切换分支")
+		if t.Dirty > 0 || t.Operation != "" {
+			httpx.WriteError(w, 409, "所选目录有未提交修改或未结束的 Git 操作，请先在终端或编辑器处理后再切换分支")
 			return
 		}
-		b, e := findBranch(v, in.Source, "local")
+		b, e := findBranch(v, in.Source, "")
 		if e != nil {
 			httpx.WriteError(w, 409, e.Error())
 			return
@@ -310,15 +365,52 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		output, err = workspace.Git(r.Context(), t.Path, "switch", "--no-guess", "--", b.Name)
+		if b.Kind == "remote" {
+			if e := validBranchName(r.Context(), p.Path, in.Name); e != nil {
+				httpx.WriteError(w, 400, e.Error())
+				return
+			}
+			if e := EnsureTrackingRefspec(r.Context(), p, v, b.Ref); e != nil {
+				httpx.WriteError(w, 409, e.Error())
+				return
+			}
+			output, err = workspace.Git(r.Context(), t.Path, "switch", "--track", "-c", in.Name, b.Ref)
+			b.Name = in.Name
+		} else {
+			output, err = workspace.Git(r.Context(), t.Path, "switch", "--no-guess", "--", b.Name)
+		}
 		message = "所选工作目录已切换到 " + b.Name
+		if err == nil && in.RequirementID != "" {
+			_, err = a.Workspace.Store.DB.Exec(`UPDATE members SET branch=? WHERE requirement_id=? AND project_id=? AND path=?`, b.Name, in.RequirementID, p.ID, t.Path)
+			if err != nil {
+				err = fmt.Errorf("分支已切换，但任务关联更新失败，请刷新后采用当前分支：%w", err)
+			}
+		}
+	case "adopt_branch":
+		a.Workspace.Mu.Lock()
+		defer a.Workspace.Mu.Unlock()
+		if in.RequirementID == "" {
+			httpx.WriteError(w, 400, "请从任务内采用当前分支")
+			return
+		}
+		if e := a.validateGitTask(p.ID, in); e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
+		t, e := selectedWorktree(r.Context(), p, in.Path)
+		if e != nil || t.Detached || t.Branch == "" {
+			httpx.WriteError(w, 409, "当前目录未检出可关联的分支")
+			return
+		}
+		_, err = a.Workspace.Store.DB.Exec(`UPDATE members SET branch=? WHERE requirement_id=? AND project_id=? AND path=?`, t.Branch, in.RequirementID, p.ID, t.Path)
+		message = "任务已采用当前分支 " + t.Branch
 	case "pull":
 		t, e := selectedWorktree(r.Context(), p, in.Path)
 		if e != nil {
 			httpx.WriteError(w, 409, e.Error())
 			return
 		}
-		if t.Dirty > 0 || t.Detached {
+		if t.Dirty > 0 || t.Detached || t.Operation != "" {
 			httpx.WriteError(w, 409, "快进拉取需要干净且已检出分支的工作目录")
 			return
 		}
@@ -328,6 +420,84 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		output, err = a.GitNetwork(r.Context(), t.Path, "pull", "--ff-only", "--no-rebase", "--no-autostash")
 		message = "已完成快进拉取"
+	case "push":
+		t, e := selectedWorktree(r.Context(), p, in.Path)
+		if e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
+		if t.Detached || t.Branch == "" || t.Operation != "" {
+			httpx.WriteError(w, 409, "请先完成进行中的 Git 操作并检出分支")
+			return
+		}
+		if !hasRemote(v, in.Remote) {
+			httpx.WriteError(w, 400, "请选择已配置的远端")
+			return
+		}
+		if e := validBranchName(r.Context(), p.Path, in.Name); e != nil {
+			httpx.WriteError(w, 400, e.Error())
+			return
+		}
+		args := []string{"push", "--porcelain", "--no-follow-tags", "--recurse-submodules=no"}
+		if in.Track {
+			if e := EnsureTrackingRefspec(r.Context(), p, v, "refs/remotes/"+in.Remote+"/"+in.Name); e != nil {
+				httpx.WriteError(w, 409, RedactGitOutput(e.Error()))
+				return
+			}
+			args = append(args, "--set-upstream")
+		}
+		args = append(args, "--", in.Remote, "HEAD:refs/heads/"+in.Name)
+		output, err = a.GitNetwork(r.Context(), t.Path, args...)
+		message = "已推送 " + t.Branch + " → " + in.Remote + "/" + in.Name
+	case "merge_preview", "merge":
+		t, e := selectedWorktree(r.Context(), p, in.Path)
+		if e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
+		if t.Dirty > 0 || t.Detached || t.Operation != "" {
+			httpx.WriteError(w, 409, "合并需要干净且没有未结束 Git 操作的分支目录")
+			return
+		}
+		b, e := findBranch(v, in.Source, "")
+		if e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
+		if in.Action == "merge_preview" {
+			log, e := workspace.Git(r.Context(), t.Path, "log", "--format=%h %s", "-20", t.Head+".."+b.Commit)
+			if e != nil {
+				writeGitActionError(w, in.Action, e)
+				return
+			}
+			httpx.WriteJSON(w, 200, map[string]string{"message": b.Name + " → " + t.Branch, "output": log, "source_commit": b.Commit, "expected_head": t.Head})
+			return
+		}
+		if in.ExpectedHead == "" || in.ExpectedHead != t.Head || in.SourceCommit != b.Commit {
+			httpx.WriteError(w, 409, "合并预览已过期，请重新预览")
+			return
+		}
+		output, err = workspace.GitOperation(r.Context(), t.Path, "-c", "merge.autoStash=false", "-c", "rerere.enabled=false", "merge", "--ff", "--commit", "--no-edit", "--no-autostash", "--no-overwrite-ignore", "--", b.Commit)
+		if err != nil {
+			after, inspectErr := workspace.ReadGitState(r.Context(), t.Path)
+			if inspectErr == nil && after.Operation == "merge" && len(after.Conflicts) > 0 {
+				httpx.WriteJSON(w, 200, map[string]any{"message": "合并出现冲突，将打开 AI 会话完成合并", "conflict": true, "conflicts": after.Conflicts, "merge_head": after.MergeHead})
+				return
+			}
+		}
+		message = "已合并 " + b.Name + " → " + t.Branch
+	case "merge_abort":
+		t, e := selectedWorktree(r.Context(), p, in.Path)
+		if e != nil {
+			httpx.WriteError(w, 409, e.Error())
+			return
+		}
+		if t.Operation != "merge" {
+			httpx.WriteError(w, 409, "当前没有进行中的合并")
+			return
+		}
+		output, err = workspace.GitOperation(r.Context(), t.Path, "merge", "--abort")
+		message = "已中止合并"
 	case "fast_forward":
 		b, e := findBranch(v, "refs/heads/"+in.Name, "local")
 		if e != nil {
@@ -375,7 +545,7 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 func writeGitActionError(w http.ResponseWriter, action string, err error) {
 	raw := RedactGitOutput(err.Error())
 	message, code := raw, "git_failed"
-	if action == "fetch" || action == "pull" {
+	if action == "fetch" || action == "pull" || action == "push" {
 		lower := strings.ToLower(raw)
 		switch {
 		case strings.Contains(lower, "could not read username"), strings.Contains(lower, "could not read password"), strings.Contains(lower, "authentication failed"), strings.Contains(lower, "terminal prompts disabled"), strings.Contains(lower, "permission denied (publickey"), strings.Contains(lower, "http basic: access denied"):
@@ -384,6 +554,10 @@ func writeGitActionError(w http.ResponseWriter, action string, err error) {
 		case strings.Contains(lower, "could not resolve host"), strings.Contains(lower, "failed to connect"), strings.Contains(lower, "network is unreachable"), strings.Contains(raw, "超时"):
 			code = "network_error"
 			message = "无法连接远端仓库，请检查当前执行环境的网络、VPN 或代理，也可在终端重试。"
+		case action == "pull" && (strings.Contains(lower, "fast-forward") || strings.Contains(lower, "diverg")):
+			code, message = "diverged", "本地与远端已分歧，无法快进拉取。请在合并区域选择上游分支合并；若发生冲突会交给 AI 处理。"
+		case action == "push" && (strings.Contains(lower, "rejected") || strings.Contains(lower, "fetch first")):
+			code, message = "push_rejected", "推送被远端拒绝，请获取远端并检查分歧或仓库权限后重试。"
 		}
 	}
 	details := []string{}

@@ -10,7 +10,7 @@ function prepareNewSession(current) {
   $('#newSessionProject').innerHTML = q.members.map(m => `<option value="${esc(m.project_id)}" ${m.project_id === selected ? 'selected' : ''}>${esc(m.project_name)}${m.project_id === q.primary_project_id ? '（主项目）' : ''}</option>`).join('');
   $('#newSessionProject').value = q.members.some(m => m.project_id === selected) ? selected : q.primary_project_id;
   updateNewSessionProject(current);
-  $('#sessionHistoryEntries').innerHTML = `<div class="session-new-empty"><span class="eyebrow">LET’S GET STARTED</span><h3>从这里开始对话</h3><p>描述你想完成的工作，Codex 将在所选项目中开始。会话会自动关联「${esc(q.name)}」。</p></div>`;
+  $('#sessionHistoryEntries').innerHTML = window.WorkHubUI.newSession(q.name);
   if (pending?.promise) watchNewSessionCreation(current, pending);
   else $('#sessionChatInput').focus();
 }

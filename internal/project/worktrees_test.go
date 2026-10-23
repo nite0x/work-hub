@@ -135,7 +135,6 @@ func TestManualWorktreeRejectsInvalidInputsAndExistingPathsBeforeMutation(t *tes
 		{Slug: "valid", Mode: "detached", Source: "refs/heads/main"},
 		{Slug: "valid", Mode: "new", Source: "main;touch bad"},
 		{Slug: "valid", Mode: "new", Source: "refs/heads/missing"},
-		{Slug: "valid", Mode: "new", Source: ""},
 		{Slug: "valid", Mode: "new", Branch: "--force", Source: "refs/heads/main"},
 		{Slug: "valid", Mode: "new", Branch: "main", Source: "refs/heads/main"},
 		{Slug: "valid", Mode: "existing", Branch: "missing"},

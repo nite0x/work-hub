@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+require('tsx/cjs');
+const { workspaceUI } = require('../frontend/workspace/renderers.tsx');
 
 function harness() {
   const elements = new Map();
@@ -16,7 +18,7 @@ function harness() {
     $, AbortController, TextDecoder, CSS: { escape: s => s },
     crypto: { randomUUID: () => 'request-' + ++sequence },
     document: { addEventListener() {}, querySelector() { return null; }, hidden: false },
-    window: { addEventListener() {} }, setInterval() { timers++; return timers; }, clearInterval() {},
+    window: { WorkHubUI: workspaceUI, addEventListener() {} }, setInterval() { timers++; return timers; }, clearInterval() {},
     state: { view: 'requirements', selectedRequirement: 'req', requirements: [{ id: 'req', name: '开发工作区', state: 'ready', primary_project_id: 'main', members: [{ project_id: 'main', project_name: 'Main', path: '/work/main' }, { project_id: 'other', project_name: 'Other', path: '/work/other' }] }] },
     requirementSessions: new Map(), updateRequirementSessionsView() {}, esc: s => String(s ?? ''),
     api(url, options) {

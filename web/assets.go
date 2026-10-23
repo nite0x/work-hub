@@ -4,5 +4,5 @@ import "embed"
 
 // Assets contains the complete browser UI, including feature subdirectories.
 //
-//go:embed index.html *.ico *.png *.svg core features chat
+//go:embed index.html *.ico *.png *.svg core features chat ui/*.js ui/*.css
 var Assets embed.FS

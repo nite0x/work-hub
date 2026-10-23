@@ -12,14 +12,13 @@ function environmentName(id = activeEnvironment) {
 }
 const state = { view: 'requirements', projects: [], requirements: [], selectedProject: null, selectedRequirement: null, root: '', terminal: {}, busy: false, refreshing: false, loaded: false };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const labels = { ready: '已就绪', partial: '部分就绪', archived: '已归档', creating: '创建中', pending: '待创建', failed: '创建失败' };
-const badge = (kind, text) => `<span class="badge ${esc(kind)}">${esc(text || labels[kind] || kind)}</span>`;
-const branch = value => `<span class="branch">⑂ ${esc(value || 'detached HEAD')}</span>`;
+const badge = (kind, text) => window.WorkHubUI.badge(kind, text);
+const branch = value => window.WorkHubUI.branch(value);
 const allTrees = () => state.projects.flatMap(p => p.worktrees);
 let toastTimer;
 function toast(message, error = false) {
   clearTimeout(toastTimer);
-  $('#toast').textContent = message;
+  $('#toastMessage').textContent = message;
   $('#toast').classList.toggle('error', error);
   $('#toast').hidden = false;
   toastTimer = setTimeout(() => { $('#toast').hidden = true; }, error ? 9000 : 4500);
@@ -44,21 +43,15 @@ async function api(path, options = {}) {
 }
 
 function stat(label, value, caption, symbol) {
-  return `<div class="stat" title="${esc(caption)}"><div class="stat-label"><span class="stat-symbol" aria-hidden="true">${symbol}</span>${esc(label)}</div><div class="stat-value">${value}</div></div>`;
+  return window.WorkHubUI.stat(label, value, caption, symbol);
 }
 
 function empty(title, description, action, button) {
-  return `<div class="empty"><div class="empty-icon">${action === 'new-project' ? '◇' : '⑂'}</div><h2>${esc(title)}</h2><p>${esc(description)}</p>${action ? `<button class="button primary" data-action="${action}">＋ ${esc(button)}</button>` : ''}</div>`;
+  return window.WorkHubUI.empty(title, description, action, button);
 }
 
 function treeState(t, pending = false) {
-  if (!t) return badge(pending ? 'neutral' : 'failed', pending ? '正在发现目录' : '目录未发现');
-  if (t.missing) return badge('failed', '目录丢失');
-  if (t.error) return badge('failed', '读取失败');
-  if (t.prunable) return badge('warning', '待修复登记');
-  if (!t.status_updated_at) return badge('neutral', '正在检查');
-  const checked = new Date(t.status_updated_at).toLocaleTimeString('zh-CN', { hour12: false });
-  return (t.dirty ? badge('warning', `${t.dirty} 项修改`) : badge('ready', '干净')) + `<div class="comparison status-checked-at">上次检查 <time data-status-path="${esc(t.path)}" datetime="${esc(t.status_updated_at)}">${esc(checked)}</time></div>`;
+  return window.WorkHubUI.treeState(t, pending);
 }
 
 function workspaceDisplayPath(root, ...parts) {

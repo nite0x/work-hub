@@ -1,6 +1,6 @@
 .requirement-sessions { margin-top: 30px; padding-top: 26px; border-top: 1px solid var(--border); }
-.session-description { font-size:14px; color: var(--muted); line-height: 1.9; max-width: 640px; margin: 10px 0 16px; }
-.session-empty { padding: 22px 0; color: var(--muted); font-size:15px; line-height: 1.9; }
+.session-description { font-size:14px; color: var(--muted-foreground, #64748b); line-height: 1.9; max-width: 640px; margin: 10px 0 16px; }
+.session-empty { padding: 22px 0; color: var(--muted-foreground, #64748b); font-size:15px; line-height: 1.9; }
 .requirement-sessions h2 { font-size: 18px; }
 .requirement-sessions td:first-child { min-width: 200px; max-width: 360px; overflow-wrap: anywhere; }
 .requirement-sessions td:nth-child(2) { min-width: 170px; }
@@ -10,21 +10,21 @@
 .session-picker-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border); }
 .session-picker-row > div { min-width: 0; }
 .session-picker-row strong { display: block; font-size:15px; overflow-wrap: anywhere; line-height: 1.8; }
-.session-picker-row .path, .session-picker-row small { display: block; font:13px/1.8 Consolas, monospace; color: var(--muted); overflow-wrap: anywhere; }
+.session-picker-row .path, .session-picker-row small { display: block; font:13px/1.8 Consolas, monospace; color: var(--muted-foreground, #64748b); overflow-wrap: anywhere; }
 .session-picker-row button { flex-shrink: 0; }
 .session-row-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .session-history-panel { position: fixed; inset: 0 0 0 auto; width: min(780px, 60vw); margin: 0; background: #fafbfe; border-left: 1px solid var(--border); box-shadow: -15px 0 50px #1c20351a; z-index: 15; display: flex; flex-direction: column; }
 .session-history-header { flex: 0 0 auto; padding: 16px 22px 14px; background: #fff; border-bottom: 1px solid var(--border); }
 .session-history-header h2 { font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
 .session-history-header .dialog-header > div { min-width: 0; }
-.session-history-meta { white-space: pre-wrap; font:12px/1.7 Consolas, monospace; color: var(--muted); overflow-wrap: anywhere; margin-top: 8px; max-height: 64px; overflow-y: auto; }
-.session-project-field { display: block; margin-top: 16px; font-size:14px; color: var(--muted); }
+.session-history-meta { white-space: pre-wrap; font:12px/1.7 Consolas, monospace; color: var(--muted-foreground, #64748b); overflow-wrap: anywhere; margin-top: 8px; max-height: 64px; overflow-y: auto; }
+.session-project-field { display: block; margin-top: 16px; font-size:14px; color: var(--muted-foreground, #64748b); }
 .session-project-field select { display: block; width: 100%; margin-top: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: #f8f8fb; color: var(--ink); font: inherit; }
 .session-new-empty { padding: 50px 14px; max-width: 420px; margin: auto; }
 .session-new-empty h3 { margin: 16px 0 10px; font-size: 20px; color: var(--ink); }
-.session-new-empty p { font-size:15px; line-height: 1.9; color: var(--muted); }
+.session-new-empty p { font-size:15px; line-height: 1.9; color: var(--muted-foreground, #64748b); }
 .session-history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
-.session-history-toolbar > span { font-size:13px; line-height: 1.8; color: var(--muted); }
+.session-history-toolbar > span { font-size:13px; line-height: 1.8; color: var(--muted-foreground, #64748b); }
 .session-history-toolbar > div { display: flex; gap: 7px; flex-shrink: 0; }
 .session-history-attention { margin-top: 12px; padding: 12px 14px; border: 1px solid #e7c477; border-radius: 10px; background: #fff8e8; color: #684509; font-size: 13px; line-height: 1.7; max-height: min(32vh, 280px); overflow: auto; overflow-wrap: anywhere; }
 .session-history-attention > strong { display: block; font-size: 14px; }
@@ -38,11 +38,11 @@
 .history-assistant + .history-command { margin-top: -4px; }
 .history-entry-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .history-entry-heading strong { font-size:13px; color: var(--ink); font-weight: 600; }
-.history-entry-heading time { font-size:11px; color: var(--muted); text-align: right; }
+.history-entry-heading time { font-size:11px; color: var(--muted-foreground, #64748b); text-align: right; }
 .history-message { white-space: pre-wrap; overflow-wrap: anywhere; font-size:15px; line-height: 1.9; }
 .history-command-line, .history-output pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font:14px/1.8 Consolas, monospace; color: #32364b; }
 .history-command-line { padding: 12px; background: #eeeff4; border-radius: 5px; }
-.history-command-cwd { font:13px/1.8 Consolas, monospace; color: var(--muted); overflow-wrap: anywhere; margin-top: 9px; }
+.history-command-cwd { font:13px/1.8 Consolas, monospace; color: var(--muted-foreground, #64748b); overflow-wrap: anywhere; margin-top: 9px; }
 .history-command-status { font-size:13px; color: #505574; margin: 9px 0; }
 .history-command-status.failed { color: #aa6c54; }
 .history-command { position: relative; padding: 0; margin-bottom: 8px; border-radius: 8px; background: #f4f6fa; border-color: #e6e9f1; }
@@ -62,7 +62,7 @@
 .history-command-body { padding: 14px 16px 10px; border-top: 1px solid #e1e6ef; background: #fff; border-radius: 0 0 8px 8px; }
 .history-command-body .history-command-line { max-height: 220px; overflow: auto; font-size: 12px; }
 .history-command-body .history-command-cwd, .history-command-body .history-command-status { font-size: 12px; }
-.history-output-button { position: absolute; top: 7px; right: 8px; min-height: 30px; padding: 4px 8px; border: 0; border-left: 1px solid #dce1ec; border-radius: 0 4px 4px 0; background: transparent; color: var(--accent); font-size: 12px; }
+.history-output-button { position: absolute; top: 7px; right: 8px; min-height: 30px; padding: 4px 8px; border: 0; border-left: 1px solid #dce1ec; border-radius: 0 4px 4px 0; background: transparent; color: var(--primary, #5964cf); font-size: 12px; }
 .history-output-button:hover { background: #e2e8f7; }
 .session-command-output-dialog { width: min(960px, calc(100vw - 32px)); max-height: min(86vh, 900px); overflow: hidden; padding: 24px; }
 .session-command-output-dialog[open] { display: flex; flex-direction: column; gap: 14px; }
@@ -70,16 +70,16 @@
 .session-command-output-dialog .eyebrow { font-size: 10px; }
 .session-command-output-dialog h2 { font-size: 20px; }
 .session-command-output-dialog > .history-command-line { flex-shrink: 0; max-height: 90px; overflow: auto; font-size: 12px; }
-.session-command-output-meta { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 66px; overflow-y: auto; font: 12px/1.7 Consolas, monospace; color: var(--muted); }
+.session-command-output-meta { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 66px; overflow-y: auto; font: 12px/1.7 Consolas, monospace; color: var(--muted-foreground, #64748b); }
 .session-command-output-text { margin: 0; padding: 18px; min-height: 100px; max-height: 48vh; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #e1e6ef; border-radius: 8px; background: #f6f8fc; color: #334155; font: 13px/1.8 Consolas, monospace; tab-size: 4; }
-.session-command-output-hint { margin: 0; font-size: 12px; color: var(--muted); }
+.session-command-output-hint { margin: 0; font-size: 12px; color: var(--muted-foreground, #64748b); }
 .history-more { display: block; margin: 0 auto 22px; }
 .session-chat-form { flex: 0 0 auto; padding: 12px 24px 16px; border-top: 1px solid var(--border); background: #fff; }
 .session-chat-form textarea { width: 100%; display: block; resize: vertical; max-height: 160px; min-height: 65px; margin-top: 7px; padding: 10px; border: 1px solid #d7d9e5; border-radius: 6px; font-family: inherit; font-size:15px; line-height: 1.7; color: var(--ink); }
-#sessionChatStatus { color: var(--muted); font-size:14px; line-height: 1.8; margin-bottom: 7px; }
+#sessionChatStatus { color: var(--muted-foreground, #64748b); font-size:14px; line-height: 1.8; margin-bottom: 7px; }
 .session-chat-form .form-error { max-height: 80px; overflow: auto; margin: 6px 0; padding: 7px; }
 .session-chat-actions { display: flex; gap: 10px; justify-content: space-between; align-items: center; margin-top: 9px; }
-.session-chat-actions small { color: var(--muted); font-size:12px; line-height: 1.8; }
+.session-chat-actions small { color: var(--muted-foreground, #64748b); font-size:12px; line-height: 1.8; }
 .session-chat-actions > div { display: flex; gap: 7px; flex-shrink: 0; }
 .session-chat-approvals { flex: 0 1 auto; max-height: 40vh; overflow-y: auto; padding: 0 24px; background: #fff8e9; }
 .chat-approval { padding: 15px 0; border-top: 1px solid #e6d9ba; }
@@ -88,7 +88,7 @@
 .chat-approval .detail-actions { margin-top: 12px; }
 .chat-question { display: block; margin: 12px 0; font-size:14px; }
 .chat-question input, .chat-question select { display: block; width: 100%; margin-top: 7px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
-.chat-run-heading { display: flex; align-items: center; gap: 12px; font-size:12px; color: var(--muted); margin: 22px 0 18px; }
+.chat-run-heading { display: flex; align-items: center; gap: 12px; font-size:12px; color: var(--muted-foreground, #64748b); margin: 22px 0 18px; }
 .chat-run-heading::before, .chat-run-heading::after { content: ''; height: 1px; background: var(--border); flex: 1; }
 @media (max-width: 1000px) { .session-history-panel { width: min(700px, 78vw); } }
 @media (max-width: 760px) {

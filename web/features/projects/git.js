@@ -1,10 +1,16 @@
 'use strict';
 let gitState = null;
 let gitSelectedPath = '';
-async function openGit(id, path = '') {
-  if (state.busy) return;
+let gitRequirementID = '';
+let gitMergePreviewData = null;
+const mergeAIRequests = new Map();
+let gitAILaunching = false;
+async function openGit(id, path = '', requirement = '') {
+  if (state.busy || gitAILaunching) return;
   gitState = null;
   gitSelectedPath = path;
+  gitRequirementID = requirement;
+  gitMergePreviewData = null;
   $('#gitError').hidden = true;
   $('#gitAuthHelp').hidden = true;
   $('#gitResult').hidden = true;
@@ -20,46 +26,24 @@ async function openGit(id, path = '') {
     renderGit();
   } catch (error) { $('#gitContent').textContent = ''; $('#gitError').textContent = error.message; $('#gitError').hidden = false; }
 }
+function defaultBranchSource(v) {
+  return ['refs/heads/master', 'refs/heads/main', 'refs/remotes/origin/master', 'refs/remotes/origin/main'].find(ref => v.branches.some(b => b.ref === ref)) || 'HEAD';
+}
 function sourceOptions(v, includeHead = true) {
-  const options = ['<option value="">请选择来源分支</option>'];
-  const remote = v.branches.filter(b => b.kind === 'remote');
-  const local = v.branches.filter(b => b.kind === 'local');
-  for (const [label, branches] of [['远端分支', remote], ['本地分支', local]]) {
-    if (branches.length) options.push(`<optgroup label="${label}">${branches.map(b => `<option value="${esc(b.ref)}">${esc(b.name)} · ${esc(b.commit.slice(0, 8))}</option>`).join('')}</optgroup>`);
-  }
-  if (includeHead) options.push(`<option value="HEAD">当前 HEAD（${esc(v.current || 'detached')}，请明确确认基线）</option>`);
-  return options.join('');
+  return window.WorkHubUI.sourceOptions(v, includeHead);
 }
 function renderGit() {
   const v = gitState;
   const local = v.branches.filter(b => b.kind === 'local');
-  const remote = v.branches.filter(b => b.kind === 'remote');
   $('#gitTitle').textContent = 'Git 操作 · ' + v.project.name;
-  const rows = v.branches.map(b => `<tr><td>${branch(b.name)} ${b.kind === 'remote' ? badge('neutral', '远端') : badge('primary-tag', '本地')}<div class="comparison">${esc(b.commit.slice(0, 8))}${b.upstream ? ' · 跟踪 ' + esc(b.upstream) : ''}</div></td><td>${b.worktrees.length ? b.worktrees.map(p => `<div class="path">${esc(p)}</div>`).join('') : '<span class="quiet">未检出</span>'}</td><td><button type="button" class="button small secondary" data-action="git-use-source" data-ref="${esc(b.ref)}">以此创建分支</button></td></tr>`).join('');
-  $('#gitContent').innerHTML = `
-    <p class="dialog-description git-repo-path">${esc(v.project.path)}</p>
-    <div class="banner ${v.project.has_master ? 'success' : 'note'} git-master-hint">${esc(v.master_hint)}${!v.project.has_master && v.master_source ? '<button type="button" class="button small primary" data-action="git-prepare-master">从远端创建本地 master</button>' : ''}</div>
-    <section class="git-section"><div class="git-section-title"><h3>远端仓库</h3><span>获取分支不会切换当前工作目录</span></div>
-      <div class="git-inline"><label class="field grow">远端<select id="gitRemote" ${v.remotes.length ? '' : 'disabled'}>${v.remotes.length ? v.remotes.map(r => `<option value="${esc(r.name)}">${esc(r.name)} · ${esc(r.url)}</option>`).join('') : '<option value="">未配置远端</option>'}</select></label><button type="button" class="button primary" data-action="git-fetch" ${v.remotes.length ? '' : 'disabled'}>↓ 获取远端全部分支</button><button type="button" class="button secondary" data-action="git-fetch-terminal" ${v.remotes.length ? '' : 'disabled'}>在终端获取 ↗</button><button type="button" class="button secondary" data-action="git-reload">刷新列表</button></div>
-      <div class="git-credentials" role="status">${v.credentials?.available ? '✓ ' : ''}${esc(v.credentials?.message || '使用现有 Git 凭证助手配置')}</div>
-    </section>
-    <section class="git-section"><div class="git-section-title"><h3>工作目录操作</h3><span>在选中的 worktree 执行</span></div>
-      <label class="field">工作目录<select id="gitWorktree">${v.project.worktrees.filter(t => !t.bare && !t.missing && !t.prunable && !t.error).map(t => `<option value="${esc(t.path)}">${esc(t.path)} · ${esc(t.branch || 'detached')} · ${t.dirty ? t.dirty + ' 项修改' : '干净'}</option>`).join('')}</select></label>
-      <div class="git-inline"><label class="field grow">切换到本地分支<select id="gitSwitch"></select></label><button type="button" class="button secondary" data-action="git-switch">切换分支</button><button type="button" class="button secondary" data-action="git-pull">快进拉取</button><button type="button" class="button subtle" data-action="git-terminal">打开 Git 终端 ↗</button></div>
-      <small class="git-help">有未提交修改时会拒绝切换和拉取；快进拉取不会自动合并分歧提交。</small>
-    </section>
-    <section class="git-section"><div class="git-section-title"><h3>创建本地分支</h3><span>创建后保留当前目录的分支</span></div>
-      <form id="gitCreateForm"><div class="form-grid"><label class="field">新分支名称<input id="gitBranchName" required maxlength="160" placeholder="master 或 feature/example" value="${v.project.has_master ? '' : 'master'}"></label><label class="field">来源分支<select id="gitBranchSource" required>${sourceOptions(v)}</select></label></div>
-      <div class="git-inline"><label class="git-track"><input type="checkbox" id="gitTrack">设置远端跟踪关系</label><button type="submit" class="button primary">创建本地分支</button></div><div class="git-source-explanation" id="gitSourceExplanation">请选择明确的来源。创建任务统一使用本地 master 作为基线。</div></form>
-    </section>
-    ${local.some(b => b.worktrees.length === 0) && remote.length ? `<section class="git-section"><div class="git-section-title"><h3>更新未检出的本地分支</h3><span>适用于 master 在其他分支工作时的更新</span></div><div class="form-grid"><label class="field">本地分支<select id="gitFFLocal">${local.filter(b => b.worktrees.length === 0).map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('')}</select></label><label class="field">快进到远端分支<select id="gitFFSource">${remote.map(b => `<option value="${esc(b.ref)}">${esc(b.name)}</option>`).join('')}</select></label></div><button type="button" class="button secondary" data-action="git-fast-forward">快进更新本地分支</button><small class="git-help">只允许快进；分支有分歧或已被 worktree 检出时会拒绝更新。</small></section>` : ''}
-    <section class="git-section"><div class="git-section-title"><h3>全部分支</h3><span>${local.length} 个本地 · ${remote.length} 个远端</span></div><div class="table-scroll"><table><thead><tr><th>分支 / 提交 / 跟踪</th><th>占用的 Worktree</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="3">尚无分支记录，请先获取远端或在终端创建初始提交。</td></tr>'}</tbody></table></div></section>`;
+  $('#gitContent').innerHTML = window.WorkHubUI.git(v);
   $('#gitWorktree').value = gitSelectedPath;
+  $('#gitWorktree').disabled = !!gitRequirementID;
   if (!$('#gitWorktree').value) {
     $('#gitWorktree').insertAdjacentHTML('afterbegin', '<option value="">原工作目录不可用，请明确选择其他目录</option>');
     $('#gitWorktree').value = '';
   }
-  if (v.master_source) $('#gitBranchSource').value = v.master_source;
+  $('#gitBranchSource').value = defaultBranchSource(v);
   updateGitSource(); updateGitWorktree();
   if ($('#gitFFLocal') && local.some(b => b.name === 'master' && !b.worktrees.length)) $('#gitFFLocal').value = 'master';
   if ($('#gitFFSource') && v.master_source) $('#gitFFSource').value = v.master_source;
@@ -69,22 +53,118 @@ function updateGitSource() {
   const remote = ref.startsWith('refs/remotes/');
   $('#gitTrack').checked = remote; $('#gitTrack').disabled = !remote;
   $('#gitSourceExplanation').textContent = ref === 'HEAD'
-    ? '当前 HEAD 的提交会成为新分支起点。这不会从远端取得 master；请确认当前代码确实是需要的基线。'
-    : ref ? `新分支将从 ${ref.replace(/^refs\/(heads|remotes)\//, '')} 创建，当前工作目录保持原分支。` : '请选择明确的来源。创建任务统一使用本地 master 作为基线。';
+    ? '当前 HEAD 的提交会成为新分支起点。'
+    : ref ? `新分支将从 ${ref.replace(/^refs\/(heads|remotes)\//, '')} 创建，当前工作目录保持原分支。` : '请选择来源分支。';
 }
 function updateGitWorktree() {
   const path = $('#gitWorktree').value;
   if (path) gitSelectedPath = path;
   const t = gitState.project.worktrees.find(t => t.path === path);
-  for (const action of ['git-switch', 'git-pull', 'git-terminal']) {
-    $(`[data-action="${action}"]`, $('#gitContent')).disabled = !t;
+  $('#gitBranchSource option[value="HEAD"]').textContent = `所选工作目录 HEAD（${t?.branch || 'detached'}）`;
+  const unavailable = !t || !!t.operation;
+  for (const action of ['git-switch', 'git-pull', 'git-push', 'git-merge-preview']) {
+    $(`[data-action="${action}"]`, $('#gitContent')).disabled = unavailable || (action !== 'git-push' && !!t?.dirty) || (action !== 'git-switch' && !!t?.detached);
   }
-  $('#gitSwitch').innerHTML = gitState.branches.filter(b => b.kind === 'local').map(b => `<option value="${esc(b.ref)}" ${b.worktrees.some(p => p !== gitSelectedPath) ? 'disabled' : ''}>${esc(b.name)}${b.worktrees.some(p => p !== gitSelectedPath) ? '（其他 worktree 占用）' : ''}</option>`).join('');
+  $('[data-action="git-terminal"]').disabled = !t;
+  $('#gitContext').textContent = `${environmentName()} · ${gitState.project.name}\n${path}\n当前分支：${t?.branch || 'detached HEAD'}\n${!t?.upstream ? '尚未设置上游' : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : `上游 ${t.upstream} · 待推送 ${t.sync_ahead || 0} · 待拉取 ${t.sync_behind || 0}`}${t?.dirty ? `\n${t.dirty} 项未提交修改（推送只发送已提交内容）` : ''}`;
+  $('#gitSwitch').innerHTML = gitState.branches.map(b => `<option value="${esc(b.ref)}" ${b.worktrees.some(p => p !== gitSelectedPath) ? 'disabled' : ''}>${esc(b.name)}${b.kind === 'remote' ? '（新建跟踪分支）' : ''}${b.worktrees.some(p => p !== gitSelectedPath) ? '（其他 worktree 占用）' : ''}</option>`).join('');
   if (t?.branch) $('#gitSwitch').value = 'refs/heads/' + t.branch;
+  $('#gitSwitchNote').textContent = gitRequirementID ? '切换后同步更新当前任务的关联分支，创建基线保留。' : '切换作用于所选目录；关联任务会显示分支变化。';
+  updateGitSwitch();
+  const remotes = [...gitState.remotes].sort((a, b) => b.name.length - a.name.length);
+  const upstreamRemote = remotes.find(r => t?.upstream?.startsWith(r.name + '/'));
+  $('#gitPushRemote').value = upstreamRemote?.name || remotes.find(r => r.name === 'origin')?.name || remotes[0]?.name || '';
+  $('#gitPushName').value = upstreamRemote ? t.upstream.slice(upstreamRemote.name.length + 1) : t?.branch || '';
+  $('#gitPushTrack').checked = !t?.upstream;
+  updateGitPush();
+  $('#gitMergeActive').hidden = t?.operation !== 'merge';
+  $('#gitMergeForm').hidden = t?.operation === 'merge';
+  $('#gitMergeStatus').textContent = t?.operation === 'merge' ? `合并进行中${t.conflicts?.length ? `，${t.conflicts.length} 个冲突文件：\n${t.conflicts.join('\n')}` : '，等待完成合并提交'}\n${gitRequirementID ? '可交给 AI 继续完成合并。' : '请从关联任务进入以使用 AI 处理。'}` : '';
+  $('[data-action="git-merge-ai"]').disabled = !gitRequirementID && t?.requirements?.length !== 1;
+  const upstream = gitState.branches.find(b => b.kind === 'remote' && b.name === t?.upstream);
+  $('#gitMergeSource').value = upstream?.ref || '';
+  clearGitMergePreview();
+}
+function updateGitSwitch() {
+  const b = gitState?.branches.find(b => b.ref === $('#gitSwitch').value);
+  $('#gitSwitchName').closest('.field').hidden = b?.kind !== 'remote';
+  if (b?.kind === 'remote') {
+    const remote = [...gitState.remotes].sort((a, b) => b.name.length - a.name.length).find(r => b.name.startsWith(r.name + '/'));
+    $('#gitSwitchName').value = remote ? b.name.slice(remote.name.length + 1) : '';
+  }
+}
+function updateGitPush() {
+  const t = gitState?.project.worktrees.find(t => t.path === gitSelectedPath);
+  $('#gitPushDirection').textContent = `${t?.branch || 'detached HEAD'} → ${$('#gitPushRemote').value}/${$('#gitPushName').value}`;
+  $('[data-action="git-push"]').disabled = !t || !!t.detached || !!t.operation || !$('#gitPushRemote').value || !$('#gitPushName').value.trim();
+}
+function clearGitMergePreview() {
+  gitMergePreviewData = null;
+  $('#gitMergePreview').hidden = true;
+  $('[data-action="git-merge"]').disabled = true;
+}
+
+async function launchGitMergeAI() {
+  if (gitAILaunching) return;
+  const t = gitState?.project.worktrees.find(t => t.path === gitSelectedPath);
+  const requirement = gitRequirementID || (t?.requirements?.length === 1 ? t.requirements[0].id : '');
+  if (!t?.merge_head || !requirement) throw new Error('请从关联任务进入合并目录后再打开 AI。');
+  const project = gitState.project.id;
+  gitAILaunching = true;
+  const controls = [...$('#gitDialog').querySelectorAll('button, input, select')].map(control => [control, control.disabled]);
+  controls.forEach(([control]) => { control.disabled = true; });
+  try {
+  const environment = activeEnvironment, revision = environmentRevision;
+  const key = [environment, requirement, project, t.path, t.head, t.merge_head].join(':');
+  let pending = mergeAIRequests.get(key);
+  if (!pending) {
+    pending = { request_id: crypto.randomUUID() };
+    mergeAIRequests.set(key, pending);
+  }
+  if (!pending.promise) {
+    const body = { request_id: pending.request_id, project_id: project, merge_head: t.merge_head };
+    const route = sessionReadOnly ? 'merge-ai' : 'sessions/new';
+    if (!sessionReadOnly) body.purpose = 'merge_conflict';
+    pending.promise = api(`/api/requirements/${encodeURIComponent(requirement)}/${route}`, { method: 'POST', body: JSON.stringify(body), environment });
+  }
+  let result;
+  try { result = await pending.promise; }
+  catch (error) { delete pending.promise; throw error; }
+  if (revision !== environmentRevision) return;
+  if (result.session) {
+    const cached = requirementSessions.get(requirement) || { sessions: [] };
+    cached.sessions = [result.session, ...cached.sessions.filter(s => s.id !== result.session.id)];
+    requirementSessions.set(requirement, cached);
+    updateRequirementSessionsView(requirement);
+    $('#gitDialog').close();
+    openSessionHistory(requirement, result.session.id);
+    if (!sessionHistoryState.assistant) {
+      sessionHistoryState.newlyCreated = true;
+      applyChatState(sessionHistoryState, result.chat);
+      if (result.chat.busy) streamChat(sessionHistoryState, result.chat.id);
+    }
+    toast('合并出现冲突，AI 已开始处理，请在会话中查看进展。');
+  } else {
+    $('#gitResultTitle').textContent = result.message;
+    $('#gitResult').hidden = false;
+    toast(result.message);
+  }
+  } finally {
+    gitAILaunching = false;
+    controls.forEach(([control, disabled]) => { if (control.isConnected) control.disabled = disabled; });
+  }
 }
 async function gitOperation(body, title) {
   if (!gitState || state.busy) return;
   const id = gitState.project.id;
+  const scopedActions = ['switch', 'adopt_branch', 'pull', 'push', 'merge_preview', 'merge', 'merge_abort'];
+  if (scopedActions.includes(body.action)) {
+    body.path ||= gitSelectedPath;
+    const t = gitState.project.worktrees.find(t => t.path === body.path);
+    if (gitRequirementID) body.requirement_id = gitRequirementID;
+    if (t?.branch) body.expected_branch = t.branch;
+  }
+  let result;
   $('#gitAuthHelp').hidden = true;
   $('#gitProgress').textContent = title + '，请稍候…';
   $('#gitProgress').hidden = false;
@@ -99,18 +179,22 @@ async function gitOperation(body, title) {
     $('#gitProgress').textContent = title + `，已等待 ${Math.floor((Date.now() - started) / 1000)} 秒。后台操作最长等待 90 秒；需要登录时请使用终端获取。`;
   }, 1000);
   try { await mutation(title, async () => {
-    let result;
     try {
       result = await api(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify(body) });
     } catch (error) {
-      $('#gitAuthHelp').hidden = !(body.action === 'fetch' && error.code === 'authentication_required');
+      $('#gitAuthHelp').hidden = error.code !== 'authentication_required';
+      try { gitState = await api(`/api/projects/${id}/git`); renderGit(); } catch { /* Keep the last readable state and original action error. */ }
       throw error;
+    }
+    if (result.conflict) {
+      const tree = gitState.project.worktrees.find(t => t.path === gitSelectedPath);
+      if (tree) Object.assign(tree, { operation: 'merge', merge_head: result.merge_head, conflicts: result.conflicts });
     }
     $('#gitResultTitle').textContent = result.message;
     $('#gitOutput').textContent = result.output || '';
     $('#gitResult').hidden = false;
-    gitState = await api(`/api/projects/${id}/git`);
-    renderGit();
+    try { gitState = await api(`/api/projects/${id}/git`); renderGit(); }
+    catch (error) { renderGit(); throw new Error('操作已执行，但状态刷新失败，请刷新检查后再操作：' + error.message); }
   }, $('#gitError')); } finally {
     clearInterval(timer);
     $('#gitProgress').hidden = true;
@@ -118,21 +202,60 @@ async function gitOperation(body, title) {
     else $('#gitResult').scrollIntoView({ block: 'nearest' });
     buttons.forEach(([button, disabled]) => { if (button.isConnected) button.disabled = disabled; });
   }
+  if (result?.conflict) {
+    toast(`合并出现冲突（${result.conflicts.length} 个文件），正在打开 AI…`, true);
+    try { await launchGitMergeAI(); }
+    catch (error) {
+      $('#gitError').textContent = '冲突已保留，AI 启动未完成：' + error.message;
+      $('#gitError').hidden = false;
+      if (error.command) showCommand(error.command);
+    }
+  }
+  return result;
+}
+
+async function pushGitBranch() {
+  const t = gitState.project.worktrees.find(t => t.path === gitSelectedPath);
+  const remote = $('#gitPushRemote').value, name = $('#gitPushName').value.trim();
+  if (!remote || !name || !t) return;
+  if (!confirm(`推送 ${t.branch} → ${remote}/${name}\n工作目录：${t.path}\n${t.dirty ? '只推送已提交内容，未提交修改保留。' : ''}`)) return;
+  return gitOperation({ action: 'push', remote, name, track: $('#gitPushTrack').checked }, '正在推送当前分支');
 }
 document.addEventListener('submit', event => {
   if (event.target.id !== 'gitCreateForm') return;
   event.preventDefault();
-  gitOperation({ action: 'create_branch', name: $('#gitBranchName').value, source: $('#gitBranchSource').value, track: $('#gitTrack').checked }, '正在创建本地分支');
+  const body = { action: 'create_branch', name: $('#gitBranchName').value, source: $('#gitBranchSource').value, track: $('#gitTrack').checked };
+  if (body.source === 'HEAD') { body.path = gitSelectedPath; if (gitRequirementID) body.requirement_id = gitRequirementID; }
+  gitOperation(body, '正在创建本地分支');
 });
 document.addEventListener('change', event => {
   if (event.target.id === 'gitBranchSource') updateGitSource();
   if (event.target.id === 'gitWorktree') updateGitWorktree();
+  if (event.target.id === 'gitSwitch') updateGitSwitch();
+  if (event.target.id === 'gitPushRemote') updateGitPush();
+  if (event.target.id === 'gitMergeSource') clearGitMergePreview();
 });
+document.addEventListener('input', event => { if (event.target.id === 'gitPushName') updateGitPush(); });
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-action^="git-"]');
-  if (!button || state.busy) return;
+  if (!button || button.disabled || state.busy || gitAILaunching) return;
   const action = button.dataset.action;
-  if (action === 'git-open') return openGit(button.dataset.id, button.dataset.path);
+  if (action === 'git-open') return openGit(button.dataset.id, button.dataset.path, button.dataset.requirement);
+  if (action.startsWith('git-task-')) {
+    await openGit(button.dataset.id, button.dataset.path, button.dataset.requirement);
+    if (!gitState) return;
+    if (action === 'git-task-pull') return gitOperation({ action: 'pull' }, '正在快进拉取');
+    if (action === 'git-task-push') {
+      const t = gitState.project.worktrees.find(t => t.path === gitSelectedPath);
+      if (t?.upstream) return pushGitBranch();
+      $('#gitPushName').focus(); return;
+    }
+    if (action === 'git-task-adopt') return gitOperation({ action: 'adopt_branch' }, '正在更新任务关联分支');
+    if (action === 'git-task-ai') {
+      try { await launchGitMergeAI(); } catch (error) { $('#gitError').textContent = error.message; $('#gitError').hidden = false; if (error.command) showCommand(error.command); }
+      return;
+    }
+  }
   if (action === 'git-prepare-project') {
     const environment = $('#requirementEnvironment').value;
     $('#requirementDialog').close();
@@ -147,8 +270,39 @@ document.addEventListener('click', async event => {
   if (action === 'git-fetch') return gitOperation({ action: 'fetch', remote: $('#gitRemote').value }, '正在获取远端全部分支');
   if (action === 'git-fetch-terminal') return gitOperation({ action: 'fetch_terminal', remote: $('#gitRemote').value }, '正在打开终端获取分支');
   if (action === 'git-prepare-master') return gitOperation({ action: 'create_branch', name: 'master', source: gitState.master_source, track: true }, '正在从远端创建本地 master');
-  if (action === 'git-switch') return gitOperation({ action: 'switch', source: $('#gitSwitch').value, path: $('#gitWorktree').value }, '正在切换工作目录分支');
+  if (action === 'git-switch') {
+    const t = gitState.project.worktrees.find(t => t.path === gitSelectedPath);
+    const shared = (t?.requirements || []).filter(q => q.id !== gitRequirementID);
+    if (shared.length && !confirm(`该目录还关联任务：${shared.map(q => q.name).join('、')}。切换会影响这些任务的实际分支，是否继续？`)) return;
+    const body = { action: 'switch', source: $('#gitSwitch').value, path: $('#gitWorktree').value };
+    if (body.source.startsWith('refs/remotes/')) body.name = $('#gitSwitchName').value.trim();
+    if (shared.length) body.allow_shared = true;
+    return gitOperation(body, '正在切换工作目录分支');
+  }
   if (action === 'git-pull') return gitOperation({ action: 'pull', path: $('#gitWorktree').value }, '正在快进拉取当前分支');
   if (action === 'git-terminal') return gitOperation({ action: 'terminal', path: $('#gitWorktree').value }, '正在打开 Git 终端');
+  if (action === 'git-push') return pushGitBranch();
+  if (action === 'git-merge-preview') {
+    const source = $('#gitMergeSource').value;
+    if (!source) return;
+    const result = await gitOperation({ action: 'merge_preview', source }, '正在预览合并');
+    if (result) {
+      $('#gitMergeSource').value = source;
+      gitMergePreviewData = { source, source_commit: result.source_commit, expected_head: result.expected_head };
+      $('#gitMergePreview').textContent = result.message + '\n目录：' + gitSelectedPath + '\n待合入提交（最多 20 条）：\n' + (result.output || '无新增提交');
+      $('#gitMergePreview').hidden = false;
+      $('[data-action="git-merge"]').disabled = false;
+    }
+    return;
+  }
+  if (action === 'git-merge' && gitMergePreviewData) return gitOperation({ action: 'merge', ...gitMergePreviewData }, '正在合并分支');
+  if (action === 'git-merge-abort') {
+    if (!confirm('中止当前合并？此次冲突解决过程中尚未提交的修改也可能被撤销。')) return;
+    return gitOperation({ action: 'merge_abort' }, '正在中止合并');
+  }
+  if (action === 'git-merge-ai') {
+    try { await launchGitMergeAI(); } catch (error) { $('#gitError').textContent = error.message; $('#gitError').hidden = false; if (error.command) showCommand(error.command); }
+    return;
+  }
   if (action === 'git-fast-forward') return gitOperation({ action: 'fast_forward', name: $('#gitFFLocal').value, source: $('#gitFFSource').value }, '正在快进更新本地分支');
 });

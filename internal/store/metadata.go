@@ -19,7 +19,7 @@ var metadataTables = []struct{ Name, Columns string }{
 	{"settings", "key,value"},
 	{"master_sync_runs", "date,started_at,finished_at,status,results"},
 	{"requirements", "id,name,slug,description,branch,path,primary_project_id,state,created_at"},
-	{"members", "requirement_id,project_id,path,base_commit,state,error"},
+	{"members", "requirement_id,project_id,path,base_commit,state,error,mode,base_ref,branch"},
 	{"requirement_sessions", "requirement_id,session_id,name,cwd,created_at,updated_at,source"},
 	{"session_create_requests", "requirement_id,request_id,session_id"},
 }
@@ -61,7 +61,23 @@ func ExportMetadata(ctx context.Context, file string) (MetadataSnapshot, error) 
 		if exists == 0 {
 			continue
 		}
-		rows, err := tx.QueryContext(ctx, "SELECT "+table.Columns+" FROM "+table.Name)
+		selectColumns := table.Columns
+		if table.Name == "members" {
+			// Export legacy databases without modifying the source environment.
+			rows, err := tx.QueryContext(ctx, "SELECT * FROM members LIMIT 0")
+			if err != nil {
+				return snapshot, err
+			}
+			columns, err := rows.Columns()
+			rows.Close()
+			if err != nil {
+				return snapshot, err
+			}
+			if len(columns) == 6 {
+				selectColumns = "requirement_id,project_id,path,base_commit,state,error,'new','refs/heads/master',''"
+			}
+		}
+		rows, err := tx.QueryContext(ctx, "SELECT "+selectColumns+" FROM "+table.Name)
 		if err != nil {
 			return snapshot, err
 		}
@@ -110,6 +126,9 @@ func (s *Store) ImportMetadata(snapshot MetadataSnapshot) error {
 		count := len(strings.Split(table.Columns, ","))
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", count), ",")
 		for _, row := range snapshot.Tables[table.Name] {
+			if table.Name == "members" && len(row) == 6 {
+				row = append(append([]any{}, row...), "new", "refs/heads/master", "")
+			}
 			if len(row) != count {
 				return fmt.Errorf("导入数据结构不匹配：%s", table.Name)
 			}

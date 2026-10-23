@@ -4,6 +4,7 @@ import "net/http"
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/requirements/{id}/launch", s.LaunchHandler)
+	mux.HandleFunc("POST /api/requirements/{id}/merge-ai", s.MergeAIHandler)
 	mux.HandleFunc("GET /api/codex/sessions", s.CodexSessionsHandler)
 	mux.HandleFunc("GET /api/requirements/{id}/sessions", s.RequirementSessionsHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/sessions", s.LinkSessionHandler)

@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS requirements (
  created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS members (
  requirement_id TEXT NOT NULL REFERENCES requirements(id), project_id TEXT NOT NULL REFERENCES projects(id),
- path TEXT NOT NULL UNIQUE, base_commit TEXT NOT NULL, state TEXT NOT NULL,
+ path TEXT NOT NULL, base_commit TEXT NOT NULL, state TEXT NOT NULL,
+ mode TEXT NOT NULL DEFAULT 'new', base_ref TEXT NOT NULL DEFAULT 'refs/heads/master', branch TEXT NOT NULL DEFAULT '',
  error TEXT NOT NULL DEFAULT '', PRIMARY KEY(requirement_id,project_id));
 CREATE TABLE IF NOT EXISTS requirement_sessions (
  requirement_id TEXT NOT NULL REFERENCES requirements(id), session_id TEXT NOT NULL,
@@ -87,7 +88,45 @@ CREATE TABLE IF NOT EXISTS session_create_requests (
  requirement_id TEXT NOT NULL REFERENCES requirements(id), request_id TEXT NOT NULL,
  session_id TEXT NOT NULL DEFAULT '', PRIMARY KEY(requirement_id,request_id));
 `)
+	if err != nil {
+		return err
+	}
+	columns, err := tableColumns(s.DB, "members")
+	if err != nil || columns["mode"] {
+		return err
+	}
+	// Existing directories may participate in multiple tasks. Retain every old
+	// member while removing the old exclusive-path constraint.
+	_, err = s.DB.Exec(`BEGIN;
+CREATE TABLE members_v2 (
+ requirement_id TEXT NOT NULL REFERENCES requirements(id), project_id TEXT NOT NULL REFERENCES projects(id),
+ path TEXT NOT NULL, base_commit TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
+ mode TEXT NOT NULL DEFAULT 'new', base_ref TEXT NOT NULL DEFAULT 'refs/heads/master', branch TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(requirement_id,project_id));
+INSERT INTO members_v2(requirement_id,project_id,path,base_commit,state,error) SELECT requirement_id,project_id,path,base_commit,state,error FROM members;
+DROP TABLE members;
+ALTER TABLE members_v2 RENAME TO members;
+COMMIT;`)
 	return err
+}
+
+func tableColumns(db *sql.DB, name string) (map[string]bool, error) {
+	rows, err := db.Query("PRAGMA table_info(" + name + ")")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var column, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &column, &kind, &notnull, &defaultValue, &pk); err != nil {
+			return nil, err
+		}
+		columns[column] = true
+	}
+	return columns, rows.Err()
 }
 func (s *Store) Projects() ([]model.Project, error) {
 	rows, err := s.DB.Query(`SELECT id,name,path,common_dir,folder,created_at FROM projects ORDER BY created_at,id`)
@@ -107,6 +146,14 @@ func (s *Store) Projects() ([]model.Project, error) {
 	return out, rows.Err()
 }
 func (s *Store) Requirements() ([]model.Requirement, error) {
+	columns, err := tableColumns(s.DB, "members")
+	if err != nil {
+		return nil, err
+	}
+	memberScope := "m.mode,m.base_ref,m.branch"
+	if !columns["mode"] {
+		memberScope = "'new','refs/heads/master',''"
+	}
 	rows, err := s.DB.Query(`SELECT id,name,slug,description,branch,path,primary_project_id,state,created_at FROM requirements ORDER BY created_at DESC,id`)
 	if err != nil {
 		return nil, err
@@ -127,15 +174,18 @@ func (s *Store) Requirements() ([]model.Requirement, error) {
 		return nil, err
 	}
 	for i := range out {
-		rows, err := s.DB.Query(`SELECT m.project_id,p.name,m.path,m.base_commit,m.state,m.error FROM members m JOIN projects p ON p.id=m.project_id WHERE m.requirement_id=? ORDER BY p.name`, out[i].ID)
+		rows, err := s.DB.Query(`SELECT m.project_id,p.name,m.path,m.base_commit,m.state,m.error,`+memberScope+` FROM members m JOIN projects p ON p.id=m.project_id WHERE m.requirement_id=? ORDER BY p.name`, out[i].ID)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var m model.Member
-			if err := rows.Scan(&m.ProjectID, &m.ProjectName, &m.Path, &m.BaseCommit, &m.State, &m.Error); err != nil {
+			if err := rows.Scan(&m.ProjectID, &m.ProjectName, &m.Path, &m.BaseCommit, &m.State, &m.Error, &m.Mode, &m.BaseRef, &m.Branch); err != nil {
 				rows.Close()
 				return nil, err
+			}
+			if m.Mode == "new" && m.Branch == "" {
+				m.Branch = out[i].Branch
 			}
 			out[i].Members = append(out[i].Members, m)
 		}

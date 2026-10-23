@@ -95,7 +95,7 @@ func TestDesktopHandshakeAuthenticatesAndChecksLiveIdentity(t *testing.T) {
 	}
 }
 
-func TestDesktopReuseRejectsDifferentVersionRootAndSessionMode(t *testing.T) {
+func TestDesktopReuseRejectsDifferentVersionAndRoot(t *testing.T) {
 	a := testApp(t)
 	a.Workspace.ReadOnlySessions = true
 	info := a.desktopInfo("http://127.0.0.1:4317")
@@ -103,7 +103,7 @@ func TestDesktopReuseRejectsDifferentVersionRootAndSessionMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"version", "protocol", "interactive", "closing", "data", "root"} {
+	for _, scenario := range []string{"version", "protocol", "closing", "data", "root"} {
 		t.Run(scenario, func(t *testing.T) {
 			candidate := info
 			root := info.Root
@@ -112,8 +112,6 @@ func TestDesktopReuseRejectsDifferentVersionRootAndSessionMode(t *testing.T) {
 				candidate.Version += "-old"
 			case "protocol":
 				candidate.Protocol = 0
-			case "interactive":
-				candidate.ReadOnly = false
 			case "closing":
 				candidate.Ready = false
 			case "data":
@@ -125,6 +123,12 @@ func TestDesktopReuseRejectsDifferentVersionRootAndSessionMode(t *testing.T) {
 				t.Fatalf("accepted %s: %v", scenario, err)
 			}
 		})
+	}
+	for _, readOnly := range []bool{false, true} {
+		info.ReadOnly = readOnly
+		if err := compatibleDesktopService(info, data, info.Root, true); err != nil {
+			t.Fatalf("session mode readOnly=%v: %v", readOnly, err)
+		}
 	}
 	if err := compatibleDesktopService(info, data, "/ignored-default-root", false); err != nil {
 		t.Fatal(err)
@@ -196,5 +200,11 @@ func TestPrepareUpgradeRejectsBusyBackend(t *testing.T) {
 	}
 	if _, err := readDesktopService(info.DataDir); err != nil {
 		t.Fatal("backend no longer healthy", err)
+	}
+	a.Workspace.GitActivity.RLock()
+	err = prepareDesktopUpgrade(info.DataDir)
+	a.Workspace.GitActivity.RUnlock()
+	if err == nil || a.Workspace.Closing.Load() {
+		t.Fatal("installer interrupted a Git network operation", err)
 	}
 }

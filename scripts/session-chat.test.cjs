@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+require('tsx/cjs');
+const { workspaceUI } = require('../frontend/workspace/renderers.tsx');
 
 function harness() {
   const elements = new Map();
@@ -11,7 +13,7 @@ function harness() {
     return elements.get(id);
   };
   const current = { requirement: 'req', session: 'session', entries: [] };
-  const context = vm.createContext({ $, sessionHistoryState: current, state: { requirements: [{ id: 'req', state: 'ready' }] }, token: 'token', AbortController, TextDecoder, URLSearchParams, crypto: { randomUUID: () => 'request' }, setInterval() { return 1; }, clearInterval() {}, document: { hidden: false }, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]), historyText: s => String(s), renderHistoryEntry: e => e.text || e.command, loadSessionHistory() {}, api: async () => ({ status: 'idle', busy: false, entries: [], approvals: [] }) });
+  const context = vm.createContext({ window: { WorkHubUI: workspaceUI }, cleanHistoryApproval: value => value, plainHistoryText: value => String(value ?? ''), $, sessionHistoryState: current, state: { requirements: [{ id: 'req', state: 'ready' }] }, token: 'token', AbortController, TextDecoder, URLSearchParams, crypto: { randomUUID: () => 'request' }, setInterval() { return 1; }, clearInterval() {}, document: { hidden: false }, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]), historyText: s => String(s), renderHistoryEntry: e => e.text || e.command, loadSessionHistory() {}, api: async () => ({ status: 'idle', busy: false, entries: [], approvals: [] }) });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/features/sessions/session-chat.js'), 'utf8'), context);
   return { context, $, current };
 }

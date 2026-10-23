@@ -21,6 +21,7 @@ type Service struct {
 	Store            *store.Store
 	Root, DataDir    string
 	Mu               sync.Mutex
+	GitActivity      sync.RWMutex // shutdown takes the writer; Git operations share readers
 	Remote           *Client
 	ReadOnlySessions bool
 	Closing          atomic.Bool

@@ -64,10 +64,18 @@ func LinkWorktrees(projects []model.Project, reqs []model.Requirement) {
 		for j := range reqs[i].Members {
 			m := &reqs[i].Members[j]
 			if t, ok := index[m.Path]; ok {
-				t.RequirementID = reqs[i].ID
-				t.RequirementName = reqs[i].Name
-				t.ExpectedBranch = reqs[i].Branch
-				m.Worktree = t
+				t.Requirements = append(t.Requirements, model.TaskLink{ID: reqs[i].ID, Name: reqs[i].Name})
+				if t.RequirementID == "" {
+					t.RequirementID = reqs[i].ID
+					t.RequirementName = reqs[i].Name
+				}
+				observed := *t
+				observed.RequirementID, observed.RequirementName = reqs[i].ID, reqs[i].Name
+				observed.ExpectedBranch = m.Branch
+				if m.Mode == "new" && observed.ExpectedBranch == "" {
+					observed.ExpectedBranch = reqs[i].Branch
+				}
+				m.Worktree = &observed
 			}
 		}
 	}

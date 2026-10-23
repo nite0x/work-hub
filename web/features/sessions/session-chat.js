@@ -17,7 +17,7 @@ function renderChatTimeline(current) {
   const savedHTML = saved.map(renderHistoryEntry).join('') || (!live.length ? `<p class="session-empty">${current.cursor ? '可加载更早记录。' : '此会话尚无已保存的消息或命令记录。'}</p>` : '');
   if (current.savedHistoryMarkup !== savedHTML) { $('#sessionHistoryEntries').innerHTML = savedHTML; current.savedHistoryMarkup = savedHTML; }
   const liveContainer = $('#sessionChatLiveEntries');
-  const liveHTML = live.length ? '<div class="chat-run-heading">本轮对话</div>' + live.map(e => e.kind === 'change' ? `<article class="history-entry"><div class="history-entry-heading"><strong>文件修改</strong><span>${esc(e.status)}</span></div><pre class="history-command-line">${historyText(e.text)}</pre></article>` : renderHistoryEntry(e)).join('') : '';
+  const liveHTML = live.length ? '<div class="chat-run-heading">本轮对话</div>' + live.map(e => e.kind === 'change' ? window.WorkHubUI.fileChange(plainHistoryText(e.text), e.status) : renderHistoryEntry(e)).join('') : '';
   if (current.liveHistoryMarkup !== liveHTML) { liveContainer.innerHTML = liveHTML; current.liveHistoryMarkup = liveHTML; }
   containers.forEach(container => container.querySelectorAll('[data-history-entry]').forEach(node => {
     const detail = node.querySelector('details');
@@ -50,7 +50,7 @@ function renderChatApprovals(current) {
   const signature = JSON.stringify(approvals);
   if (current.approvalSignature === signature) return;
   current.approvalSignature = signature;
-  $('#sessionChatApprovals').innerHTML = approvals.map(a => `<form class="chat-approval" data-chat-approval="${esc(a.id)}"><strong>${esc(a.title)}</strong>${a.details ? `<pre>${historyText(a.details)}</pre>` : ''}${(a.questions || []).map(q => `<label class="chat-question">${esc(q.header)} · ${esc(q.question)}${q.options?.length ? `<select data-answer-for="${esc(q.id)}"><option value="">选择一个回答，或在下方补充</option>${q.options.map(o => `<option value="${esc(o.label)}">${esc(o.label)}${o.description ? ' — ' + esc(o.description) : ''}</option>`).join('')}</select>` : ''}<input type="${q.isSecret ? 'password' : 'text'}" data-free-answer-for="${esc(q.id)}" autocomplete="off" placeholder="输入回答或补充说明"></label>`).join('')}<div class="detail-actions"><button type="button" class="button small secondary" data-chat-decision="decline">拒绝</button>${a.can_accept ? `<button type="submit" class="button small primary">${a.kind === 'questions' ? '提交回答' : '允许一次'}</button>` : ''}</div></form>`).join('');
+  $('#sessionChatApprovals').innerHTML = window.WorkHubUI.chatApprovals(approvals.map(cleanHistoryApproval));
 }
 function applyChatState(current, chat) {
   if (sessionHistoryState !== current) return;
@@ -73,7 +73,7 @@ function applyChatState(current, chat) {
     renderChatTimeline(current);
     if (follow) scroll.scrollTop = scroll.scrollHeight;
   }
-  if (previous?.busy && !chat.busy) loadSessionHistory();
+  if (previous?.busy && !chat.busy) { loadSessionHistory(); if (typeof refresh === 'function') refresh(true); }
   else if (chat.turn_id && !previous?.turn_id && current.newlyCreated) loadSessionHistory();
 }
 async function pollChat(current) {

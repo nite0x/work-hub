@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/platform"
 	"worktree-hub/internal/workspace"
 )
 
@@ -13,10 +14,13 @@ type Service struct {
 	cache            *stateCache
 	CredentialHelper string
 	masterSyncMu     sync.Mutex
+	gitLocks         sync.Map // common Git directory -> *sync.Mutex
+	OpenEditor       func(tool, path, distro string) error
+	OpenExternal     func(string) error
 }
 
 func New(environment *workspace.Service) *Service {
-	s := &Service{Workspace: environment, cache: newStateCache(), CredentialHelper: workspace.CredentialHelperCommand()}
+	s := &Service{Workspace: environment, cache: newStateCache(), CredentialHelper: workspace.CredentialHelperCommand(), OpenEditor: platform.OpenEditor, OpenExternal: platform.OpenExternal}
 	if environment.Remote != nil {
 		s.CredentialHelper = environment.Remote.Identity.CredentialHelper
 		s.cache.ctx = workspace.WithClient(s.cache.ctx, environment.Remote)
@@ -25,6 +29,13 @@ func New(environment *workspace.Service) *Service {
 }
 
 func (s *Service) Close() { s.cache.Close() }
+
+func (s *Service) lockGit(common string) func() {
+	value, _ := s.gitLocks.LoadOrStore(common, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 func (s *Service) Snapshot(projects []model.Project, force bool) (bool, string) {
 	return s.cache.snapshot(projects, force)
 }

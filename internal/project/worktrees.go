@@ -60,7 +60,10 @@ func (a *Service) CreateWorktreeHandler(w http.ResponseWriter, r *http.Request) 
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
-	source, commit := in.Source, ""
+	source, commit := strings.TrimSpace(in.Source), ""
+	if source == "" && in.Mode == "new" {
+		source = workspace.DefaultBranchSource(r.Context(), p.Path)
+	}
 	if in.Mode == "existing" {
 		b, err := findBranch(v, "refs/heads/"+in.Branch, "local")
 		if err != nil {

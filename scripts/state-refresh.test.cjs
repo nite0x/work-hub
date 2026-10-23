@@ -3,6 +3,10 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
+require('tsx/cjs');
+const { workspaceUI } = require('../frontend/workspace/renderers.tsx');
+const { JSDOM } = require('jsdom');
+const markup = html => new JSDOM(html).window.document;
 
 function snapshot(updatedAt = '2026-10-22T05:23:13Z', refreshing = false) {
   const tree = { path: '/workspace/app', branch: 'codex/task', dirty: 0, refreshing };
@@ -41,7 +45,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
-    window: { addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams, DOMException,
+    window: { WorkHubUI: workspaceUI, addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams, DOMException,
     setTimeout: (callback, delay) => { timers.push(delay); return timers.length; },
     clearTimeout() {}, renderSettings() {}, refreshRequirementProjectPicker() {},
     renderRequirementSessions() { return ''; }, refreshRequirementSessions() {},
@@ -58,7 +62,9 @@ function harness({ fullPage = false, readOnly = false } = {}) {
     }
   });
   const scripts = fullPage
-    ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer><\/script>/g)].map(match => match[1])
+    ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer(?: data-ui-bundle)?><\/script>/g)]
+      // This VM exercises business scripts; component mounting is checked in a browser.
+      .filter(match => !match[0].includes('data-ui-bundle')).map(match => match[1])
       .filter(file => !readOnly || !['features/sessions/session-chat.js', 'features/sessions/session-create.js'].includes(file))
     : ['core/core.js', 'features/projects/projects.js', 'features/tasks/requirements.js', 'core/app.js'];
   for (const file of scripts) {
@@ -185,10 +191,10 @@ test('the first completed check enables project actions even with no Git changes
   const h = harness();
   await h.refresh(snapshot(null, true));
   assert.match(h.element('#content').innerHTML, /正在检查/);
-  assert.match(h.element('#content').innerHTML, /aria-label="打开 app 的终端" disabled/);
+  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]').disabled, true);
   await h.refresh(snapshot());
   assert.equal(h.element('#content').writes, 2);
-  assert.match(h.element('#content').innerHTML, /aria-label="打开 app 的终端" >打开终端/);
+  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]').disabled, false);
   assert.match(h.element('#content').innerHTML, /干净/);
 });
 
@@ -252,4 +258,33 @@ test('macOS settings show Terminal and hide WSL without discarding unsaved termi
   assert.equal(h.element('#terminalKind').value, 'custom');
   assert.equal(h.element('#terminalStyle').value, 'command');
   assert.equal(h.element('#terminalPath').value, '/my unsaved terminal');
+});
+
+test('reused task directories report branch changes while remaining usable on their own branch and detached HEAD', async () => {
+  for (const patch of [{ branch: 'main' }, { branch: '', detached: true }]) {
+    const h = harness();
+    const data = snapshot();
+    data.projects[0].has_master = false;
+    Object.assign(data.requirements[0].members[0], { mode: 'worktree', branch: 'existing' });
+    Object.assign(data.requirements[0].members[0].worktree, patch);
+    await h.refresh(data);
+    const html = h.element('#content').innerHTML;
+    assert.doesNotMatch(html, /缺少 master|无本地 master/);
+    assert.match(html, /分支已变化/);
+    assert.equal(markup(html).querySelector('[data-action="git-task-adopt"]').disabled, !!patch.detached);
+    assert.equal(markup(html).querySelector('[data-action="launch"]').disabled, false);
+    assert.match(html, /已有工作目录/);
+  }
+});
+
+test('new task directories use their individual expected branch and recorded source', async () => {
+  const h = harness();
+  const data = snapshot();
+  Object.assign(data.requirements[0].members[0], { mode: 'new', branch: 'custom/task', base_ref: 'refs/heads/release' });
+  data.requirements[0].members[0].worktree.branch = 'custom/task';
+  await h.refresh(data);
+  assert.doesNotMatch(h.element('#content').innerHTML, /分支已变化/);
+  const document = markup(h.element('#content').innerHTML);
+  assert.equal(document.querySelector('[data-action="launch"]').disabled, false);
+  assert([...document.querySelectorAll('.branch')].some(node => node.textContent === 'release'));
 });

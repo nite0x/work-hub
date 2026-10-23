@@ -122,7 +122,6 @@ pub fn start(
         || service.protocol != 1
         || service.version != env!("WORK_HUB_BACKEND_VERSION")
         || !service.ready
-        || !service.read_only_sessions
     {
         return Err("后台版本或启动信息不兼容，请安全停止旧后台后重新打开".into());
     }

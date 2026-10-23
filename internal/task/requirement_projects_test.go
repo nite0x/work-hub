@@ -81,18 +81,14 @@ func TestAddTaskProjectsUsesSavedWorkspaceAndPreservesExistingWork(t *testing.T)
 }
 
 func TestAddTaskProjectsPreflightsWholeBatch(t *testing.T) {
-	for _, conflict := range []string{"missing master", "branch", "directory", "symlink", "brief symlink"} {
+	for _, conflict := range []string{"branch", "directory", "symlink", "brief symlink"} {
 		t.Run(conflict, func(t *testing.T) {
 			a := testApp(t)
 			primary := register(t, a, "Primary", repo(t, "primary", "master"))
 			_, q, _ := create(t, a, primary, nil, "preflight-add")
 			goodPath := repo(t, "good", "master")
 			good := register(t, a, "Good", goodPath)
-			initialBranch := "master"
-			if conflict == "missing master" {
-				initialBranch = "main"
-			}
-			badPath := repo(t, "bad", initialBranch)
+			badPath := repo(t, "bad", "main")
 			bad := register(t, a, "Bad", badPath)
 			destination := filepath.Join(q.Path, "bad")
 			switch conflict {

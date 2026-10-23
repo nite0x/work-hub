@@ -9,8 +9,7 @@ function renderHistoryAttention(current) {
   const signature = JSON.stringify([current.pushConnected, current.pushWaiting, confirmations]);
   if (current.attentionSignature === signature) return;
   current.attentionSignature = signature;
-  const hint = current.pushConnected ? '请回到原终端回答或确认，处理后此提醒会自动消失。' : '实时连接已断开，以下提示可能已处理；重连后会重新核实，请以原终端为准。';
-  container.innerHTML = `<strong>${current.pushConnected ? '需要你处理' : '待确认状态尚未核实'}${confirmations.length ? ' · ' + confirmations.length + ' 项' : ''}</strong><p>${hint}</p>` + confirmations.map(item => `<article class="session-confirmation"><strong>${historyText(item.title)}</strong>${item.details ? `<pre>${historyText(item.details)}</pre>` : ''}${(item.questions || []).map(question => `<p><strong>${historyText(question.header)}</strong>${question.header ? ' · ' : ''}${historyText(question.question)}</p>${question.options?.length ? `<ul>${question.options.map(option => `<li>${historyText(option.label)}${option.description ? '：' + historyText(option.description) : ''}</li>`).join('')}</ul>` : ''}`).join('')}</article>`).join('') + (!confirmations.length ? '<p>终端正在等待审批或回答，请在终端查看具体问题。</p>' : '');
+  container.innerHTML = window.WorkHubUI.historyAttention(current.pushConnected, confirmations.map(cleanHistoryApproval));
 }
 
 function mergeHistoryPush(current, entries) {

@@ -22,7 +22,7 @@ async function openWorktree(id) {
     $('#worktreeTitle').textContent = '创建 Worktree · ' + overview.project.name;
     $('#worktreeProject').textContent = overview.project.path;
     $('#worktreeSource').innerHTML = sourceOptions(overview);
-    $('#worktreeSource').value = overview.project.has_master ? 'refs/heads/master' : '';
+    $('#worktreeSource').value = defaultBranchSource(overview);
     $('#worktreeExisting').innerHTML = '<option value="">请选择未被占用的本地分支</option>' + overview.branches.filter(b => b.kind === 'local').map(b => `<option value="${esc(b.name)}" ${b.worktrees.length ? 'disabled' : ''}>${esc(b.name)}${b.worktrees.length ? '（已被 worktree 占用）' : ''}</option>`).join('');
     form.hidden = false;
     updateWorktreePreview();
@@ -48,7 +48,7 @@ function updateWorktreePreview() {
   const selected = worktreeOverview.branches.find(b => b.ref === ref);
   $('#worktreeSourceNote').textContent = existing
     ? (selected ? `将在新目录检出已有分支 ${selected.name}（${selected.commit.slice(0, 8)}），不创建新分支。` : '请选择未被占用的本地分支。如果没有可用分支，请选择新建分支。')
-    : (selected ? `新分支将从 ${selected.name}（${selected.commit.slice(0, 8)}）创建。` : ref === 'HEAD' ? '你选择了当前 HEAD 作为起点，请确认这是需要的代码基线。' : '请选择明确的来源分支。独立 worktree 可使用任意已有分支；创建任务仍使用本地 master 作为基线。');
+    : (selected ? `新分支将从 ${selected.name}（${selected.commit.slice(0, 8)}）创建。` : ref === 'HEAD' ? '你选择了当前 HEAD 作为起点，请确认这是需要的代码基线。' : '请选择来源分支。');
 }
 
 $('#worktreeForm').addEventListener('input', event => {

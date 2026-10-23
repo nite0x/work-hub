@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {ChatController, type ChatOptions} from "../frontend/chat/controller";
-import {idleChat, readSnapshots, mergeEntries, type ChatState} from "../frontend/chat/model";
+import {convertEntries, convertEntry, idleChat, readSnapshots, mergeEntries, type ChatState} from "../frontend/chat/model";
 
 const task = {id: "task", name: "跨项目任务", state: "ready", primary_project_id: "p", members: [{project_id:"p", project_name:"项目", path:"/home/test/workspaces/task/p"}]};
 const session = {id:"thread", name:"会话", cwd:task.members[0].path};
@@ -9,6 +9,46 @@ function setup(request: ChatOptions["request"], isNew = false) {
   return new ChatController({task, session: isNew ? null : session, environment:"wsl-ubuntu", request, stream: async () => {throw new Error("offline");}, created() {}, close() {}});
 }
 const running = (id = "request"): ChatState => ({...idleChat(), id, turn_id:"turn", status:"running", busy:true});
+
+test("official tool rendering receives live output without marking an executing command complete", () => {
+  const message = convertEntry({id:"command", turn_id:"turn", kind:"command", command:"npm test", cwd:"/workspace", status:"inProgress", output:"\x1b[32mstarted\x1b[0m"});
+  assert.equal(message.status?.type,"running");
+  assert.notEqual(typeof message.content,"string");
+  const part = message.content[0];
+  assert.equal(typeof part,"object");
+  if (typeof part !== "object" || part.type !== "tool-call") throw new Error("Expected a tool call");
+  assert.deepEqual(part.args,{command:"npm test",cwd:"/workspace"});
+  assert.equal(part.isPreliminary,true);
+  assert.equal(part.result.output,"started");
+  assert.deepEqual(JSON.parse(part.argsText || ""),part.args);
+});
+
+test("official tool rendering retains failure details and file changes as inert data", () => {
+  const message = convertEntry({id:"command",turn_id:"turn",kind:"command",command:"npm test",status:"failed",output:"<script>failed</script>",exit_code:1,duration_ms:1200});
+  const part = message.content[0];
+  if (typeof part !== "object" || part.type !== "tool-call") throw new Error("Expected a tool call");
+  assert.equal(part.isError,true);
+  assert.equal(part.isPreliminary,undefined);
+  assert.deepEqual(part.result,{status:"failed",output:"<script>failed</script>",exit_code:1,duration_ms:1200});
+  const change = convertEntry({id:"diff",turn_id:"turn",kind:"change",text:"+ added\n- removed",status:"completed"}).content[0];
+  if (typeof change !== "object" || change.type !== "tool-call") throw new Error("Expected a file change tool call");
+  assert.deepEqual(change.args,{changes:"+ added\n- removed"});
+});
+
+test("assistant text and tools share one stable message per turn without merging user turns", () => {
+  const entries = [{id:"u",turn_id:"first",kind:"user",text:"检查项目"},{id:"a",turn_id:"first",kind:"assistant",text:"开始检查"},{id:"b",turn_id:"first",kind:"assistant",text:"先运行测试"},{id:"c",turn_id:"first",kind:"command",command:"npm test",status:"inProgress"},{id:"d",turn_id:"first",kind:"assistant",text:"等待结果"},{id:"u",turn_id:"second",kind:"user",text:"继续"},{id:"a",turn_id:"second",kind:"assistant",text:"继续处理"}];
+  const messages = convertEntries(entries);
+  assert.equal(messages.length,4);
+  assert.deepEqual(messages.map(message=>message.role),["user","assistant","user","assistant"]);
+  assert.equal(messages[1].status?.type,"running");
+  const content = messages[1].content;
+  if(typeof content === "string") throw new Error("Expected message parts");
+  assert.deepEqual(content.map(part=>part.type),["text","tool-call","text"]);
+  assert.equal(content[0].type === "text" && content[0].text,"开始检查\n\n先运行测试");
+  const updated = convertEntries(entries.map(entry=>entry.id === "c" ? {...entry,status:"completed",output:"passed"} : entry));
+  assert.equal(updated[1].id,messages[1].id);
+  assert.equal(updated[1].status?.type,"complete");
+});
 
 test("a lost creation response reuses its idempotency key and binds the created thread", async () => {
   const bodies: any[] = [];
