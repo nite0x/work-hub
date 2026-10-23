@@ -19,7 +19,7 @@ function harness() {
   const context = vm.createContext({
     $, AbortController, URLSearchParams, CSS: { escape: s => s },
     state: { requirements: [{ id: 'req', state: 'ready' }] },
-    requirementSessions: new Map(),
+    requirementSessions: new Map(), markSessionRead() {},
     document: { hidden: false, addEventListener(event, handler) { listeners.set(event, handler); }, querySelector() { return null; } },
     window: { WorkHubUI: workspaceUI, addEventListener() {} },
     setInterval(callback, delay) { timers.set(++timerID, { callback, delay }); return timerID; },

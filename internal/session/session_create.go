@@ -18,18 +18,23 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	var input struct {
-		Text      string `json:"text"`
-		Project   string `json:"project_id"`
-		RequestID string `json:"request_id"`
-		Purpose   string `json:"purpose"`
-		MergeHead string `json:"merge_head"`
+		Text      string   `json:"text"`
+		Project   string   `json:"project_id"`
+		RequestID string   `json:"request_id"`
+		Purpose   string   `json:"purpose"`
+		MergeHead string   `json:"merge_head"`
+		Images    []string `json:"images"`
 	}
-	if !httpx.Decode(w, r, &input) {
+	if !httpx.DecodeLimit(w, r, &input, chatRequestLimit) {
+		return
+	}
+	if err := validateChatImages(input.Images); err != nil {
+		httpx.WriteError(w, 400, err.Error())
 		return
 	}
 	input.Text = strings.TrimSpace(input.Text)
-	if (input.Text == "" && input.Purpose != "merge_conflict") || len(input.Text) > 64000 || input.RequestID == "" || len(input.RequestID) > 100 || (input.Purpose != "" && input.Purpose != "merge_conflict") {
-		httpx.WriteError(w, 400, "请输入第一条消息（最多 64000 字节）并提供创建标识")
+	if (input.Text == "" && len(input.Images) == 0 && input.Purpose != "merge_conflict") || len(input.Text) > 64000 || input.RequestID == "" || len(input.RequestID) > 100 || (input.Purpose != "" && input.Purpose != "merge_conflict") {
+		httpx.WriteError(w, 400, "请输入第一条消息或添加图片（文字最多 64000 字节）并提供创建标识")
 		return
 	}
 	// Persist the idempotency key before making any remote mutation. An uncertain
@@ -145,7 +150,7 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 	// Keep this exact connection through the first turn: a new thread has no
 	// resumable rollout until that turn has begun.
 	keep = true
-	go a.DriveChat(ctx, run, plan, input.Text)
+	go a.DriveChat(ctx, run, plan, input.Text, input.Images...)
 	a.WriteCreatedSession(w, id, s.ID, 202)
 }
 func (a *Service) WriteCreatedSession(w http.ResponseWriter, requirement, session string, status int) {

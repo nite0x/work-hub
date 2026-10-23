@@ -26,7 +26,7 @@ function saveSessionRead(session) {
 }
 function sessionWithUnread(session) {
   const seen = sessionReadProgress(session);
-  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && !document.hidden;
+  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && !document.hidden && !document.getElementById('taskConversation')?.hidden;
   if (open) saveSessionRead(session);
   return { ...session, unread: !open && ((session.updated_at || 0) > seen.time || !!session.completed_run && session.completed_run !== seen.run) };
 }
@@ -58,7 +58,24 @@ function updateRequirementSessionsView(id) {
   if (state.selectedRequirement !== id || state.view !== 'requirements') return;
   const q = state.requirements.find(q => q.id === id);
   const container = $('#requirementSessions');
-  if (q && container) container.outerHTML = renderRequirementSessions(q);
+  if (q && container) {
+    const view = $('#taskSessionsView');
+    const top = view?.scrollTop || 0;
+    const focused = container.contains(document.activeElement) ? document.activeElement : null;
+    const focusSession = focused?.dataset.session;
+    const focusAction = focused?.dataset.sessionAction;
+    const markup = renderRequirementSessions(q);
+    if (container.outerHTML !== markup) {
+      container.outerHTML = markup;
+      const next = $('#requirementSessions');
+      if (view) view.scrollTop = top;
+      if (focused) {
+        const target = [...next.querySelectorAll('[data-session-action]')].find(node => node.dataset.session === focusSession && node.dataset.sessionAction === focusAction);
+        (target || next.querySelector('button'))?.focus({preventScroll: true});
+      }
+    }
+  }
+  if (typeof updateTaskConversationStatus === 'function') updateTaskConversationStatus();
 }
 
 async function refreshRequirementSessions(id, force = true) {

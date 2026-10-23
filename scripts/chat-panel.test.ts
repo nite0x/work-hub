@@ -24,16 +24,21 @@ function mount(existing = false, entries: Entry[] = []) {
   Object.assign(w,{TransformStream,ReadableStream,WritableStream,TextEncoder,TextDecoder,Response,Request,Headers,ResizeObserver:class {observe(){} unobserve(){} disconnect(){}},IntersectionObserver:class {observe(){} unobserve(){} disconnect(){}},matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}})});
   w.HTMLElement.prototype.scrollTo = function() {};
   w.HTMLElement.prototype.scrollIntoView = function() {};
+  w.URL.createObjectURL = () => "blob:http://localhost/test-image";
+  w.URL.revokeObjectURL = () => {};
   w.eval(bundle);
   const calls: {path:string;body:any}[] = [];
+  let sendFailures = 0;
   let chat: ChatState = idleChat();
   const options = {task,session:existing?session:null,environment:"local",created(){},close(){bridge.close();},stream:async()=>{throw new Error("fixture offline");},request:async(path:string,init?:RequestInit)=>{
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({path,body});
+    if (body && (path.endsWith("/sessions/new") || path.endsWith("/chat")) && sendFailures-- > 0) throw new Error("发送失败，请重试");
     if(path.includes("/history")) return {session,entries};
     if(path.endsWith("/sessions/new")) return {session,chat:{...idleChat(),id:body.request_id,status:"completed",turn_id:"turn",entries:[{id:"u",turn_id:"turn",kind:"user",text:body.text}]}};
     if(path.endsWith("/chat/stop")) {chat={...chat,busy:false,status:"interrupted"}; return chat;}
     if(path.endsWith("/chat/approval")) {chat={...chat,approvals:[]}; return chat;}
+    if(path.endsWith("/chat") && body) return {...idleChat(),id:body.request_id,status:"completed",turn_id:"turn"};
     return chat;
   }};
   const bridge = (w as any).ChatTest.bridge;
@@ -43,15 +48,109 @@ function mount(existing = false, entries: Entry[] = []) {
     Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype,"value")!.set!.call(input(),text);
     input().dispatchEvent(new w.Event("input",{bubbles:true}));
   };
-  return {w,errors,calls,bridge,options,input,type,setChat:(value:ChatState)=>{chat=value;},dispose(){bridge.close();dom.window.close();}};
+  return {w,errors,calls,bridge,options,input,type,setChat:(value:ChatState)=>{chat=value;},failSends:(count:number)=>{sendFailures=count;},dispose(){bridge.close();dom.window.close();}};
 }
+
+const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII=";
+function pasteImage(h: ReturnType<typeof mount>, file = new h.w.File([Uint8Array.from(h.w.atob(png), c => c.charCodeAt(0))], "截图.png", {type:"image/png"})) {
+  const event = new h.w.Event("paste", {bubbles:true,cancelable:true});
+  Object.defineProperty(event, "clipboardData", {value:{files:[file]}});
+  h.input().dispatchEvent(event);
+  assert.equal(event.defaultPrevented, true);
+}
+
+test("pasted screenshots retain their preview across reopening and send without text in new and existing chats", async () => {
+  for (const existing of [false,true]) {
+    const h = mount(existing);
+    try {
+      await until(()=>h.input());
+      pasteImage(h);
+      await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+      h.bridge.close(); await tick(); h.bridge.open(h.options);
+      await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+      h.input().dispatchEvent(new h.w.KeyboardEvent("keydown",{key:"Enter",ctrlKey:true,bubbles:true,cancelable:true}));
+      await until(()=>h.calls.some(call=>call.body?.images));
+      const call = h.calls.find(call=>call.body?.images)!;
+      assert.equal(call.path.endsWith(existing ? "/chat" : "/sessions/new"),true);
+      assert.equal(call.body.text, "");
+      assert.deepEqual(call.body.images,["data:image/png;base64,"+png]);
+      assert.deepEqual(h.errors,[]);
+    } finally {h.dispose();}
+  }
+});
+
+test("a failed image send retains attachments for retry and removing an image excludes it from the message", async () => {
+  const h = mount();
+  try {
+    await until(()=>h.input()); pasteImage(h);
+    await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+    h.failSends(1);
+    h.w.document.querySelector<HTMLButtonElement>(".aui-composer-send")!.click();
+    await until(()=>h.w.document.body.textContent?.includes("发送失败，请重试"));
+    await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+    h.w.document.querySelector<HTMLButtonElement>(".aui-composer-send")!.click();
+    await until(()=>h.calls.filter(call=>call.body?.images).length===2);
+    const sends = h.calls.filter(call=>call.body?.images);
+    assert.equal(sends[0].body.request_id,sends[1].body.request_id);
+    assert.deepEqual(sends[0].body.images,sends[1].body.images);
+    assert.deepEqual(h.errors,[]);
+  } finally {h.dispose();}
+  const removed = mount();
+  try {
+    await until(()=>removed.input()); pasteImage(removed);
+    await until(()=>removed.w.document.querySelector(".aui-attachment-tile-remove"));
+    removed.w.document.querySelector<HTMLButtonElement>(".aui-attachment-tile-remove")!.click();
+    await until(()=>!removed.w.document.querySelector(".aui-attachment-tile-remove"));
+    removed.type("只发文字"); await tick();
+    removed.w.document.querySelector<HTMLButtonElement>(".aui-composer-send")!.click();
+    await until(()=>removed.calls.some(call=>call.body?.text));
+    assert.equal(removed.calls.find(call=>call.body?.text)!.body.images,undefined);
+    assert.deepEqual(removed.errors,[]);
+  } finally {removed.dispose();}
+});
+
+test("oversized pasted images display an error without adding an attachment", async () => {
+  const h = mount();
+  try {
+    await until(()=>h.input());
+    pasteImage(h, new h.w.File([new Uint8Array(4*1024*1024+1)],"large.png",{type:"image/png"}));
+    await until(()=>h.w.document.body.textContent?.includes("每张不能超过 4 MiB"));
+    assert.equal(h.w.document.querySelector(".aui-attachment-tile-remove"),null);
+    assert.deepEqual(h.errors,[]);
+  } finally {h.dispose();}
+});
+
+test("an image is restored when Codex fails before starting a turn", async () => {
+  const h = mount(true);
+  const originalRequest = h.options.request;
+  h.options.request = async (path, init) => {
+    if (path.endsWith("/chat") && init?.body) {
+      const body = JSON.parse(String(init.body));
+      const starting = {...idleChat(),id:body.request_id,status:"starting",busy:true};
+      h.setChat({...idleChat(),id:body.request_id,status:"failed",error:"无法启动"});
+      return starting;
+    }
+    return originalRequest(path, init);
+  };
+  // Rebind the same session with the request behavior above.
+  h.bridge.open(h.options);
+  try {
+    await until(()=>h.input()); pasteImage(h);
+    await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+    h.w.document.querySelector<HTMLButtonElement>(".aui-composer-send")!.click();
+    await until(()=>h.w.document.body.textContent?.includes("本轮未完成"));
+    await until(()=>h.w.document.querySelector(".aui-attachment-tile-remove"));
+    assert.equal(h.w.document.querySelectorAll(".aui-attachment-tile-remove").length,1);
+    assert.deepEqual(h.errors,[]);
+  } finally {h.dispose();}
+});
 
 test("official composer keeps drafts across reopening and sends through the existing creation API", async () => {
   const h = mount();
   try {
     await until(()=>h.input());
     assert.equal(h.w.document.querySelector(".aui-thread-root")!=null,true);
-    assert.equal(h.w.document.querySelector(".aui-composer-add-attachment"),null);
+    assert.ok(h.w.document.querySelector(".aui-composer-add-attachment"));
     h.type("继续完成任务"); await tick();
     assert.equal(h.input().value,"继续完成任务");
     h.input().dispatchEvent(new h.w.KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true}));
@@ -79,6 +178,47 @@ test("official Markdown and tool components render existing history and expose c
     assert.match(h.w.document.querySelector(".aui-tool-fallback-result")?.textContent||"",/not executable/);
     assert.deepEqual(h.errors,[]);
   } finally {h.dispose();}
+});
+
+test("chat chrome keeps context available without repeated task labels or idle hints", async () => {
+  const h = mount(true, [{id:"a",turn_id:"turn",kind:"assistant",text:"当前检查已完成。"}]);
+  try {
+    await until(() => h.input());
+    assert.equal(h.w.document.querySelector("footer"), null);
+    assert.doesNotMatch(h.w.document.body.textContent || "", /可以在这里继续对话|可粘贴或拖入图片|Ctrl\+Enter 发送/);
+    assert.doesNotMatch(h.w.document.querySelector(".chat-panel-header")?.textContent || "", /测试任务/);
+    const context = h.w.document.querySelector<HTMLDetailsElement>(".chat-context")!;
+    assert.equal(context.open, false);
+    assert.match(context.querySelector("summary")?.textContent || "", /项目/);
+    assert.match(context.textContent || "", /\/workspace\/project/);
+    assert(h.w.document.querySelector('[aria-label="刷新历史"]'));
+    assert.deepEqual(h.errors, []);
+  } finally { h.dispose(); }
+});
+
+test("switching sessions and tasks restores each composer and its reading position", async () => {
+  const h = mount(true, [{id: "reply", turn_id: "turn", kind: "assistant", text: "一段需要保留阅读位置的历史记录"}]);
+  try {
+    await until(() => h.input());
+    h.type("第一个会话的草稿"); await tick();
+    const viewport = h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
+    Object.defineProperties(viewport, {scrollHeight: {value: 2400}, clientHeight: {value: 400}});
+    viewport.scrollTop = 360;
+    viewport.dispatchEvent(new h.w.Event("scroll"));
+    const second = {...h.options, session: {...session, id: "second"}};
+    h.bridge.open(second); await until(() => h.input()?.value === "");
+    h.type("第二个会话的草稿"); await tick();
+    h.bridge.open({...h.options, task: {...task, id: "other-task"}});
+    await until(() => h.input()?.value === "");
+    h.type("其他任务的草稿"); await tick();
+    h.bridge.open(h.options);
+    await until(() => h.input()?.value === "第一个会话的草稿");
+    await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 360);
+    h.bridge.open(second);
+    await until(() => h.input()?.value === "第二个会话的草稿");
+    assert.deepEqual(h.errors, []);
+    assert(!h.calls.some(call => call.body));
+  } finally { h.dispose(); }
 });
 
 test("official stop control and application approval fields retain their existing API targets", async () => {

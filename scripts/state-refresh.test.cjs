@@ -25,7 +25,10 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       let html = '';
       elements.set(selector, {
         content: selector === 'meta[name="session-mode"]' ? (readOnly ? 'read-only' : 'interactive') : 'token',
-        value: '', checked: false, hidden: false, writes: 0,
+        value: '', checked: false, hidden: false, writes: 0, scrollTop: 0, dataset: {},
+        style: {setProperty() {}}, getBoundingClientRect() { return {width: 0}; },
+        setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
+        querySelector: element, contains() { return false; },
         classList: { toggle() {}, remove() {} }, addEventListener() {}, querySelectorAll() { return []; },
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
@@ -41,11 +44,12 @@ function harness({ fullPage = false, readOnly = false } = {}) {
   let failure;
   const context = vm.createContext({
     document: {
+      body: element('body'),
       querySelector: element,
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
-    window: { WorkHubUI: workspaceUI, addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams, DOMException,
+    window: { WorkHubUI: workspaceUI, dispatchEvent() {}, addEventListener(event, handler) { if (event === 'DOMContentLoaded') ready.push(handler); } }, location: { hash: '#/requirements/task', search: '' }, URLSearchParams, DOMException, CustomEvent: class {},
     setTimeout: (callback, delay) => { timers.push(delay); return timers.length; },
     clearTimeout() {}, renderSettings() {}, refreshRequirementProjectPicker() {},
     renderRequirementSessions() { return ''; }, refreshRequirementSessions() {},
@@ -191,10 +195,10 @@ test('the first completed check enables project actions even with no Git changes
   const h = harness();
   await h.refresh(snapshot(null, true));
   assert.match(h.element('#content').innerHTML, /正在检查/);
-  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]').disabled, true);
+  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-project-open-primary]').disabled, true);
   await h.refresh(snapshot());
   assert.equal(h.element('#content').writes, 2);
-  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]').disabled, false);
+  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-project-open-primary]').disabled, false);
   assert.match(h.element('#content').innerHTML, /干净/);
 });
 
@@ -228,8 +232,8 @@ for (const readOnly of [true, false]) {
     assert.equal(vm.runInContext('state.loaded', h.context), true);
     assert.equal(vm.runInContext('sessionReadOnly', h.context), readOnly);
     assert.equal(h.element('#offlineBanner').hidden, true);
-    assert.match(h.element('#content').innerHTML, /打开终端/);
-    assert.match(h.element('#content').innerHTML, /关联会话/);
+    assert(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]'));
+    assert.match(h.element('#taskSessionsContainer').innerHTML, /关联已有会话/);
     assert.equal(vm.runInContext('typeof openSessionChat', h.context), readOnly ? 'undefined' : 'function');
     // Navigation must still find both domain renderers after splitting the entry script.
     vm.runInContext("state.view = 'projects'; state.selectedProject = 'app'; render()", h.context);
@@ -272,7 +276,7 @@ test('reused task directories report branch changes while remaining usable on th
     assert.doesNotMatch(html, /缺少 master|无本地 master/);
     assert.match(html, /分支已变化/);
     assert.equal(markup(html).querySelector('[data-action="git-task-adopt"]').disabled, !!patch.detached);
-    assert.equal(markup(html).querySelector('[data-action="launch"]').disabled, false);
+    assert.equal(markup(h.element('#taskPageActions').innerHTML).querySelector('[data-action="launch"]').disabled, false);
     assert.match(html, /已有工作目录/);
   }
 });
@@ -285,6 +289,6 @@ test('new task directories use their individual expected branch and recorded sou
   await h.refresh(data);
   assert.doesNotMatch(h.element('#content').innerHTML, /分支已变化/);
   const document = markup(h.element('#content').innerHTML);
-  assert.equal(document.querySelector('[data-action="launch"]').disabled, false);
-  assert([...document.querySelectorAll('.branch')].some(node => node.textContent === 'release'));
+  assert.equal(markup(h.element('#taskPageActions').innerHTML).querySelector('[data-action="launch"]').disabled, false);
+  assert([...document.querySelectorAll('.task-project-details code')].some(node => node.textContent === 'release'));
 });

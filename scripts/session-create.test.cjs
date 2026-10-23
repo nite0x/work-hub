@@ -20,7 +20,7 @@ function harness() {
     document: { addEventListener() {}, querySelector() { return null; }, hidden: false },
     window: { WorkHubUI: workspaceUI, addEventListener() {} }, setInterval() { timers++; return timers; }, clearInterval() {},
     state: { view: 'requirements', selectedRequirement: 'req', requirements: [{ id: 'req', name: '开发工作区', state: 'ready', primary_project_id: 'main', members: [{ project_id: 'main', project_name: 'Main', path: '/work/main' }, { project_id: 'other', project_name: 'Other', path: '/work/other' }] }] },
-    requirementSessions: new Map(), updateRequirementSessionsView() {}, esc: s => String(s ?? ''),
+    requirementSessions: new Map(), updateRequirementSessionsView() {}, markSessionRead() {}, updateSessionChatActivity() {}, esc: s => String(s ?? ''),
     api(url, options) {
       if (url.endsWith('/sessions/new')) return new Promise((resolve, reject) => creates.push({ url, body: JSON.parse(options.body), resolve, reject }));
       if (url.endsWith('/history')) return Promise.resolve({ session: { id: 'created', name: 'Created', cwd: '/work/main' }, entries: [] });

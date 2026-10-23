@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState, useSyncExternalStore} from "react";
 import {AssistantRuntimeProvider, MessageNotSentError, useExternalStoreRuntime, type ThreadMessageLike} from "@assistant-ui/react";
-import {RefreshCwIcon, XIcon} from "lucide-react";
+import {RefreshCwIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
 import {TooltipIconButton} from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {Alert, AlertDescription} from "@/components/ui/alert";
@@ -10,9 +10,11 @@ import {Input} from "@/components/ui/input";
 import {Label} from "@/components/ui/label";
 import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {ChatController} from "./controller";
+import {useChatReading} from "./use-chat-reading";
 import {cleanText, convertEntries, mergeEntries, type Approval} from "./model";
 import {readElicitation} from "./approval";
 import {ApprovalActions, ElicitationFields} from "./approval-fields";
+import {ChatImageAttachmentAdapter} from "./attachments";
 
 const labels: Record<string, string> = {handoff: "等待终端本轮工作结束后交接…", idle: "可以在这里继续对话", starting: "正在连接 Codex…", running: "Codex 正在工作…", waiting: "等待你的审批或回答", stopping: "正在请求停止…", completed: "本轮已完成", interrupted: "本轮已停止", failed: "本轮未完成，请检查进展", conflict: "会话暂不可发送"};
 const toThreadMessage = (message: ThreadMessageLike) => message;
@@ -58,9 +60,12 @@ function ApprovalCard({approval, controller}: {approval: Approval; controller: C
 }
 
 export function ChatPanel({controller}: {controller: ChatController}) {
+  const reading = useChatReading(controller);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const attachments = useMemo(() => new ChatImageAttachmentAdapter(), []);
   const messages = useMemo(() => convertEntries(mergeEntries(state.entries, state.chat.entries)), [state.entries, state.chat.entries]);
   const runtime = useExternalStoreRuntime({
+    adapters: {attachments},
     messages, convertMessage: toThreadMessage,
     isRunning: state.chat.busy || state.submitting,
     isLoading: state.loading && messages.length === 0,
@@ -68,40 +73,55 @@ export function ChatPanel({controller}: {controller: ChatController}) {
     onLoadEarlier: () => controller.history(true),
     isSendDisabled: !!state.chat.blocked || state.submitting || controller.options.task.state !== "ready",
     onNew: async message => {
+      reading.latest();
       const text = message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
-      try { await controller.send(text); } catch (error) { throw new MessageNotSentError((error as Error).message); }
+      const images = [...message.content, ...(message.attachments || []).flatMap(a => a.content)].filter(p => p.type === "image").map(p => p.image);
+      controller.draftAttachments = message.attachments || [];
+      try { await controller.send(text, images); } catch (error) { throw new MessageNotSentError((error as Error).message); }
     },
     onCancel: controller.stop,
   });
   useEffect(() => { controller.connect(); return () => controller.disconnect(); }, [controller]);
   useEffect(() => { runtime.thread.composer.setText(state.draft); }, [runtime, state.draft]);
+  useEffect(() => {
+    const composer = runtime.thread.composer;
+    for (const attachment of controller.draftAttachments) {
+      if (composer.getState().attachments.some(a => a.id === attachment.id)) continue;
+      const restored = attachment.content ? {id: attachment.id, type: attachment.type, name: attachment.name, contentType: attachment.contentType, content: attachment.content} : attachment.file;
+      if (restored) void composer.addAttachment(restored).catch(error => controller.setError((error as Error).message));
+    }
+    const unsubscribe = composer.subscribe(() => {
+      const draft = composer.getState();
+      if (!draft.submission && !controller.getSnapshot().submitting) controller.draftAttachments = draft.attachments;
+    });
+    const unsubscribeErrors = composer.unstable_on("attachmentAddError", event => controller.setError(event.message));
+    return () => { unsubscribe(); unsubscribeErrors(); };
+  }, [controller, runtime, state.draftRestore]);
   const task = controller.options.task;
   const path = state.session?.cwd || task.members.find(m => m.project_id === state.project)?.path;
+  const project = task.members.find(m => m.path === path);
+  const status = state.chat.blocked || (state.chat.busy || ["failed", "interrupted", "conflict"].includes(state.chat.status) ? labels[state.chat.status] || state.chat.status : "");
+  const footer = status || state.chat.notice || state.chat.can_handoff || state.error || state.chat.error;
   return <AssistantRuntimeProvider runtime={runtime}>
     <section className="shadcn-scope assistant-chat-scope flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-labelledby="assistantChatTitle">
-      <header className="shrink-0 space-y-3 border-b px-5 py-4">
+      <header className="chat-panel-header shrink-0 space-y-2 border-b px-5 py-4">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1"><h2 id="assistantChatTitle" tabIndex={-1} className="m-0 truncate text-base font-semibold">{state.session?.name || "新建会话"}</h2><p className="m-0 text-xs text-muted-foreground">{task.name} · {controller.options.environment === "local" ? "本机" : "WSL"}</p></div>
-          <div className="flex shrink-0 gap-1">
-            {state.session && <TooltipIconButton tooltip="刷新历史" aria-label="刷新历史" disabled={state.loading} onClick={() => void controller.history()}><RefreshCwIcon /></TooltipIconButton>}
-            <TooltipIconButton tooltip="关闭会话详情" aria-label="关闭会话详情" onClick={controller.options.close}><XIcon /></TooltipIconButton>
-          </div>
+          <h2 id="assistantChatTitle" tabIndex={-1} className="chat-panel-title m-0 min-w-0 truncate text-base font-semibold">{state.session?.name || "新建会话"}</h2>
         </div>
-        <p className="m-0 truncate font-mono text-xs text-muted-foreground" title={path}>{path}</p>
+        {state.session && <details className="chat-context text-xs text-muted-foreground"><summary>{project?.project_name || "工作目录"}</summary><div className="space-y-2 pt-2"><p className="break-all font-mono">{path}</p><TooltipIconButton tooltip="刷新历史" aria-label="刷新历史" disabled={state.loading} onClick={() => void controller.history()}><RefreshCwIcon /></TooltipIconButton></div></details>}
         {!state.session && <div className="space-y-2"><Label htmlFor="assistantChatProject">工作项目</Label><NativeSelect id="assistantChatProject" value={state.project} disabled={state.submitting} onChange={e => controller.setProject(e.target.value)}>{task.members.map(m => <NativeSelectOption key={m.project_id} value={m.project_id}>{m.project_name}{m.project_id === task.primary_project_id ? "（主项目）" : ""}</NativeSelectOption>)}</NativeSelect></div>}
       </header>
       {state.historyError && <Alert variant="destructive" className="shrink-0 rounded-none"><AlertDescription>{state.historyError}</AlertDescription></Alert>}
-      <div className="min-h-0 flex-1" onChange={event => {
+      <div ref={reading.container} className="relative min-h-0 flex-1" onChange={event => {
         if (event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) controller.setDraft(event.target.value);
-      }}><Thread /></div>
+      }}><Thread managedScroll autoFocus={false} />{reading.hasNew && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
       {state.chat.approvals.length > 0 && <div className="max-h-[40%] shrink-0 space-y-2 overflow-y-auto border-t p-4" aria-live="polite">{state.chat.approvals.map(a => <ApprovalCard key={a.id} approval={a} controller={controller} />)}</div>}
-      <footer className="shrink-0 space-y-2 border-t px-5 py-3 text-xs text-muted-foreground">
-        <div role="status">{state.chat.blocked || labels[state.chat.status] || state.chat.status}</div>
+      {footer && <footer className="shrink-0 space-y-2 border-t px-5 py-3 text-xs text-muted-foreground">
+        {status && <div role="status">{status}</div>}
         {state.chat.notice && <p className="m-0">{state.chat.notice}</p>}
-        {state.chat.can_handoff && !state.chat.busy && <Button type="button" size="sm" variant="outline" disabled={state.submitting} onClick={() => void controller.handoff()}>切换到侧栏（等本轮结束）</Button>}
+        {state.chat.can_handoff && !state.chat.busy && <Button type="button" size="sm" variant="outline" disabled={state.submitting} onClick={() => void controller.handoff()}>在这里继续（等终端本轮结束）</Button>}
         {(state.error || state.chat.error) && <Alert variant="destructive"><AlertDescription>{state.error || state.chat.error}</AlertDescription></Alert>}
-        <p className="m-0">Ctrl+Enter 发送 · 关闭面板后仍会继续运行</p>
-      </footer>
+      </footer>}
     </section>
   </AssistantRuntimeProvider>;
 }

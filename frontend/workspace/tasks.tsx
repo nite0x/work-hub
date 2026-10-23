@@ -1,8 +1,9 @@
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { TableCell, TableRow } from "@/components/ui/table"
-import { Action, Branch, Check, DataTable, Feedback, Field, GitSyncStatus, NativeSelect, Option, ProjectOpenActions, SourceOptions, StatusBadge, TreeStatus, branchSummary, canOpenMember, expectedBranch, reusesDirectory } from "./shared"
+import { ChevronDown } from "lucide-react"
+import { Action, Check, Feedback, Field, GitSyncStatus, NativeSelect, Option, TaskOpenActions, SourceOptions, StatusBadge, TreeStatus, branchSummary, canOpenMember, expectedBranch, reusesDirectory } from "./shared"
+import type { ProjectOpenTool } from "./shared"
 import type { PickerRow, Project, Task } from "./types"
 
 export function TaskList({ tasks }: { tasks: Task[] }) {
@@ -12,35 +13,63 @@ export function TaskList({ tasks }: { tasks: Task[] }) {
   })}</div>
 }
 
-export function TaskDetail({ task: q, projects, environment }: { task: Task; projects: Project[]; environment: string }) {
+export function TaskActions({ task: q, environment }: { task: Task; environment: string }) {
+  const ready = q.state === "ready" && q.members.every(m => canOpenMember(m) && (reusesDirectory(m) || (!m.worktree?.detached && m.worktree?.branch === expectedBranch(m, q))))
+  return <div className="task-page-actions shadcn-scope">
+    <StatusBadge kind="neutral">{environment}</StatusBadge><StatusBadge kind={q.state === "ready" && !ready ? "warning" : q.state}>{q.state === "ready" && !ready ? "工作区需检查" : undefined}</StatusBadge>
+    <Action action="launch" id={q.id} disabled={!ready}>终端 · Codex ↗</Action>
+    <details className="task-more" data-workspace-detail="task-actions"><summary>更多操作</summary><div className="task-more-menu">
+      <Action action="command" id={q.id} disabled={!ready}>复制启动命令</Action>
+      {q.state === "partial" ? <Action action="retry" id={q.id}>重试失败项</Action> : null}
+      <Action action="archive" id={q.id}>{q.state === "archived" ? "取消归档" : "归档任务"}</Action>
+    </div></details>
+  </div>
+}
+
+export function TaskDetail({ task: q, projects, openTool = "vscode" }: { task: Task; projects: Project[]; environment: string; openTool?: ProjectOpenTool }) {
   const pending = (m: Task["members"][number]) => !m.worktree?.status_updated_at && !!projects.find(p => p.id === m.project_id)?.refreshing
   const ready = q.state === "ready" && q.members.every(m => canOpenMember(m) && (reusesDirectory(m) || (!m.worktree?.detached && m.worktree?.branch === expectedBranch(m, q))))
   const checking = q.state === "ready" && !ready
-  const primary = q.members.find(m => m.project_id === q.primary_project_id)
-  return <Card className="shadcn-scope requirement-workspace gap-5 rounded-none border-0 p-5 shadow-none sm:p-6">
-    <div className="detail-top"><div className="min-w-0"><h2 className="mb-2 flex items-center gap-2 text-lg font-semibold">关联项目 <StatusBadge kind={checking ? q.members.some(pending) ? "neutral" : "warning" : q.state}>{checking ? q.members.some(pending) ? "状态检查中" : "工作区需检查" : undefined}</StatusBadge></h2><div className="detail-path">{q.path}</div></div><div className="detail-actions">
+  return <Card className="shadcn-scope requirement-workspace gap-5 rounded-none border-0 p-5 shadow-none">
+    <section className="task-info" aria-label="任务信息"><div className="task-info-heading"><strong>任务信息</strong>{q.description ? <button type="button" className="task-info-toggle" data-action="task-info-toggle" aria-controls="taskDescription" aria-expanded="false" hidden>查看全部</button> : null}</div>
+      {q.description ? <p id="taskDescription" className="task-description task-description-clamped">{q.description}</p> : null}
+      <div className="detail-path">工作区：{q.path}</div>
+    </section>
+    <div className="detail-top"><div className="min-w-0"><h2 className="m-0 flex items-center gap-2 text-base font-semibold">项目工作区 <StatusBadge kind="neutral">{q.members.length} 个</StatusBadge></h2><p className="task-project-summary">{q.members.filter(m => !!m.worktree?.dirty).length} 个项目有修改{checking ? " · 工作目录需检查" : ""}</p></div><div className="detail-actions">
       <Action action="add-requirement-projects" id={q.id} disabled={q.state === "archived" || q.state === "creating" || q.members.length >= 30}>＋ 添加项目</Action>
-      {q.state === "partial" ? <Action action="retry" id={q.id} variant="secondary">↻ 重试失败项</Action> : null}
-      <Action action="command" id={q.id} disabled={!ready}>复制启动命令</Action>
-      <Action action="launch" id={q.id} variant="default" disabled={!ready}>↗ 打开终端 · Codex</Action>
-      <Action action="archive" id={q.id}>{q.state === "archived" ? "取消归档" : "归档"}</Action>
     </div></div>
-    {q.description ? <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{q.description}</p> : null}
-    <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground"><span>执行环境 <b className="font-medium text-foreground">{environment}</b></span><span>关联项目 <b className="font-medium text-foreground">{q.members.length} 个</b></span><span>主目录 <b className="font-medium text-foreground">{primary?.project_name}</b></span></div>
-    <DataTable label="任务关联项目" headers={["项目 / 工作目录", "实际分支", "创建基线", "状态", "进入工作目录"]}>{[...q.members].sort((a, b) => Number(b.project_id === q.primary_project_id) - Number(a.project_id === q.primary_project_id)).map(m => {
+    <div className="task-project-list" aria-label="任务关联项目">{[...q.members].sort((a, b) => Number(b.project_id === q.primary_project_id) - Number(a.project_id === q.primary_project_id)).map(m => {
       const t = m.worktree
       const usable = canOpenMember(m)
       const expected = m.branch || (!reusesDirectory(m) ? q.branch : "")
       const drifted = !!t && !!expected && t.branch !== expected
       const active = usable && q.state === "ready"
-      return <TableRow key={m.project_id}>
-        <TableCell className="align-top whitespace-normal"><strong className="mb-2 flex flex-wrap items-center gap-2 text-sm font-semibold">{m.project_name}{m.project_id === q.primary_project_id ? <StatusBadge kind="primary-tag">主项目</StatusBadge> : null}</strong><div className="path">{m.path}</div><ProjectOpenActions project={m.project_id} path={m.path} disabled={!usable} /></TableCell>
-        <TableCell className="align-top whitespace-normal">{t ? <Action action="git-open" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active} aria-label={`切换 ${m.project_name} 的分支`}>⑂ {t.branch || "detached HEAD"}</Action> : <span className="quiet">尚未读取</span>}{drifted ? <div className="table-message">分支已变化，预期 {expected}<Action action="git-task-adopt" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active || !!t?.detached}>采用当前分支</Action></div> : null}<GitSyncStatus tree={t} />{t?.compare_available ? <div className="comparison">相对基线 {t.comparison_ref || "master"}：↑ {t.ahead} ↓ {t.behind}</div> : null}</TableCell>
-        <TableCell className="align-top whitespace-normal"><Branch>{reusesDirectory(m) ? "已有工作目录" : (m.base_ref || "refs/heads/master").replace(/^refs\/(heads|remotes)\//, "")}</Branch><div className="comparison">{(m.base_commit || "").slice(0, 8)}</div></TableCell>
-        <TableCell className="align-top whitespace-normal">{m.state === "ready" ? <TreeStatus tree={t} pending={pending(m)} /> : <StatusBadge kind={m.state} />}{m.error ? <div className="table-message">{m.error}</div> : null}{t?.error ? <div className="table-message">{t.error}</div> : null}</TableCell>
-        <TableCell className="align-top whitespace-normal"><div className="workspace-project-actions"><Action action="git-task-pull" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active || !!t?.detached || !!t?.operation || !!t?.dirty}>拉取</Action><Action action="git-task-push" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active || !!t?.detached || !!t?.operation}>推送</Action><Action action="workspace-terminal" id={m.project_id} data-path={m.path} aria-label={`打开 ${m.project_name} 的终端`} disabled={!usable}>打开终端 ↗</Action><Action action="git-open" id={m.project_id} data-path={m.path} data-requirement={q.id} aria-label={`打开 ${m.project_name} 的 Git 操作`} disabled={!active} variant="secondary">Git 操作</Action>{t?.operation === "merge" ? <Action action="git-task-ai" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active}>让 AI 完成合并</Action> : null}</div>{!usable ? <div className="table-message">{pending(m) ? "正在检查工作目录…" : "工作目录不可用"}</div> : null}</TableCell>
-      </TableRow>
-    })}</DataTable>
+      const creationRef = m.base_ref?.replace(/^refs\/(heads|remotes)\//, "") || (reusesDirectory(m) ? "已有工作目录" : "master")
+      const baseline = t?.compare_available ? t.comparison_ref || "master" : creationRef
+      const baselineDifference = t?.compare_available ? [t.ahead ? `领先 ${t.ahead}` : "", t.behind ? `落后 ${t.behind}` : ""].filter(Boolean).join(" · ") || "与基线一致" : "暂不可比较"
+      return <article key={m.project_id} className="task-project" aria-label={m.project_name}>
+        <div className="task-project-heading"><strong>{m.project_name}</strong>{m.project_id === q.primary_project_id ? <StatusBadge kind="primary-tag">主项目</StatusBadge> : null}</div>
+        <button type="button" className="task-project-path path" data-action="copy-path" data-path={m.path} title="点击复制完整路径" aria-label={`复制工作目录路径 ${m.path}`}>{m.path}</button>
+        <div className="task-project-state">{t ? <Action action="git-open" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active} aria-label={`切换 ${m.project_name} 的分支`}>⑂ {t.branch || "detached HEAD"}</Action> : <span className="quiet">尚未读取分支</span>}{m.state === "ready" ? <TreeStatus tree={t} pending={pending(m)} compact /> : <StatusBadge kind={m.state} />}</div>
+        <GitSyncStatus tree={t} compact />
+        <div className="comparison task-baseline" title={`创建来源：${creationRef}${m.base_commit ? `；创建提交：${m.base_commit}` : ""}；差异相对当前 ${baseline} 分支`}>基线 <code>{baseline}</code> · {baselineDifference}</div>
+        {drifted ? <div className="table-message">分支已变化，预期 {expected}<Action action="git-task-adopt" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active || !!t?.detached}>采用当前分支</Action></div> : null}
+        {m.error || t?.error || !usable ? <div className="table-message">{m.error || t?.error || (pending(m) ? "正在检查工作目录…" : "工作目录不可用")}</div> : null}
+        <div className="workspace-project-actions task-project-primary-actions">
+          <TaskOpenActions project={m.project_id} path={m.path} disabled={!usable} tool={openTool} />
+          <div className="task-split-action"><Action className="task-split-primary rounded-r-none" action="git-open" id={m.project_id} data-path={m.path} data-requirement={q.id} aria-label={`打开 ${m.project_name} 的 Git 操作`} disabled={!active}>Git 操作</Action>
+            {active ? <details className="task-action-menu"><summary aria-label="更多 Git 操作"><ChevronDown aria-hidden="true" /></summary><div className="task-action-menu-body">
+              <Action variant="ghost" className="justify-start font-normal" action="git-task-pull" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!!t?.detached || !!t?.operation || !!t?.dirty}>拉取</Action><Action variant="ghost" className="justify-start font-normal" action="git-task-push" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!!t?.detached || !!t?.operation}>推送</Action>
+            </div></details> : <Button className="task-split-toggle rounded-l-none border-l-0" size="icon-sm" variant="outline" disabled aria-label="更多 Git 操作"><ChevronDown aria-hidden="true" /></Button>}
+          </div>
+          {t?.operation === "merge" ? <Action action="git-task-ai" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active}>让 AI 完成合并</Action> : null}
+          <details className="task-project-details" data-workspace-detail={`project:${m.project_id}`}><summary>详情</summary><div className="task-project-details-body">
+            <div>创建来源 <code>{creationRef}</code>{m.base_commit ? <> · <code title={m.base_commit}>{m.base_commit.slice(0, 8)}</code></> : null}</div>
+            {t?.status_updated_at ? <div>上次检查 <time data-status-path={t.path} dateTime={t.status_updated_at}>{new Date(t.status_updated_at).toLocaleTimeString("zh-CN", { hour12: false })}</time></div> : null}
+          </div></details>
+        </div>
+      </article>
+    })}</div>
   </Card>
 }
 

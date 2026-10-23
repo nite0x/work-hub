@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption as Option, NativeSelectOptGroup } from "@/components/ui/native-select"
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import { ChevronDown, CodeXml, Terminal, FolderGit2 } from "lucide-react"
 import type { GitOverview, Member, Task, Worktree } from "./types"
 
 export const statusLabels: Record<string, string> = { ready: "已就绪", partial: "部分就绪", archived: "已归档", creating: "创建中", pending: "待创建", failed: "创建失败" }
@@ -22,23 +23,24 @@ export function StatusBadge({ kind, children }: { kind: string; children?: React
 export function Branch({ children }: { children?: ReactNode }) {
   return <Badge variant="secondary" className="branch rounded-md font-mono text-xs font-normal">{children || "detached HEAD"}</Badge>
 }
-export function TreeStatus({ tree: t, pending = false }: { tree?: Worktree; pending?: boolean }) {
+export function TreeStatus({ tree: t, pending = false, compact = false }: { tree?: Worktree; pending?: boolean; compact?: boolean }) {
   if (!t) return <StatusBadge kind={pending ? "neutral" : "failed"}>{pending ? "正在发现目录" : "目录未发现"}</StatusBadge>
   if (t.missing) return <StatusBadge kind="failed">目录丢失</StatusBadge>
   if (t.error) return <StatusBadge kind="failed">读取失败</StatusBadge>
   if (t.prunable) return <StatusBadge kind="warning">待修复登记</StatusBadge>
   if (!t.status_updated_at) return <StatusBadge kind="neutral">正在检查</StatusBadge>
-  return <><StatusBadge kind={t.dirty ? "warning" : "ready"}>{t.dirty ? `${t.dirty} 项修改` : "干净"}</StatusBadge><div className="comparison status-checked-at">上次检查 <time data-status-path={t.path} dateTime={t.status_updated_at}>{new Date(t.status_updated_at).toLocaleTimeString("zh-CN", { hour12: false })}</time></div></>
+  return <><StatusBadge kind={t.dirty ? "warning" : "ready"}>{t.dirty ? `${t.dirty} 项修改` : "干净"}</StatusBadge>{!compact ? <div className="comparison status-checked-at">上次检查 <time data-status-path={t.path} dateTime={t.status_updated_at}>{new Date(t.status_updated_at).toLocaleTimeString("zh-CN", { hour12: false })}</time></div> : null}</>
 }
 export const reusesDirectory = (m: Member) => m.mode === "project" || m.mode === "worktree"
 export const expectedBranch = (m: Member, q: Task) => m.branch || q.branch
 export const canOpenMember = (m: Member) => m.state === "ready" && !!m.worktree?.status_updated_at && !m.worktree.bare && !m.worktree.missing && !m.worktree.prunable && !m.worktree.error
 export const branchSummary = (q: Task) => [...new Set(q.members.map(m => m.worktree?.branch || m.branch || (reusesDirectory(m) ? "detached HEAD" : q.branch)).filter(Boolean))].join(" · ") || "使用已有工作目录"
 
-export function GitSyncStatus({ tree: t }: { tree?: Worktree }) {
+export function GitSyncStatus({ tree: t, compact = false }: { tree?: Worktree; compact?: boolean }) {
   if (!t?.status_updated_at) return null
+  const differences = [t.sync_ahead ? `待推 ${t.sync_ahead}` : "", t.sync_behind ? `待拉 ${t.sync_behind}` : ""].filter(Boolean).join(" · ") || "已同步"
   return <div className="comparison space-y-1" title="同步数量基于本地最近获取的上游记录；获取远端后更新。">
-    <div>{t.detached ? "游离 HEAD" : !t.upstream ? "尚未设置上游 · 推送时发布分支" : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : <>上游 {t.upstream}<br />待推送 {t.sync_ahead || 0} · 待拉取 {t.sync_behind || 0}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</>}</div>
+    <div>{t.detached ? "游离 HEAD" : !t.upstream ? compact ? "未设置上游" : "尚未设置上游 · 推送时发布分支" : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : compact ? <>上游 <code>{t.upstream}</code> · {differences}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</> : <>上游 {t.upstream}<br />待推送 {t.sync_ahead || 0} · 待拉取 {t.sync_behind || 0}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</>}</div>
     {t.operation ? <div className="font-medium text-amber-800">{t.operation === "merge" ? `合并进行中${t.conflicts?.length ? ` · ${t.conflicts.length} 个冲突文件` : " · 等待完成提交"}` : `${t.operation} 进行中`}</div> : null}
   </div>
 }
@@ -49,6 +51,17 @@ export function Action({ action, id, children, ...props }: ComponentProps<typeof
 
 export function ProjectOpenActions({ project, path, disabled }: { project: string; path: string; disabled?: boolean }) {
   return <div className="workspace-project-actions mt-2"><Action action="project-open-remote" id={project} data-path={path} disabled={disabled}>远端仓库 ↗</Action><Action action="project-open-vscode" id={project} data-path={path} disabled={disabled}>VS Code ↗</Action><Action action="project-open-idea" id={project} data-path={path} disabled={disabled}>IDEA ↗</Action></div>
+}
+export type ProjectOpenTool = "vscode" | "idea" | "terminal"
+export const projectOpenLabels: Record<ProjectOpenTool, string> = { vscode: "VS Code", idea: "IDEA", terminal: "终端" }
+export function TaskOpenActions({ project, path, disabled, tool }: { project: string; path: string; disabled?: boolean; tool: ProjectOpenTool }) {
+  return <div className="task-split-action" data-project-open>
+    <Action className="task-split-primary rounded-r-none" action={tool === "terminal" ? "workspace-terminal" : `project-open-${tool}`} id={project} data-path={path} data-project-open-primary aria-label={`用 ${projectOpenLabels[tool]} 打开工作目录`} disabled={disabled}>{tool === "terminal" ? <Terminal aria-hidden="true" /> : <CodeXml aria-hidden="true" />}<span data-project-open-label>{projectOpenLabels[tool]} 打开</span></Action>
+    {!disabled ? <details className="task-action-menu"><summary aria-label="选择打开方式"><ChevronDown aria-hidden="true" /></summary><div className="task-action-menu-body">
+      {(["vscode", "idea", "terminal"] as const).map(choice => <Action key={choice} variant="ghost" className="justify-start font-normal" action={choice === "terminal" ? "workspace-terminal" : `project-open-${choice}`} id={project} data-path={path} data-project-open-choice={choice}>{choice === "terminal" ? <Terminal aria-hidden="true" /> : <CodeXml aria-hidden="true" />}{projectOpenLabels[choice]}</Action>)}
+      <hr /><Action variant="ghost" className="justify-start font-normal" action="project-open-remote" id={project} data-path={path}><FolderGit2 aria-hidden="true" />打开远端仓库</Action>
+    </div></details> : <Button className="task-split-toggle rounded-l-none border-l-0" size="icon-sm" variant="outline" disabled aria-label="选择打开方式"><ChevronDown aria-hidden="true" /></Button>}
+  </div>
 }
 export function Field({ id, label, help, required, children, ...props }: ComponentProps<"div"> & { id: string; label: string; help?: string; required?: boolean; children: ReactNode }) {
   return <div {...props} className={cn("field grid gap-2", props.className)}><Label htmlFor={id} className="leading-relaxed">{label}{required ? <span className="text-destructive" aria-hidden="true"> *</span> : null}</Label>{children}{help ? <small className="text-xs leading-relaxed text-muted-foreground">{help}</small> : null}</div>

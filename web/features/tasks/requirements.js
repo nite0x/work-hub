@@ -4,6 +4,28 @@ let requirementPickerRevision = 0;
 let requirementPickerTimer;
 // Both task dialogs use the same per-project directory and branch choices.
 const taskProjectPickers = new Map();
+const expandedTaskDescriptions = new Set();
+
+function syncTaskDescription() {
+  const description = $('#taskDescription');
+  const button = $('[data-action="task-info-toggle"]');
+  if (!description?.textContent || !button) return;
+  const expanded = expandedTaskDescriptions.has(JSON.stringify([activeEnvironment, state.selectedRequirement]));
+  description.classList.add('task-description-clamped');
+  button.hidden = description.scrollHeight <= description.clientHeight + 1;
+  description.classList.toggle('task-description-clamped', !expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+  button.textContent = expanded ? '收起' : '查看全部';
+}
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('[data-action="task-info-toggle"]')) return;
+  const key = JSON.stringify([activeEnvironment, state.selectedRequirement]);
+  if (expandedTaskDescriptions.has(key)) expandedTaskDescriptions.delete(key); else expandedTaskDescriptions.add(key);
+  syncTaskDescription();
+});
+window.addEventListener('resize', syncTaskDescription);
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTaskDescription).observe($('#taskProjectsView'));
 
 function resetTaskProjectPicker(selector) {
   taskProjectPickers.set(selector, { choices: new Map(), overviews: new Map() });
@@ -86,7 +108,7 @@ function canOpenMember(m) {
 }
 
 function requirementDetail(q) {
-  return window.WorkHubUI.taskDetail(q, state.projects, environmentName()) + '<div class="task-sessions">' + renderRequirementSessions(q) + '</div>';
+  return window.WorkHubUI.taskDetail(q, state.projects, environmentName(), preferredProjectOpenTool());
 }
 
 function openRequirement() {

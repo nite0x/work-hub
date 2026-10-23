@@ -79,8 +79,8 @@ async function harness(t, readOnly = true) {
 
 for (const readOnly of [true, false]) test(`the production UI mounts before controllers in ${readOnly ? 'read-only' : 'interactive'} mode`, async t => {
   const h = await harness(t, readOnly);
-  assert.match(h.$('#content').textContent, /Billing|关联项目/);
-  assert(h.$('#content [data-slot="table"]'));
+  assert.match(h.$('#content').textContent, /项目工作区/);
+  assert(h.$('#content .task-project-list'));
   assert(h.$('#projectForm [data-slot="input"]'));
   assert(h.$('#requirementForm [data-slot="native-select"]'));
   const ids = [...h.document.querySelectorAll('[id]')].map(node => node.id);
@@ -182,7 +182,7 @@ test('task sync status and quick pull use the task worktree and current branch',
   const h = await harness(t);
   Object.assign(h.data.projects[0].worktrees[1], { upstream: 'origin/feature/task', sync_available: true, sync_ahead: 2, sync_behind: 1 });
   await h.window.refresh();
-  assert.match(h.$('#content').textContent, /待推送 2 · 待拉取 1 · 已分歧/);
+  assert.match(h.$('#content').textContent, /待推 2 · 待拉 1 · 已分歧/);
   h.click('[data-action="git-task-pull"]'); await settle();
   const request = h.requests.find(r => r.body?.action === 'pull');
   assert.deepEqual(request.body, { action: 'pull', path: '/workspace/task/app', requirement_id: 'task', expected_branch: 'feature/task' });
@@ -254,6 +254,81 @@ test('task and project shortcuts open the intended directory in remote browser a
   await h.navigate('/projects');
   h.click('[data-action="project-open-vscode"][data-id="app"]'); await settle();
   assert.deepEqual(h.requests.filter(r => r.url === '/api/projects/app/open').at(-1).body, { tool: 'vscode', path: '/repo/app' });
+});
+
+test('task cards keep the full path visible and distinguish upstream sync from baseline differences', async t => {
+  const h = await harness(t);
+  Object.assign(h.data.requirements[0].members[0], { base_ref: 'refs/heads/master', base_commit: 'c2de7c96abcdef' });
+  const tree = h.data.projects[0].worktrees[1];
+  Object.assign(tree, { upstream: 'origin/feature/task', sync_available: true, sync_ahead: 0, sync_behind: 0, compare_available: true, comparison_ref: 'master', ahead: 1, behind: 0 });
+  await h.window.refresh();
+  assert.equal(h.$('.task-project-path').textContent, '/workspace/task/app');
+  assert.equal(h.$('.task-project-path').closest('details'), null);
+  let copied;
+  Object.defineProperty(h.window.navigator, 'clipboard', { value: { writeText: async value => { copied = value; } } });
+  h.click('.task-project-path'); await settle();
+  assert.equal(copied, '/workspace/task/app');
+  assert.match(h.$('.task-project .comparison').textContent, /上游 origin\/feature\/task · 已同步/);
+  assert.equal(h.$('.task-baseline').textContent, '基线 master · 领先 1');
+  assert.match(h.$('.task-baseline').title, /c2de7c96abcdef/);
+  assert.equal(h.$('.task-project-details').open, false);
+  assert.equal(h.$('.task-project-state time'), null);
+  assert(h.$('.task-project-details time'));
+  assert.doesNotMatch(h.$('.task-project').textContent, /待推 0|待拉 0|落后 0|创建基线|相对基线/);
+  Object.assign(tree, { sync_ahead: 0, sync_behind: 3, ahead: 0, behind: 0 });
+  await h.window.refresh();
+  assert.match(h.$('.task-project .comparison').textContent, /待拉 3/);
+  assert.equal(h.$('.task-baseline').textContent, '基线 master · 与基线一致');
+  tree.sync_available = false;
+  await h.window.refresh();
+  assert.match(h.$('.task-project .comparison').textContent, /不可用，请获取远端/);
+  assert.doesNotMatch(h.$('.task-project .comparison').textContent, /已同步/);
+});
+
+test('the open split button remembers the chosen tool and retains its worktree after rendering', async t => {
+  const h = await harness(t);
+  assert.match(h.$('[data-project-open-primary]').textContent, /VS Code 打开/);
+  h.click('[data-project-open] summary');
+  assert.equal(h.$('[data-project-open] details').open, true);
+  h.click('[data-project-open-choice="idea"]'); await settle();
+  assert.equal(h.$('[data-project-open] details').open, false);
+  assert.equal(h.window.localStorage.getItem('workhub:project-open:v1'), 'idea');
+  assert.deepEqual(h.requests.find(r => r.url === '/api/projects/app/open').body, { tool: 'idea', path: '/workspace/task/app' });
+  h.window.render();
+  assert.match(h.$('[data-project-open-primary]').textContent, /IDEA 打开/);
+  h.click('[data-project-open-primary]'); await settle();
+  assert.equal(h.requests.filter(r => r.url === '/api/projects/app/open').length, 2);
+  h.click('[data-project-open] summary');
+  h.$('[data-project-open] summary').dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(h.$('[data-project-open] details').open, false);
+  assert.equal(h.document.activeElement, h.$('[data-project-open] summary'));
+  h.click('[data-project-open-choice="terminal"]'); await settle();
+  assert.deepEqual(h.requests.find(r => r.body?.action === 'terminal').body, { action: 'terminal', path: '/workspace/task/app' });
+  h.window.render();
+  assert.match(h.$('[data-project-open-primary]').textContent, /终端 打开/);
+  assert.equal(h.$('[data-project-open-primary]').dataset.action, 'workspace-terminal');
+});
+
+test('task information stays visible and only offers expansion when the description overflows', async t => {
+  const h = await harness(t);
+  h.data.requirements[0].description = '任务目标\n实现项目卡片精简\n保留完整路径\n统一打开方式';
+  await h.window.refresh();
+  const description = h.$('#taskDescription');
+  const button = h.$('[data-action="task-info-toggle"]');
+  assert.equal(h.$('.task-info').tagName, 'SECTION');
+  assert.equal(description.closest('details'), null);
+  assert.equal(button.hidden, true);
+  Object.defineProperties(description, { scrollHeight: {value: 100, configurable: true}, clientHeight: {value: 60, configurable: true} });
+  h.window.syncTaskDescription();
+  assert.equal(button.hidden, false);
+  h.click('[data-action="task-info-toggle"]');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(button.textContent, '收起');
+  assert.equal(description.classList.contains('task-description-clamped'), false);
+  h.window.render();
+  assert.equal(h.$('[data-action="task-info-toggle"]').getAttribute('aria-expanded'), 'true');
+  h.click('[data-action="task-info-toggle"]');
+  assert.equal(h.$('#taskDescription').classList.contains('task-description-clamped'), true);
 });
 
 test('an AI launch failure preserves merge context and retries the same creation identifier', async t => {
@@ -385,7 +460,7 @@ test('WSL connection and reconnect use the same environment payloads', async t =
 
 test('read-only sessions retain history paging, expanded commands and a live output dialog', async t => {
   const h = await harness(t);
-  assert(h.$('#requirementSessions [data-slot="table"]'));
+  assert(h.$('#requirementSessions ul[aria-label="关联会话"]'));
   assert.equal(h.$('#requirementSessions [data-session-action="new"]'), null);
   h.click('[data-session-action="details"]'); await settle();
   assert.equal(h.$('#sessionChatForm').hidden, true);
@@ -407,7 +482,8 @@ test('read-only sessions retain history paging, expanded commands and a live out
   h.click('#closeSessionCommandOutput');
   h.window.closeSessionHistory();
   assert.equal(h.$('#sessionCommandOutputDialog').open, false);
-  assert.equal(h.$('#sessionHistoryPanel').hidden, true);
+  assert.equal(h.$('#taskConversation').hidden, true);
+  assert.equal(h.$('#sessionHistoryPanel').hidden, false);
   assert.equal(h.document.activeElement.dataset.sessionAction, 'details');
   assert(!h.requests.some(r => r.url.endsWith('/chat') || r.url.endsWith('/sessions/new')));
 });
@@ -526,20 +602,175 @@ test('task session actions open the assistant-ui mount without launching a termi
   let opened, closed = 0;
   h.window.WorkHubAssistant = { open(options) { opened = options; }, close() { closed++; } };
   assert(h.$('#assistantChatRoot'));
-  const actions = [...h.document.querySelectorAll('#requirementSessions .session-row-actions button')];
-  assert.equal(actions[1].textContent, '继续对话');
-  actions[1].click();
+  assert.equal(h.$('#requirementSessions .session-row-actions'), null);
+  assert.equal(h.$('#requirementSessions [data-session-row] > button').className, 'task-session-open');
+  assert.doesNotMatch(h.$('#requirementSessions').textContent, /继续对话|只读|\/workspace\/task\/app|自动关联/);
+  assert.equal(h.$('.task-session-open').title, '/workspace/task/app');
+  assert.equal(h.$('#breadcrumbTitle').textContent, '任务');
+  assert.equal(h.document.querySelectorAll('#taskConversation [data-task-layout]').length, 2);
+  h.click('#requirementSessions .task-session-meta');
   await settle();
   assert.equal(opened.task.id, 'task');
   assert.equal(opened.session.id, 'session-1');
   assert.equal(h.$('#sessionHistoryPanel').hasAttribute('data-assistant-ui'), true);
   assert.equal(h.currentSession().assistant, true);
   opened.close();
-  assert.equal(closed, 1);
+  assert.equal(closed, 0);
+  assert.equal(h.$('#taskConversation').hidden, true);
   h.click('[data-session-action="new"]');
   assert.equal(opened.session, null);
   opened.created({ id: 'new-session', name: 'New', cwd: '/workspace/task/app', available: true });
   assert.equal(h.currentSession().session, 'new-session');
   assert(h.$('[data-session="new-session"]'));
   assert(!h.requests.some(r => r.url.endsWith('/resume') || r.url.endsWith('/launch')));
+});
+
+test('task panes resize, expand and fold without closing the active conversation', async t => {
+  const h = await harness(t, false);
+  let opened = 0, closed = 0;
+  h.window.WorkHubAssistant = {open() { opened++; }, close() { closed++; }};
+  const layout = h.$('#taskWorkspaceLayout');
+  layout.getBoundingClientRect = () => ({width: 1200, right: 1200});
+  h.$('#taskWorkArea').getBoundingClientRect = () => ({width: 700});
+  assert.equal(layout.dataset.mode, 'collapsed');
+  assert.equal(h.$('#taskProjectsView').hidden, false);
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  assert.equal(h.$('#content #requirementSessions'), null);
+  assert.equal(h.$('[data-task-layout="toggle"]'), null);
+  const overview = h.$('#taskOverviewHandle');
+  assert.equal(overview.hidden, false);
+  overview.dispatchEvent(new h.window.MouseEvent('pointerdown', {button: 0, clientX: 720}));
+  overview.dispatchEvent(new h.window.MouseEvent('pointermove', {clientX: 600}));
+  overview.dispatchEvent(new h.window.MouseEvent('pointerup'));
+  assert.equal(overview.getAttribute('aria-valuenow'), '50');
+  overview.dispatchEvent(new h.window.MouseEvent('dblclick'));
+  h.click('[data-session-action="details"]'); await settle();
+  assert.equal(layout.dataset.mode, 'split');
+  const current = h.currentSession();
+  const handle = h.$('#taskSplitHandle');
+  handle.dispatchEvent(new h.window.KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true}));
+  assert.equal(handle.getAttribute('aria-valuenow'), '42');
+  handle.dispatchEvent(new h.window.MouseEvent('pointerdown', {button: 0, clientX: 696}));
+  handle.dispatchEvent(new h.window.MouseEvent('pointermove', {clientX: 600}));
+  handle.dispatchEvent(new h.window.MouseEvent('pointerup'));
+  assert.equal(handle.getAttribute('aria-valuenow'), '50');
+  h.$('#taskProjectsView').scrollTop = 120;
+  h.$('.task-project-details').open = true;
+  h.click('[data-task-layout="expand"]');
+  assert.equal(layout.dataset.mode, 'expanded');
+  h.click('[data-task-layout="expand"]');
+  assert.equal(layout.dataset.mode, 'split');
+  assert.equal(h.$('#taskProjectsView').scrollTop, 120);
+  assert.equal(handle.getAttribute('aria-valuenow'), '50');
+  h.click('[data-task-layout="close"]');
+  assert.equal(layout.dataset.mode, 'collapsed');
+  assert.equal(h.document.activeElement.dataset.sessionAction, 'details');
+  h.click('[data-session-action="details"]'); await settle();
+  assert.equal(layout.dataset.mode, 'split');
+  assert.equal(h.currentSession(), current);
+  assert.equal(opened, 1); assert.equal(closed, 0);
+  h.window.render();
+  assert.equal(h.$('.task-project-details').open, true);
+  assert.equal(h.$('#taskProjectsView').scrollTop, 120);
+  assert.equal(h.currentSession(), current);
+});
+
+test('left views switch independently; folding chat displays projects and sessions together', async t => {
+  const h = await harness(t, false);
+  let opens = 0;
+  h.window.WorkHubAssistant = {open() { opens++; }, close() {}};
+  h.click('[data-session-action="details"]'); await settle();
+  const current = h.currentSession();
+  h.$('#taskProjectsView').scrollTop = 210;
+  h.click('#taskSessionsTab');
+  assert.equal(h.$('#taskProjectsView').hidden, true);
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  assert.equal(h.$('#taskSessionsTab').getAttribute('aria-selected'), 'true');
+  h.$('#taskSessionsView').scrollTop = 95;
+  h.click('[data-task-layout="close"]');
+  assert.equal(h.$('#taskProjectsView').hidden, false);
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  assert.equal(h.$('#taskProjectsView').scrollTop, 210);
+  assert.equal(h.$('#taskSessionsView').scrollTop, 95);
+  h.click('[data-session-action="details"]'); await settle();
+  assert.equal(h.$('#taskProjectsView').hidden, true);
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  h.$('#taskSessionsTab').dispatchEvent(new h.window.KeyboardEvent('keydown', {key: 'ArrowLeft', bubbles: true}));
+  assert.equal(h.$('#taskProjectsView').hidden, false);
+  assert.equal(h.$('#taskSessionsView').hidden, true);
+  assert.equal(h.$('#taskProjectsView').scrollTop, 210);
+  h.click('[data-task-layout="expand"]');
+  h.click('[data-task-layout="expand"]');
+  h.click('#taskSessionsTab');
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'split');
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  assert.equal(h.$('#taskSessionsView').scrollTop, 95);
+  assert.equal(h.currentSession(), current);
+  assert.equal(opens, 1);
+  h.$('#taskWorkspaceLayout').getBoundingClientRect = () => ({width: 600});
+  h.click('[data-task-layout="close"]');
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'collapsed');
+  assert.equal(h.$('#taskProjectsView').hidden, false);
+  assert.equal(h.$('#taskSessionsView').hidden, false);
+  assert.equal(h.currentSession(), current);
+});
+
+test('task switches restore their own layout, project details and reading position', async t => {
+  const h = await harness(t);
+  const first = h.data.requirements[0];
+  h.data.requirements.push({...first, id: 'other-task', name: 'Other task'});
+  h.click('[data-session-action="details"]'); await settle();
+  h.$('.task-project-details').open = true;
+  h.$('#taskProjectsView').scrollTop = 135;
+  const scroll = h.$('#sessionHistoryScroll');
+  Object.defineProperties(scroll, {scrollHeight: {value: 2000, configurable: true}, clientHeight: {value: 400, configurable: true}});
+  scroll.scrollTop = 360;
+  scroll.dispatchEvent(new h.window.Event('scroll'));
+  h.click('[data-task-layout="expand"]');
+  await h.navigate('/requirements/other-task');
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'collapsed');
+  assert.equal(h.$('.task-project-details').open, false);
+  await h.navigate('/requirements/task');
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'expanded');
+  assert.equal(h.$('.task-project-details').open, true);
+  assert.equal(h.$('#sessionHistoryScroll').scrollTop, 360);
+  h.click('[data-task-layout="expand"]');
+  assert.equal(h.$('#taskProjectsView').scrollTop, 135);
+  await h.navigate('/projects');
+  assert.equal(h.$('#taskConversation').hidden, true);
+  assert.equal(h.document.body.classList.contains('task-detail-page'), false);
+  await h.navigate('/requirements/task');
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'split');
+  assert.equal(h.$('#sessionHistoryScroll').scrollTop, 360);
+});
+
+test('Escape dismisses project menus before folding the conversation', async t => {
+  const h = await harness(t);
+  h.click('[data-session-action="details"]'); await settle();
+  const current = h.currentSession();
+  for (const selector of ['.task-action-menu', '.task-project-details', '.task-more']) {
+    const menu = h.$(selector);
+    menu.open = true;
+    const summary = menu.querySelector('summary');
+    summary.focus();
+    summary.dispatchEvent(new h.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+    assert.equal(menu.open, false);
+    assert.equal(h.document.activeElement, summary);
+    assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'split');
+    assert.equal(h.currentSession(), current);
+  }
+  h.document.activeElement.dispatchEvent(new h.window.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+  assert.equal(h.$('#taskWorkspaceLayout').dataset.mode, 'collapsed');
+});
+
+test('a collapsed conversation reports new activity without opening or marking it read', async t => {
+  const h = await harness(t);
+  h.click('[data-session-action="details"]'); await settle();
+  h.click('[data-task-layout="close"]');
+  h.window.updateSessionChatActivity('task', 'session-1', {busy: true, status: 'waiting'});
+  assert.match(h.$('[data-task-chat-status]').textContent, /待确认/);
+  assert.equal(h.$('#taskConversation').hidden, true);
+  h.window.updateSessionChatActivity('task', 'session-1', {id: 'finished', turn_id: 'turn', busy: false, status: 'completed'});
+  assert.match(h.$('[data-task-chat-status]').textContent, /有新消息/);
+  assert.equal(h.$('#taskConversation').hidden, true);
 });

@@ -182,15 +182,20 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	var input struct {
-		Text      string `json:"text"`
-		RequestID string `json:"request_id"`
+		Text      string   `json:"text"`
+		RequestID string   `json:"request_id"`
+		Images    []string `json:"images"`
 	}
-	if !httpx.Decode(w, r, &input) {
+	if !httpx.DecodeLimit(w, r, &input, chatRequestLimit) {
+		return
+	}
+	if err := validateChatImages(input.Images); err != nil {
+		httpx.WriteError(w, 400, err.Error())
 		return
 	}
 	input.Text = strings.TrimSpace(input.Text)
-	if input.Text == "" || len(input.Text) > 64000 || len(input.RequestID) > 100 || input.RequestID == "" {
-		httpx.WriteError(w, 400, "请输入文字消息（最多 64000 字节）并提供发送标识")
+	if (input.Text == "" && len(input.Images) == 0) || len(input.Text) > 64000 || len(input.RequestID) > 100 || input.RequestID == "" {
+		httpx.WriteError(w, 400, "请输入消息或添加图片（文字最多 64000 字节）并提供发送标识")
 		return
 	}
 	q, cwd, ok := a.LinkedChatSession(w, r)
@@ -235,10 +240,10 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	a.chats[run.session] = run
 	a.chatMu.Unlock()
-	go a.DriveChat(ctx, run, plan, input.Text)
+	go a.DriveChat(ctx, run, plan, input.Text, input.Images...)
 	httpx.WriteJSON(w, 202, run.snapshot())
 }
-func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.LaunchPlan, text string) {
+func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.LaunchPlan, text string, images ...string) {
 	defer close(run.finished)
 	defer run.cancel()
 	defer func() { run.mu.Lock(); run.ended = time.Now(); run.mu.Unlock() }()
@@ -345,7 +350,7 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		run.change(func(s *ChatState) { s.Status = "conflict"; s.Error = err.Error() })
 		return
 	}
-	params := map[string]any{"threadId": run.session, "cwd": s.Cwd, "input": []any{map[string]any{"type": "text", "text": text}}}
+	params := map[string]any{"threadId": run.session, "cwd": s.Cwd, "input": chatTurnInput(text, images)}
 	// Preserve the session's model and approval policy. Only add the requirement's
 	// project roots when the session already uses the workspace-write sandbox.
 	if resumed.Sandbox["type"] == "workspaceWrite" {

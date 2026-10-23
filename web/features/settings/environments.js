@@ -26,6 +26,7 @@ async function selectEnvironment(id, route = '/requirements', updateHistory = tr
   if (state.busy) { $('#environmentSelect').value = activeEnvironment; $('#projectEnvironment').value = activeEnvironment; toast('请等待当前操作完成后切换环境'); return; }
   route = route.replace(/^#/, '');
   const changed = activeEnvironment !== id;
+  if (typeof suspendTaskWorkspace === 'function') suspendTaskWorkspace();
   closeSessionHistory(false);
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if (changed) requirementSessions.clear();

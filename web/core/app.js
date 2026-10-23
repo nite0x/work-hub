@@ -95,10 +95,14 @@ window.addEventListener('hashchange', () => {
   refresh();
 });
 function render() {
+  if (typeof saveTaskWorkspace === 'function') saveTaskWorkspace();
   const settingsView = state.view === 'settings';
   const reqView = state.view === 'requirements';
   const detailView = reqView && !!state.selectedRequirement;
   const requirement = detailView ? state.requirements.find(q => q.id === state.selectedRequirement) : null;
+  document.body.classList.toggle('task-detail-page', !!requirement);
+  $('#taskPageActions').hidden = !requirement;
+  if (requirement) $('#taskPageActions').innerHTML = window.WorkHubUI.taskActions(requirement, environmentName());
   document.title = settingsView ? '设置 · Work Hub' : requirement ? requirement.name + ' · Work Hub' : 'Work Hub';
   $('#backToRequirements').hidden = !detailView;
   $('#stats').hidden = detailView || settingsView;
@@ -109,10 +113,11 @@ function render() {
   $('#reqCount').textContent = taskInventory.requirements.filter(q => q.state !== 'archived').length;
   $('#projectCount').textContent = taskInventory.project_count;
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
-  $('#breadcrumbTitle').textContent = settingsView ? '设置' : detailView ? '任务 / ' + (requirement?.name || '任务不存在') : reqView ? '任务' : '项目与 Worktree';
+  $('#breadcrumbTitle').textContent = settingsView ? '设置' : reqView ? '任务' : '项目与 Worktree';
   $('#eyebrow').textContent = settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
   $('#pageTitle').textContent = settingsView ? '设置' : detailView ? requirement?.name || '任务不存在' : reqView ? '任务' : '项目与 Worktree';
   $('#pageSubtitle').textContent = settingsView ? '管理执行环境、终端工具与每日更新。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
+  $('#pageSubtitle').hidden = detailView;
   $('#newButton').innerHTML = `<span>＋</span> ${reqView ? '创建任务' : '添加项目'}`;
   $('#panelTitle').textContent = reqView ? '全部任务' : '已登记项目';
   $('#search').placeholder = reqView ? '搜索任务名称、分支…' : '搜索项目名称、目录…';
@@ -120,7 +125,7 @@ function render() {
   $('#projectEnvironmentWrap').hidden = reqView;
   renderSettings();
   $('#rootPath').textContent = reqView && !detailView ? '全部执行环境' : 'WORKSPACE ROOT  ' + state.root;
-  if (settingsView) return;
+  if (settingsView) { if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(null); return; }
   const trees = allTrees();
   $('#stats').innerHTML = reqView
     ? stat('进行中的任务', taskInventory.requirements.filter(q => q.state !== 'archived').length, '汇总所有执行环境', '▤') + stat('已就绪任务', taskInventory.requirements.filter(q => q.state === 'ready').length, '所有项目已准备完成', '✓') + stat('已登记项目', taskInventory.project_count, '所有环境的 Git 仓库', '◇') + stat('任务工作目录', taskInventory.requirements.reduce((sum, q) => sum + q.members.length, 0), '各任务保留原有目录', '⑂')
@@ -129,6 +134,8 @@ function render() {
     ? requirement ? requirementDetail(requirement) : !state.loaded ? empty('暂时无法读取任务', '请检查任务所属环境的连接，可在设置中重新连接。') : empty('这个任务不存在', '可返回任务列表，重新选择一个任务。')
     : reqView ? renderRequirements() : renderProjects();
   if (requirement) refreshRequirementSessions(requirement.id, false);
+  if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(requirement);
+  syncTaskDescription();
 }
 
 async function handleAction(action, target) {

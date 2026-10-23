@@ -26,7 +26,10 @@ document.addEventListener('click', event => {
   if (!button || button.disabled || state.busy) return;
   const q = state.requirements.find(q => q.id === button.dataset.requirement);
   if (!q || q.state !== 'ready') return;
-  if (sessionHistoryState?.requirement === q.id && !sessionHistoryState.session) { $('#sessionChatInput').focus(); return; }
+  if (sessionHistoryState?.requirement === q.id && !sessionHistoryState.session) {
+    if (typeof taskConversationOpened === 'function') taskConversationOpened(q.id, null);
+    (document.querySelector('#assistantChatRoot textarea') || $('#sessionChatInput')).focus(); return;
+  }
   openSessionHistory(q.id);
 });
 $('#newSessionProject').addEventListener('change', () => {

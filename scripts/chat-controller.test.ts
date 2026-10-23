@@ -10,6 +10,30 @@ function setup(request: ChatOptions["request"], isNew = false) {
 }
 const running = (id = "request"): ChatState => ({...idleChat(), id, turn_id:"turn", status:"running", busy:true});
 
+test("changing an image changes the retry key while identical image retries keep it", async () => {
+  const bodies: any[] = [];
+  const c = setup(async (_path, options) => {
+    bodies.push(JSON.parse(String(options?.body)));
+    throw new Error("offline");
+  }, true);
+  const image = "data:image/png;base64,aGVsbG8=";
+  await assert.rejects(c.send("",[image]));
+  await assert.rejects(c.send("",[image]));
+  await assert.rejects(c.send("",["data:image/png;base64,d29ybGQ="]));
+  assert.equal(bodies[0].request_id,bodies[1].request_id);
+  assert.notEqual(bodies[1].request_id,bodies[2].request_id);
+});
+
+test("image count and total size limits reject without a POST", async () => {
+  let calls = 0;
+  const c = setup(async () => { calls++; return running() as any; });
+  const image = "data:image/png;base64,aGVsbG8=";
+  await assert.rejects(c.send("", Array(5).fill(image)), /最多附加 4 张/);
+  const large = "data:image/png;base64," + Buffer.alloc(3*1024*1024).toString("base64");
+  await assert.rejects(c.send("", [large,large,large]), /总大小不能超过 8 MiB/);
+  assert.equal(calls,0);
+});
+
 test("official tool rendering receives live output without marking an executing command complete", () => {
   const message = convertEntry({id:"command", turn_id:"turn", kind:"command", command:"npm test", cwd:"/workspace", status:"inProgress", output:"\x1b[32mstarted\x1b[0m"});
   assert.equal(message.status?.type,"running");

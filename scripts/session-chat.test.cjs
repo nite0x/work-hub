@@ -14,6 +14,7 @@ function harness() {
   };
   const current = { requirement: 'req', session: 'session', entries: [] };
   const context = vm.createContext({ window: { WorkHubUI: workspaceUI }, cleanHistoryApproval: value => value, plainHistoryText: value => String(value ?? ''), $, sessionHistoryState: current, state: { requirements: [{ id: 'req', state: 'ready' }] }, token: 'token', AbortController, TextDecoder, URLSearchParams, crypto: { randomUUID: () => 'request' }, setInterval() { return 1; }, clearInterval() {}, document: { hidden: false }, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]), historyText: s => String(s), renderHistoryEntry: e => e.text || e.command, loadSessionHistory() {}, api: async () => ({ status: 'idle', busy: false, entries: [], approvals: [] }) });
+  context.updateSessionChatActivity = () => {};
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/features/sessions/session-chat.js'), 'utf8'), context);
   return { context, $, current };
 }

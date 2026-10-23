@@ -4,7 +4,7 @@ const chatLabels = { idle: '可以在这里继续对话', starting: '正在连�
 chatLabels.handoff = '正在交接：等待终端本轮工作结束…';
 
 function chatPath(current) { return `/api/requirements/${encodeURIComponent(current.requirement)}/sessions/${encodeURIComponent(current.session)}/chat`; }
-function chatDraftKey(current) { return current.requirement + ':' + (current.session || 'new'); }
+function chatDraftKey(current) { return JSON.stringify([current.environment || (typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment), current.requirement, current.session || 'new']); }
 function renderChatTimeline(current) {
   const live = current.chat?.entries || [];
   const liveIDs = new Set(live.map(e => e.turn_id + ':' + e.id));
@@ -41,7 +41,7 @@ function renderChatControls(current) {
   $('#sessionHandoffNotice').textContent = chat?.notice || '';
   $('#sessionHandoffNotice').hidden = !chat?.notice;
   $('#resumeHistorySession').disabled = !!chat?.busy || !ready || !!chat?.blocked;
-  $('#sessionChatStatus').textContent = isNew ? (current.submitting ? '正在创建会话并发送…' : '发送第一条消息后，自动创建会话并关联当前任务') : chat?.blocked || (chat ? chatLabels[chat.status] || chat.status : '正在检查会话状态…');
+  $('#sessionChatStatus').textContent = isNew ? (current.submitting ? '正在创建会话并发送…' : '') : chat?.blocked || (chat?.status === 'idle' ? '' : chat ? chatLabels[chat.status] || chat.status : '正在检查会话状态…');
   $('#sessionChatError').textContent = current.chatError || chat?.error || '';
   $('#sessionChatError').hidden = !$('#sessionChatError').textContent;
 }

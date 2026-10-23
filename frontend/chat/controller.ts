@@ -1,4 +1,6 @@
 import {entryKey, idleChat, mergeEntries, readSnapshots, type Approval, type ChatState, type Entry, type Session, type Task} from "./model";
+import type {Attachment} from "@assistant-ui/react";
+import {validateImages} from "./attachments";
 
 export interface ChatOptions {
   task: Task; session: Session | null; environment: string;
@@ -12,9 +14,12 @@ export interface Snapshot {
   session: Session | null; entries: Entry[]; chat: ChatState; project: string; draft: string;
   error: string; historyError: string; loading: boolean; submitting: boolean; stopping: boolean;
   answering: string | null; cursor: string | null;
+  draftRestore: number;
 }
 type History = {session: Session; entries: Entry[]; next_cursor?: string | null};
 export class ChatController {
+  reading = {top: 0, bottom: true, anchor: "", offset: 0};
+  draftAttachments: readonly Attachment[] = [];
   private snapshot: Snapshot;
   private listeners = new Set<() => void>();
   private connected = false;
@@ -25,17 +30,18 @@ export class ChatController {
   private polling = false;
   private generation = 0;
   private handoffID?: string;
-  private submitted?: {id?: string; text: string};
-  private pending?: {text: string; project_id: string; request_id: string};
+  private submitted?: {id?: string; text: string; attachments: readonly Attachment[]};
+  private pending?: {text: string; images?: string[]; project_id: string; request_id: string};
   private openingApproval = false;
   constructor(public options: ChatOptions) {
-    this.snapshot = {session: options.session, entries: [], chat: idleChat(), project: options.task.primary_project_id, draft: "", error: "", historyError: "", loading: false, submitting: false, stopping: false, answering: null, cursor: null};
+    this.snapshot = {session: options.session, entries: [], chat: idleChat(), project: options.task.primary_project_id, draft: "", error: "", historyError: "", loading: false, submitting: false, stopping: false, answering: null, cursor: null, draftRestore: 0};
   }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private update(patch: Partial<Snapshot>) { this.snapshot = {...this.snapshot, ...patch}; for (const listener of this.listeners) listener(); }
   private base() { return `/api/requirements/${encodeURIComponent(this.options.task.id)}/sessions/${encodeURIComponent(this.snapshot.session!.id)}`; }
   setDraft = (draft: string) => { if (draft !== this.snapshot.draft) this.update({draft}); };
+  setError = (error: string) => this.update({error});
   setProject = (project: string) => this.update({project});
   connect() {
     this.disconnect(); this.connected = true; this.readAbort = new AbortController();
@@ -76,7 +82,14 @@ export class ChatController {
     if (!chat.busy && chat.id === this.handoffID) this.handoffID = undefined;
     if (previous.busy && !chat.id) return;
     if (chat.id === previous.id && (chat.revision || 0) < (previous.revision || 0)) return;
-    if (!chat.busy && !chat.turn_id && this.submitted && this.submitted.id === chat.id && !this.snapshot.draft) this.update({draft: this.submitted.text});
+    if (chat.turn_id && this.submitted?.id === chat.id) this.submitted = undefined;
+    if (!chat.busy && !chat.turn_id && this.submitted && this.submitted.id === chat.id) {
+      if (!this.snapshot.draft && !this.draftAttachments.length) {
+        this.draftAttachments = this.submitted.attachments;
+        this.update({draft: this.submitted.text, draftRestore: this.snapshot.draftRestore + 1});
+      }
+      this.submitted = undefined;
+    }
     if (!chat.busy) {
       chat = {...chat, entries: chat.entries.map(e => e.status === "inProgress" ? {...e, status: chat.status === "completed" ? "completed" : "interrupted"} : e)};
       this.update({entries: mergeEntries(this.snapshot.entries, chat.entries), chat});
@@ -107,12 +120,18 @@ export class ChatController {
     } catch (error) { if (!abort.signal.aborted && generation === this.generation) this.update({error: "实时连接暂时断开，将自动重连，不会重复发送消息。"}); }
     finally { if (this.streamAbort === abort) this.streamRun = undefined; }
   }
-  send = async (text: string) => {
+  send = async (text: string, images: string[] = []) => {
     text = text.trim();
     const before = this.snapshot;
-    if (!text || before.submitting || before.chat.busy || before.chat.blocked || this.options.task.state !== "ready") return;
-    const pending = this.pending?.text === text && this.pending.project_id === before.project ? this.pending : {text, project_id: before.project, request_id: crypto.randomUUID()};
+    if ((!text && !images.length) || before.submitting || before.chat.busy || before.chat.blocked || this.options.task.state !== "ready") return;
+    try { validateImages(images); }
+    catch (error) { this.update({error: (error as Error).message}); throw error; }
+    const samePending = this.pending?.text === text && this.pending.project_id === before.project
+      && (this.pending.images || []).length === images.length
+      && images.every((image, i) => image === this.pending?.images?.[i]);
+    const pending = samePending ? this.pending! : {text, ...(images.length ? {images} : {}), project_id: before.project, request_id: crypto.randomUUID()};
     this.pending = pending;
+    const attachments = this.draftAttachments;
     this.update({submitting: true, error: "", draft: text});
     try {
       let chat: ChatState;
@@ -120,15 +139,16 @@ export class ChatController {
         const result = await this.options.request<{session: Session; chat: ChatState}>(`/api/requirements/${encodeURIComponent(this.options.task.id)}/sessions/new`, {method: "POST", body: JSON.stringify(pending)});
         this.update({session: result.session}); this.options.created(result.session); chat = result.chat;
       } else {
-        chat = await this.options.request<ChatState>(this.base() + "/chat", {method: "POST", body: JSON.stringify({text, request_id: pending.request_id})});
+        chat = await this.options.request<ChatState>(this.base() + "/chat", {method: "POST", body: JSON.stringify({text, ...(images.length ? {images} : {}), request_id: pending.request_id})});
       }
-      this.pending = undefined; this.submitted = {id: chat.id, text}; this.update({draft: ""}); this.apply(chat);
+      this.draftAttachments = [];
+      this.pending = undefined; this.submitted = {id: chat.id, text, attachments}; this.update({draft: ""}); this.apply(chat);
     } catch (error) {
       // Recover an acknowledged turn after a lost POST response. Never resend it.
       if (before.session) {
         try {
           const chat = await this.options.request<ChatState>(this.base() + "/chat");
-          if (chat.id === pending.request_id) { this.pending = undefined; this.submitted = {id: chat.id, text}; this.update({draft: ""}); this.apply(chat); return; }
+          if (chat.id === pending.request_id) { this.draftAttachments = []; this.pending = undefined; this.submitted = {id: chat.id, text, attachments}; this.update({draft: ""}); this.apply(chat); return; }
         } catch { /* Keep the same idempotency key for an explicit retry. */ }
       }
       this.update({error: (error as Error).message});

@@ -46,7 +46,8 @@ func (c *browserLive) Call(ctx context.Context, method string, params any, out a
 	}
 	if method == "turn/start" {
 		p := params.(map[string]any)
-		input := p["input"].([]any)[0].(map[string]any)["text"].(string)
+		// Image-only requests have no text item; keep the UI stand-in usable.
+		input, _ := p["input"].([]any)[0].(map[string]any)["text"].(string)
 		go func() {
 			c.event("item/started", map[string]any{"turnId": "turn", "item": map[string]any{"type": "userMessage", "id": "new-user", "content": []any{map[string]any{"type": "text", "text": input}}}})
 			c.event("item/started", map[string]any{"turnId": "turn", "item": map[string]any{"type": "agentMessage", "id": "new-reply", "text": ""}})

@@ -20,6 +20,7 @@
         close.addEventListener('click', options.close); target.append(close);
       }
     },
-    close() { version++; mounted?.close(); }
+    close() { version++; mounted?.close(); },
+    updateTask(task) { mounted?.updateTask(task); }
   };
 })();

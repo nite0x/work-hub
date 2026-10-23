@@ -35,6 +35,7 @@
   <script src="/features/sessions/session-history-live.js" defer></script>
   <script src="/features/sessions/session-chat.js" defer></script>
   <script src="/features/sessions/session-create.js" defer></script>
+  <script src="/features/tasks/task-layout.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -52,13 +53,28 @@
     <header class="topbar"><span class="breadcrumb">工作台 <span>/</span> <b id="breadcrumbTitle">任务</b></span><div class="sync"><span class="live-dot" id="syncDot"></span><span id="syncText" role="status">正在读取本地状态…</span><span id="refreshControl" class="shadcn-scope"></span></div></header>
     <main>
       <a href="#/requirements" class="workspace-back" id="backToRequirements" hidden>← 返回任务列表</a>
-      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。</p></div><span id="newTaskButton" class="shadcn-scope"></span></div>
+      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。</p></div><span id="newTaskButton" class="shadcn-scope"></span><div id="taskPageActions" hidden></div></div>
       <div id="offlineFeedback" class="shadcn-scope"></div>
       <section id="stats" class="stats" aria-label="工作台统计"></section>
       <section id="settingsPage" class="settings-page shadcn-scope" aria-label="设置" hidden></section>
       <section class="content-panel" id="workContent">
         <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><div class="shadcn-scope" id="archiveFilterWrap"></div></div></div>
-        <div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div>
+        <div id="taskWorkspaceLayout" class="task-workspace-layout" data-mode="collapsed">
+          <div id="taskWorkArea" class="task-work-area" aria-label="任务工作区">
+            <div id="taskToolsTabs" class="task-tools-tabs" role="tablist" aria-label="工作区视图" hidden><button type="button" id="taskProjectsTab" role="tab" data-task-view="projects" aria-controls="taskProjectsView" aria-selected="true">项目</button><button type="button" id="taskSessionsTab" role="tab" data-task-view="sessions" aria-controls="taskSessionsView" aria-selected="false" tabindex="-1">会话<span data-task-chat-status></span></button></div>
+            <div id="taskToolPanels" class="task-tool-panels">
+              <section id="taskProjectsView" class="task-projects-view" aria-label="项目工作区"><div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div></section>
+              <div id="taskOverviewHandle" class="task-split-handle" data-workspace-resize="overview" role="separator" aria-label="调整项目与会话列表宽度" aria-orientation="vertical" aria-controls="taskProjectsView taskSessionsView" aria-valuemin="25" aria-valuemax="65" aria-valuenow="40" tabindex="0" hidden></div>
+              <section id="taskSessionsView" class="task-sessions-view" aria-label="会话列表" hidden><div id="taskSessionsContainer"></div></section>
+            </div>
+          </div>
+          <div id="taskSplitHandle" class="task-split-handle" data-workspace-resize="chat" role="separator" aria-label="调整任务与对话宽度" aria-orientation="vertical" aria-controls="taskWorkArea taskConversation" aria-valuemin="25" aria-valuemax="65" aria-valuenow="40" tabindex="0" hidden></div>
+          <section id="taskConversation" class="task-conversation" aria-label="任务对话" hidden>
+            <div class="task-conversation-toolbar"><div class="task-conversation-layout-actions shadcn-scope"><button type="button" data-task-layout="expand" aria-label="展开对话" title="展开对话">展开</button><button type="button" data-task-layout="close" aria-label="关闭对话" title="关闭对话">关闭</button></div></div>
+            <div id="taskConversationEmpty" class="task-conversation-empty">选择一个会话，或新建对话开始工作。</div>
+            <aside id="sessionHistoryPanel" class="session-history-panel shadcn-scope" role="region" aria-labelledby="sessionHistoryTitle" hidden></aside>
+          </section>
+        </div>
       </section>
       <footer class="page-footer"><span>所有分支和修改状态直接读取本地 Git</span><span id="rootPath"></span></footer>
     </main>
@@ -74,6 +90,5 @@
   <div id="toast" class="toast shadcn-scope" role="status" hidden></div>
   <dialog id="sessionDialog" class="wide-dialog shadcn-scope" aria-labelledby="sessionDialogTitle"></dialog>
   <dialog id="sessionCommandOutputDialog" class="session-command-output-dialog shadcn-scope" aria-labelledby="sessionCommandOutputTitle"></dialog>
-  <aside id="sessionHistoryPanel" class="session-history-panel shadcn-scope" role="dialog" aria-modal="false" aria-labelledby="sessionHistoryTitle" hidden></aside>
 </body>
 </html>

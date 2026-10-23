@@ -23,4 +23,9 @@ export const bridge = {
     root.render(<ChatPanel key={++mountSequence} controller={controller} />);
   },
   close() { active?.disconnect(); active = undefined; root?.render(null); },
+  updateTask(task: ChatOptions['task']) {
+    if (!active || active.options.task.id !== task.id) return;
+    active.options.task = task;
+    root?.render(<ChatPanel key={mountSequence} controller={active} />);
+  },
 };
