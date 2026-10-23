@@ -83,6 +83,57 @@ func getRequirementSessions(t *testing.T, a *App, id string) []RequirementSessio
 	return result.Sessions
 }
 
+func TestSessionListIncludesCurrentChatActivityWithoutPersistingIt(t *testing.T) {
+	a, q, _, _ := chatFixture(t)
+	fakeSessions(a, map[string]codex.Session{"session": {ID: "session", Cwd: q.Members[0].Path}})
+	run := &ChatRun{state: ChatState{ID: "run", Status: "running", Busy: true, TurnID: "turn"}}
+	a.chats["session"] = run
+	// Remove the synthetic run before fixture cleanup tries to stop it.
+	defer delete(a.chats, "session")
+	for _, status := range []string{"running", "waiting", "stopping"} {
+		run.mu.Lock()
+		run.state.Status = status
+		run.mu.Unlock()
+		got := getRequirementSessions(t, a, q.ID)
+		if len(got) != 1 || got[0].ChatStatus != status || got[0].CompletedRun != "" {
+			t.Fatalf("active session: %+v", got)
+		}
+	}
+	run.mu.Lock()
+	run.state.Busy, run.state.Status = false, "completed"
+	run.mu.Unlock()
+	got := getRequirementSessions(t, a, q.ID)
+	if got[0].ChatStatus != "" || got[0].CompletedRun != "run" {
+		t.Fatalf("completed session: %+v", got)
+	}
+	stored, err := a.StoredSessions(q.ID)
+	if err != nil || stored[0].ChatStatus != "" || stored[0].CompletedRun != "" {
+		t.Fatalf("runtime activity persisted: %+v, %v", stored, err)
+	}
+	a.openSessions = func(context.Context) (codex.SessionClient, error) { return nil, fmt.Errorf("offline") }
+	got = getRequirementSessions(t, a, q.ID)
+	if got[0].CompletedRun != "run" {
+		t.Fatalf("runtime activity lost on metadata failure: %+v", got)
+	}
+}
+
+func TestSessionActivityTracksManagedTerminalStatus(t *testing.T) {
+	b := &terminalBridge{session: "terminal", connected: true, bound: true}
+	a := &Service{bridges: map[string]*terminalBridge{"bridge": b}}
+	for _, step := range []struct{ event, want string }{
+		{`{"method":"turn/started","params":{"threadId":"terminal"}}`, "running"},
+		{`{"method":"thread/status/changed","params":{"threadId":"terminal","status":{"type":"active","activeFlags":["waitingOnUserInput"]}}}`, "waiting"},
+		{`{"method":"turn/completed","params":{"threadId":"terminal"}}`, ""},
+	} {
+		b.observe([]byte(step.event))
+		s := RequirementSession{ID: "terminal"}
+		a.decorateSessionActivity(&s)
+		if s.ChatStatus != step.want {
+			t.Fatalf("status = %q, want %q", s.ChatStatus, step.want)
+		}
+	}
+}
+
 func TestSessionsDiscoverPageAndManualLaunchesAndPersistLinks(t *testing.T) {
 	a := testApp(t)
 	front := register(t, a, "Front", repo(t, "front", "master"))

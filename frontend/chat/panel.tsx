@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useSyncExternalStore} from "react";
+import {useEffect, useMemo, useState, useSyncExternalStore} from "react";
 import {AssistantRuntimeProvider, MessageNotSentError, useExternalStoreRuntime, type ThreadMessageLike} from "@assistant-ui/react";
 import {RefreshCwIcon, XIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
@@ -11,23 +11,40 @@ import {Label} from "@/components/ui/label";
 import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {ChatController} from "./controller";
 import {cleanText, convertEntries, mergeEntries, type Approval} from "./model";
+import {readElicitation} from "./approval";
+import {ApprovalActions, ElicitationFields} from "./approval-fields";
 
 const labels: Record<string, string> = {handoff: "等待终端本轮工作结束后交接…", idle: "可以在这里继续对话", starting: "正在连接 Codex…", running: "Codex 正在工作…", waiting: "等待你的审批或回答", stopping: "正在请求停止…", completed: "本轮已完成", interrupted: "本轮已停止", failed: "本轮未完成，请检查进展", conflict: "会话暂不可发送"};
 const toThreadMessage = (message: ThreadMessageLike) => message;
 
 function ApprovalCard({approval, controller}: {approval: Approval; controller: ChatController}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const disabled = !!state.answering || state.stopping;
+  const [error, setError] = useState("");
+  const disabled = !!state.answering || state.stopping || !state.chat.busy || state.chat.status === "stopping";
   return <Card className="gap-3 py-4"><form onSubmit={event => {
     event.preventDefault();
+    if (disabled) return;
+    setError("");
     const data = new FormData(event.currentTarget);
     const answers: Record<string, string[]> = {};
     for (const q of approval.questions || []) answers[q.id] = [String(data.get(`text:${q.id}`) || "").trim() || String(data.get(`choice:${q.id}`) || "")];
-    void controller.answer(approval, "accept", answers);
+    const decision = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") || "accept";
+    try { void controller.answer(approval, decision, answers, readElicitation(event.currentTarget, approval.elicitation)); }
+    catch (error) { setError((error as Error).message); }
+  }} onClick={event => {
+    if ((event.target as Element).closest("[data-elicitation-open]")) {
+      event.preventDefault();
+      if (!disabled) void controller.openApprovalURL(approval);
+      return;
+    }
+    const button = (event.target as Element).closest<HTMLButtonElement>("[data-chat-decision]");
+    if (button && !disabled) { setError(""); void controller.answer(approval, button.dataset.chatDecision!, {}); }
   }}>
-    <CardHeader className="px-4"><CardTitle>{approval.title}</CardTitle></CardHeader>
+    <CardHeader className="px-4"><CardTitle>{cleanText(approval.title)}</CardTitle></CardHeader>
     <CardContent className="space-y-3 px-4 py-3">
       {approval.details && <pre className="m-0 max-h-36 overflow-auto whitespace-pre-wrap wrap-anywhere text-xs">{cleanText(approval.details)}</pre>}
+      <ElicitationFields elicitation={approval.elicitation} disabled={disabled} />
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {(approval.questions || []).map(q => <fieldset key={q.id} className="m-0 min-w-0 space-y-2 border-0 p-0" disabled={disabled}>
         <legend className="mb-2 text-sm">{q.header} · {q.question}</legend>
         {q.options?.length ? <NativeSelect name={`choice:${q.id}`} aria-label={q.question}><NativeSelectOption value="">选择一个回答，或在下方补充</NativeSelectOption>{q.options.map(o => <NativeSelectOption key={o.label} value={o.label}>{o.label} · {o.description}</NativeSelectOption>)}</NativeSelect> : null}
@@ -35,8 +52,7 @@ function ApprovalCard({approval, controller}: {approval: Approval; controller: C
       </fieldset>)}
     </CardContent>
     <CardFooter className="justify-end gap-2 px-4">
-      <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => void controller.answer(approval, "decline", {})}>拒绝</Button>
-      {approval.can_accept && <Button type="submit" size="sm" disabled={disabled}>{state.answering === approval.id ? "正在提交…" : approval.kind === "questions" ? "提交回答" : "允许一次"}</Button>}
+      <ApprovalActions approval={approval} disabled={disabled} sending={state.answering === approval.id} />
     </CardFooter>
   </form></Card>;
 }

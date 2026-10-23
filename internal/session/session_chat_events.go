@@ -197,42 +197,31 @@ func makeChatApproval(event codex.Event) (ChatApproval, error) {
 		if len(p.Additional) > 0 && string(p.Additional) != "null" {
 			a.Details += "\n附加权限：" + string(p.Additional)
 		}
-		if len(p.Decisions) > 0 {
-			a.CanAccept = false
-			for _, d := range p.Decisions {
-				if string(d) == `"accept"` {
-					a.CanAccept = true
-				}
-			}
+		a.Choices = commandApprovalChoices(p.Decisions)
+		a.CanAccept = false
+		for _, choice := range a.Choices {
+			a.CanAccept = a.CanAccept || choice.Accepts
 		}
 	case "item/fileChange/requestApproval":
 		a.Kind, a.Title = "decision", "允许修改文件？"
 		a.Details = p.Reason + "\n" + p.Cwd + "\n" + p.GrantRoot
+		a.Choices = commandApprovalChoices([]json.RawMessage{json.RawMessage(`"accept"`), json.RawMessage(`"acceptForSession"`), json.RawMessage(`"decline"`), json.RawMessage(`"cancel"`)})
 	case "item/permissions/requestApproval":
 		a.Kind, a.Title = "permissions", "允许本轮使用这些权限？"
 		a.Details = p.Reason + "\n" + p.Cwd + "\n" + string(p.Permissions)
+		a.Choices = []ChatApprovalChoice{{ID: "decline", Label: "拒绝"}, {ID: "accept", Label: "允许本轮", Accepts: true}, {ID: "accept_session", Label: "本会话允许", Accepts: true}}
 	case "item/tool/requestUserInput":
 		a.Kind, a.Title, a.Questions = "questions", "Codex 需要你的回答", p.Questions
 	case "mcpServer/elicitation/request":
-		a.Kind, a.Title, a.CanAccept = "unsupported", "外部工具需要额外交互", false
-		a.Details = "此工具的表单或登录交互暂不支持在侧栏完成。可拒绝本次请求，或停止后在终端继续。"
+		makeElicitation(&a)
 	default:
 		return a, fmt.Errorf("侧栏暂不支持此交互（%s），已请求停止本轮工作，请在终端继续", event.Method)
 	}
 	return a, nil
 }
 func (a *Service) ChatApprovalHandler(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		RunID      string              `json:"run_id"`
-		ApprovalID string              `json:"approval_id"`
-		Decision   string              `json:"decision"`
-		Answers    map[string][]string `json:"answers"`
-	}
+	var input chatApprovalInput
 	if !httpx.Decode(w, r, &input) {
-		return
-	}
-	if input.Decision != "accept" && input.Decision != "decline" {
-		httpx.WriteError(w, 400, "请选择允许或拒绝")
 		return
 	}
 	run := a.ControlledRun(w, r, input.RunID)
@@ -258,46 +247,43 @@ func (a *Service) ChatApprovalHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, "此审批已被处理或失效")
 		return
 	}
-	if input.Decision == "accept" && !pending.CanAccept {
+	choice, err := approvalChoice(pending, input.Decision)
+	if err != nil {
 		run.mu.Unlock()
-		httpx.WriteError(w, 400, "此交互不支持在侧栏批准")
+		httpx.WriteError(w, 400, err.Error())
 		return
 	}
 	var result any
 	switch pending.Kind {
+	case "elicitation":
+		result, err = elicitationReply(pending, choice, input.Content)
 	case "permissions":
 		permissions := json.RawMessage(`{}`)
-		if input.Decision == "accept" {
+		if choice.Accepts {
 			var p struct {
 				Permissions json.RawMessage `json:"permissions"`
 			}
 			_ = json.Unmarshal(pending.params, &p)
 			permissions = p.Permissions
 		}
-		result = map[string]any{"permissions": permissions, "scope": "turn"}
-	case "questions":
-		answers := map[string]any{}
-		for _, q := range pending.Questions {
-			values := input.Answers[q.ID]
-			if input.Decision == "decline" {
-				values = []string{}
-			}
-			if input.Decision == "accept" && (len(values) != 1 || strings.TrimSpace(values[0]) == "" || len(values[0]) > 8000) {
-				run.mu.Unlock()
-				httpx.WriteError(w, 400, "请回答每一个问题（最多 8000 字节）")
-				return
-			}
-			answers[q.ID] = map[string]any{"answers": values}
+		scope := "turn"
+		if input.Decision == "accept_session" {
+			scope = "session"
 		}
-		result = map[string]any{"answers": answers}
-	case "unsupported":
-		result = map[string]any{"action": "decline", "content": nil}
+		result = map[string]any{"permissions": permissions, "scope": scope}
+	case "questions":
+		result, err = questionReply(pending.Questions, input)
 	default:
-		result = map[string]any{"decision": input.Decision}
+		result = map[string]any{"decision": choice.decision}
+	}
+	if err != nil {
+		run.mu.Unlock()
+		httpx.WriteError(w, 400, err.Error())
+		return
 	}
 	// Keep this mutex through the short write so duplicate clicks cannot reply
 	// twice to one RPC request, and a completed turn cannot consume an old reply.
-	err := run.client.Reply(pending.rpcID, result)
+	err = run.client.Reply(pending.rpcID, result)
 	if err == nil {
 		left := []ChatApproval{}
 		for _, p := range run.state.Approvals {
@@ -315,6 +301,10 @@ func (a *Service) ChatApprovalHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, 503, "审批未送达："+err.Error())
 		return
+	}
+	select {
+	case run.notify <- struct{}{}:
+	default:
 	}
 	httpx.WriteJSON(w, 200, run.snapshot())
 }

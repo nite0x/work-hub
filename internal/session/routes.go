@@ -17,5 +17,6 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/requirements/{id}/sessions/{session}/chat/events", s.ChatEventsHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/stop", s.ChatStopHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/approval", s.ChatApprovalHandler)
+	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/approval/open", s.ChatApprovalOpenHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/handoff", s.ChatHandoffHandler)
 }

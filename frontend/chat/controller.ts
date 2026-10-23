@@ -5,6 +5,7 @@ export interface ChatOptions {
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   stream: (path: string, signal: AbortSignal) => Promise<Response>;
   created: (session: Session) => void;
+  activity?: (session: string, chat: ChatState) => void;
   close: () => void;
 }
 export interface Snapshot {
@@ -26,6 +27,7 @@ export class ChatController {
   private handoffID?: string;
   private submitted?: {id?: string; text: string};
   private pending?: {text: string; project_id: string; request_id: string};
+  private openingApproval = false;
   constructor(public options: ChatOptions) {
     this.snapshot = {session: options.session, entries: [], chat: idleChat(), project: options.task.primary_project_id, draft: "", error: "", historyError: "", loading: false, submitting: false, stopping: false, answering: null, cursor: null};
   }
@@ -79,6 +81,7 @@ export class ChatController {
       chat = {...chat, entries: chat.entries.map(e => e.status === "inProgress" ? {...e, status: chat.status === "completed" ? "completed" : "interrupted"} : e)};
       this.update({entries: mergeEntries(this.snapshot.entries, chat.entries), chat});
     } else this.update({chat});
+    if (this.snapshot.session) this.options.activity?.(this.snapshot.session.id, chat);
     if (previous.busy && !chat.busy) { this.streamAbort?.abort(); void this.history(); }
     if (chat.busy && chat.id && this.connected) void this.watch(chat.id);
   }
@@ -148,10 +151,19 @@ export class ChatController {
     catch (error) { this.update({error: (error as Error).message}); }
     finally { this.update({stopping: false}); }
   };
-  answer = async (approval: Approval, decision: "accept" | "decline", answers: Record<string, string[]>) => {
+  openApprovalURL = async (approval: Approval) => {
+    const {chat, stopping} = this.snapshot;
+    if (this.openingApproval || stopping || !chat.busy || chat.status === "stopping") return;
+    this.openingApproval = true;
+    this.update({error: ""});
+    try { await this.options.request(this.base() + "/chat/approval/open", {method: "POST", body: JSON.stringify({run_id: chat.id, approval_id: approval.id})}); }
+    catch (error) { this.update({error: (error as Error).message}); }
+    finally { this.openingApproval = false; }
+  };
+  answer = async (approval: Approval, decision: string, answers: Record<string, string[]>, content?: Record<string, unknown>) => {
     if (this.snapshot.answering || !this.snapshot.chat.busy) return;
     this.update({answering: approval.id, error: ""});
-    try { this.apply(await this.options.request<ChatState>(this.base() + "/chat/approval", {method: "POST", body: JSON.stringify({run_id: this.snapshot.chat.id, approval_id: approval.id, decision, answers})})); }
+    try { this.apply(await this.options.request<ChatState>(this.base() + "/chat/approval", {method: "POST", body: JSON.stringify({run_id: this.snapshot.chat.id, approval_id: approval.id, decision, answers, ...(content === undefined ? {} : {content})})})); }
     catch (error) { this.update({error: (error as Error).message}); }
     finally { this.update({answering: null}); }
   };

@@ -133,3 +133,25 @@ test("opening an idle existing conversation needs no previous submitted draft", 
  c.connect(); await new Promise(r=>setImmediate(r));
  assert.equal(c.getSnapshot().error,"");assert.equal(c.getSnapshot().chat.status,"idle");c.disconnect();
 });
+
+test("chat state updates publish session activity for the surrounding list", async () => {
+  Object.assign(globalThis, {document: {hidden: false}});
+  let chat = idleChat();
+  const c = setup(async (path, options) => {
+    if (path.endsWith('/history')) return {session, entries: []} as any;
+    if (options?.method === 'POST') chat = running('activity-run');
+    return chat as any;
+  });
+  const states: string[] = [];
+  c.options.activity = (id, state) => { assert.equal(id, session.id); states.push(state.status); };
+  c.connect();
+  try {
+    await new Promise(r => setImmediate(r));
+    await c.send('开始工作');
+    chat = {...running('activity-run'), status: 'waiting'};
+    await c.poll();
+    chat = {...chat, status: 'completed', busy: false};
+    await c.poll();
+    assert.deepEqual(states, ['idle', 'running', 'waiting', 'completed']);
+  } finally { c.disconnect(); }
+});

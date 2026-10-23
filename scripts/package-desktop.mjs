@@ -31,6 +31,15 @@ if (plan.dryRun) {
   for (const [source, name] of [['README.md', 'README.md'], ['src-tauri/notices/THIRD-PARTY-NOTICES.txt', 'THIRD-PARTY-NOTICES.txt']]) {
     cpSync(path.join(root, source), path.join(output, name)); names.push(name);
   }
+  if (plan.platform === 'win32') {
+    for (const [source, name] of [
+      ['scripts/upgrade-windows.ps1', 'Upgrade-WorkHub.ps1'],
+      ['scripts/upgrade-windows.cmd', 'Upgrade.cmd'],
+      [`src-tauri/binaries/work-hub-backend-${plan.target}.exe`, 'work-hub-upgrade.exe'],
+    ]) {
+      cpSync(path.join(root, source), path.join(output, name)); names.push(name);
+    }
+  }
   const files = writeChecksums(output, names);
   const revision = run('git', ['rev-parse', 'HEAD']);
   const modified = Boolean(run('git', ['status', '--porcelain', '--untracked-files=normal']));

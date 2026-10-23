@@ -19,15 +19,17 @@ import (
 )
 
 type ChatApproval struct {
-	ID        string         `json:"id"`
-	Kind      string         `json:"kind"`
-	Title     string         `json:"title"`
-	Details   string         `json:"details"`
-	Questions []ChatQuestion `json:"questions,omitempty"`
-	CanAccept bool           `json:"can_accept"`
-	rpcID     json.RawMessage
-	method    string
-	params    json.RawMessage
+	ID          string               `json:"id"`
+	Kind        string               `json:"kind"`
+	Title       string               `json:"title"`
+	Details     string               `json:"details"`
+	Questions   []ChatQuestion       `json:"questions,omitempty"`
+	CanAccept   bool                 `json:"can_accept"`
+	Choices     []ChatApprovalChoice `json:"choices,omitempty"`
+	Elicitation *ChatElicitation     `json:"elicitation,omitempty"`
+	rpcID       json.RawMessage
+	method      string
+	params      json.RawMessage
 }
 type ChatQuestion struct {
 	ID       string `json:"id"`

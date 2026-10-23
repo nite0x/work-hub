@@ -429,6 +429,51 @@ test('session picker keeps search, pagination, already-linked state and ID linki
   assert.equal(h.$('#sessionDialog').open, false);
 });
 
+test('session activity and unread indicators survive refresh and clear when opened', async t => {
+  const h = await harness(t, false);
+  const indicators = () => h.$('[data-session-indicators="session-1"]').textContent;
+  assert.equal(indicators(), ''); // Existing history starts read.
+  h.sessions[0].chat_status = 'running';
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '对话中');
+  h.sessions[0].chat_status = 'waiting';
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '待确认');
+  h.sessions[0].chat_status = '';
+  h.sessions[0].completed_run = 'background-run';
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '未读');
+  // Recreate the read cache as on page reload; persisted progress still leaves
+  // the unseen completion unread.
+  h.window.eval('sessionReadMemory.clear()');
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '未读');
+  h.window.openSessionHistory('task', 'session-1');
+  await settle();
+  assert.equal(indicators(), '');
+  const saved = JSON.parse(h.window.localStorage.getItem('workhub:session-read:' + JSON.stringify(['local', 'session-1'])));
+  assert.equal(saved.run, 'background-run');
+  h.window.closeSessionHistory();
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '');
+  h.sessions[0].completed_run = 'second-background-run';
+  await h.window.refreshRequirementSessions('task');
+  assert.equal(indicators(), '未读');
+});
+
+test('assistant and fallback chat updates immediately refresh session activity', async t => {
+  const h = await harness(t, false);
+  let opened;
+  h.window.WorkHubAssistant = { open(options) { opened = options; }, close() {} };
+  h.window.openSessionHistory('task', 'session-1');
+  opened.activity('session-1', { id: 'live', status: 'running', busy: true });
+  assert.equal(h.$('[data-session-indicators="session-1"]').textContent, '对话中');
+  opened.activity('session-1', { id: 'live', status: 'waiting', busy: true });
+  assert.equal(h.$('[data-session-indicators="session-1"]').textContent, '待确认');
+  opened.activity('session-1', { id: 'live', turn_id: 'turn', status: 'completed', busy: false });
+  assert.equal(h.$('[data-session-indicators="session-1"]').textContent, '');
+});
+
 test('interactive approval questions keep native values, secret fields and answer requests', async t => {
   const h = await harness(t, false);
   h.window.openSessionHistory('task', 'session-1'); await settle();
@@ -458,6 +503,21 @@ test('interactive message shortcuts and new-session drafts keep the existing wor
   assert.equal(h.$('#sessionChatInput').value, '保留这份草稿');
   assert.equal(h.$('#newSessionProject').value, 'app');
   assert(!h.requests.some(r => r.url.endsWith('/sessions/new')));
+});
+
+test('legacy MCP forms preserve drafts when another request arrives and return typed answers', async t => {
+  const h=await harness(t,false);
+  h.window.openSessionHistory('task','session-1');await settle();
+  const current=h.currentSession();
+  const approval={id:'mcp',title:'填写配置',details:'请选择配置',kind:'elicitation',can_accept:true,choices:[{id:'decline',label:'拒绝',accepts:false},{id:'accept',label:'提交回答',accepts:true}],elicitation:{mode:'form',server_name:'apix',fields:[{name:'choice',title:'方案',type:'string',required:true,options:[{value:'id-a',label:'方案 A'}]},{name:'enabled',title:'启用',type:'boolean',required:true,default:false},{name:'count',title:'数量',type:'integer',required:true,default:0}]}};
+  const chat={id:'run',status:'waiting',busy:true,entries:[],approvals:[approval]};
+  h.window.applyChatState(current,chat);
+  const field=h.change('select[name="elicitation:choice"]',JSON.stringify('id-a'));
+  h.window.applyChatState(current,{...chat,approvals:[approval,{id:'another',title:'另一个请求',kind:'questions',can_accept:true}]});
+  assert.equal(h.$('select[name="elicitation:choice"]'),field);
+  assert.equal(field.value,JSON.stringify('id-a'));
+  h.click('form[data-chat-approval="mcp"] button[value="accept"]');await settle();
+  assert.deepEqual(h.requests.find(r=>r.url.endsWith('/chat/approval')).body,{run_id:'run',approval_id:'mcp',decision:'accept',answers:{},content:{choice:'id-a',enabled:false,count:0}});
 });
 
 

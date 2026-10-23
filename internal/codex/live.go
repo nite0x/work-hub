@@ -104,7 +104,7 @@ func DialDaemon(ctx context.Context) (*websocket.Conn, error) {
 }
 
 func StartWebSocket(parent context.Context, conn *websocket.Conn) (LiveClient, error) {
-	return StartWebSocketWithCapabilities(parent, conn, nil)
+	return StartWebSocketWithCapabilities(parent, conn, map[string]bool{"mcpServerOpenaiFormElicitation": true})
 }
 
 func StartWebSocketWithCapabilities(parent context.Context, conn *websocket.Conn, capabilities any) (LiveClient, error) {
@@ -165,7 +165,7 @@ func StartWire(parent context.Context, cmd *exec.Cmd) (LiveClient, error) {
 	go w.read(out)
 	callCtx, end := context.WithTimeout(ctx, 10*time.Second)
 	defer end()
-	if err := w.Call(callCtx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "worktree_hub", "version": "0.1.0"}}, nil); err != nil {
+	if err := w.Call(callCtx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "worktree_hub", "version": "0.1.0"}, "capabilities": map[string]bool{"mcpServerOpenaiFormElicitation": true}}, nil); err != nil {
 		w.Close()
 		return nil, err
 	}

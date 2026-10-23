@@ -6,13 +6,52 @@ let sessionPickerLoading = false;
 let sessionPickerGeneration = 0;
 let sessionPickerSearch = '';
 let sessionPickerItems = [];
+const sessionReadMemory = new Map();
+function sessionReadKey(session) { return 'workhub:session-read:' + JSON.stringify([activeEnvironment, session]); }
+function sessionReadProgress(session) {
+  const key = sessionReadKey(session.id);
+  if (sessionReadMemory.has(key)) return sessionReadMemory.get(key);
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved && Number.isFinite(saved.time)) { sessionReadMemory.set(key, saved); return saved; }
+  } catch { /* Reading remains usable when browser storage is unavailable. */ }
+  return saveSessionRead(session);
+}
+function saveSessionRead(session) {
+  const key = sessionReadKey(session.id);
+  const saved = { time: Math.max(Date.now() / 1000, session.updated_at || 0), run: session.completed_run || '' };
+  sessionReadMemory.set(key, saved);
+  try { localStorage.setItem(key, JSON.stringify(saved)); } catch { /* Keep an in-memory fallback. */ }
+  return saved;
+}
+function sessionWithUnread(session) {
+  const seen = sessionReadProgress(session);
+  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && !document.hidden;
+  if (open) saveSessionRead(session);
+  return { ...session, unread: !open && ((session.updated_at || 0) > seen.time || !!session.completed_run && session.completed_run !== seen.run) };
+}
+function markSessionRead(requirement, session) {
+  const item = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
+  if (item) { saveSessionRead(item); updateRequirementSessionsView(requirement); }
+}
+function updateSessionChatActivity(requirement, session, chat) {
+  const item = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
+  if (!item) return;
+  const status = chat.busy ? chat.status : '';
+  const completed = !chat.busy && chat.turn_id ? chat.id : item.completed_run;
+  if (item.chat_status === status && item.completed_run === completed) return;
+  item.chat_status = status;
+  item.completed_run = completed;
+  updateRequirementSessionsView(requirement);
+}
 
 function sessionTime(value) {
   return value ? new Date(value * 1000).toLocaleString('zh-CN', { hour12: false }) : '暂无活动记录';
 }
 
 function renderRequirementSessions(q) {
-  return window.WorkHubUI.sessions(q, requirementSessions.get(q.id), typeof sessionReadOnly !== 'undefined' && sessionReadOnly);
+  const data = requirementSessions.get(q.id);
+  return window.WorkHubUI.sessions(q, data && { ...data, sessions: data.sessions.map(sessionWithUnread) }, typeof sessionReadOnly !== 'undefined' && sessionReadOnly);
 }
 
 function updateRequirementSessionsView(id) {

@@ -9,6 +9,7 @@ import (
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/platform"
 	"worktree-hub/internal/workspace"
 )
 
@@ -23,6 +24,7 @@ type Service struct {
 	openLive         func(context.Context) (codex.LiveClient, error)
 	watchHistory     func(context.Context, string, func(HistoryPush) error) error
 	terminalConflict func(string, string) error
+	openExternal     func(string) error
 	chatMu           sync.Mutex
 	chats            map[string]*ChatRun
 	createChatMu     sync.Mutex
@@ -32,7 +34,7 @@ type Service struct {
 }
 
 func New(environment *workspace.Service, plans LaunchPlanner) *Service {
-	s := &Service{Workspace: environment, plans: plans, openSessions: codex.OpenSessionClient, openLive: codex.OpenLive, watchHistory: WatchCodexHistory, terminalConflict: terminalSessionConflict, chats: map[string]*ChatRun{}, bridges: map[string]*terminalBridge{}}
+	s := &Service{Workspace: environment, plans: plans, openSessions: codex.OpenSessionClient, openLive: codex.OpenLive, watchHistory: WatchCodexHistory, terminalConflict: terminalSessionConflict, openExternal: platform.OpenExternal, chats: map[string]*ChatRun{}, bridges: map[string]*terminalBridge{}}
 	if environment.Remote != nil {
 		s.openLive = environment.Remote.OpenCodex
 		s.terminalConflict = func(id, cwd string) error {

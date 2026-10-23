@@ -158,6 +158,7 @@ async function loadSessionHistory(older = false, background = false) {
 }
 
 function openSessionHistory(requirement, session = null) {
+  if (session) markSessionRead(requirement, session);
   const readonly = typeof sessionReadOnly !== 'undefined' && sessionReadOnly;
   if (readonly && !session) return;
   if (!readonly && window.WorkHubAssistant) {
@@ -176,6 +177,9 @@ function openSessionHistory(requirement, session = null) {
       request: (path, options) => api(path, { ...options, environment }),
       stream: (path, signal) => fetch(path, { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal }),
       close: () => closeSessionHistory(),
+      activity: (id, chat) => {
+        if (activeEnvironment === environment) updateSessionChatActivity(requirement, id, chat);
+      },
       created: created => {
         if (activeEnvironment !== environment) return;
         const data = requirementSessions.get(requirement) || { sessions: [] };

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,6 +33,7 @@ type terminalBridge struct {
 	client, upstream                       *websocket.Conn
 	pending                                map[string]bridgeCall
 	active, connected, draining, revoked   bool
+	waiting                                bool
 	bound                                  bool
 	once                                   sync.Once
 	done                                   chan struct{}
@@ -334,14 +336,16 @@ func (b *terminalBridge) observe(raw []byte) {
 			Thread  struct {
 				codex.Session
 				Status struct {
-					Type string `json:"type"`
+					Type        string   `json:"type"`
+					ActiveFlags []string `json:"activeFlags"`
 				} `json:"status"`
 			} `json:"thread"`
 		} `json:"result"`
 		Params struct {
 			ThreadID string `json:"threadId"`
 			Status   struct {
-				Type string `json:"type"`
+				Type        string   `json:"type"`
+				ActiveFlags []string `json:"activeFlags"`
 			} `json:"status"`
 		} `json:"params"`
 	}
@@ -361,23 +365,28 @@ func (b *terminalBridge) observe(raw []byte) {
 					b.bound = true
 					b.sandbox = append(json.RawMessage{}, m.Result.Sandbox...)
 					b.active = m.Result.Thread.Status.Type == "active"
+					b.waiting = slices.Contains(m.Result.Thread.Status.ActiveFlags, "waitingOnApproval") || slices.Contains(m.Result.Thread.Status.ActiveFlags, "waitingOnUserInput")
 					save = &s
 				}
 			}
 			if call.Method == "turn/start" {
 				b.active = true
+				b.waiting = false
 			}
 		}
 	}
 	if m.Params.ThreadID == b.session && b.session != "" {
 		if m.Method == "turn/started" {
 			b.active = true
+			b.waiting = false
 		}
 		if m.Method == "turn/completed" {
 			b.active = false
+			b.waiting = false
 		}
 		if m.Method == "thread/status/changed" {
 			b.active = m.Params.Status.Type == "active"
+			b.waiting = slices.Contains(m.Params.Status.ActiveFlags, "waitingOnApproval") || slices.Contains(m.Params.Status.ActiveFlags, "waitingOnUserInput")
 		}
 	}
 	b.mu.Unlock()

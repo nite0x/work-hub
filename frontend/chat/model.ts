@@ -1,11 +1,12 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
+import type {ApprovalChoice, Elicitation} from "./approval";
 
 export interface Entry {
   id: string; turn_id: string; kind: string; text?: string; command?: string; cwd?: string;
   status?: string; output?: string | null; exit_code?: number | null; duration_ms?: number | null;
 }
 export interface Question { id: string; header: string; question: string; isSecret?: boolean; options?: {label: string; description: string}[] }
-export interface Approval { id: string; title: string; details: string; kind: string; can_accept: boolean; questions?: Question[] }
+export interface Approval { id: string; title: string; details: string; kind: string; can_accept: boolean; questions?: Question[]; choices?: ApprovalChoice[]; elicitation?: Elicitation }
 export interface ChatState { id?: string; revision?: number; turn_id?: string; status: string; busy: boolean; entries: Entry[]; approvals: Approval[]; error?: string; blocked?: string; can_handoff?: boolean; notice?: string }
 export interface Session { id: string; name: string; cwd: string; available?: boolean }
 export interface Task { id: string; name: string; state: string; primary_project_id: string; members: {project_id: string; project_name: string; path: string}[] }

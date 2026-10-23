@@ -50,7 +50,23 @@ function renderChatApprovals(current) {
   const signature = JSON.stringify(approvals);
   if (current.approvalSignature === signature) return;
   current.approvalSignature = signature;
-  $('#sessionChatApprovals').innerHTML = window.WorkHubUI.chatApprovals(approvals.map(cleanHistoryApproval));
+  const container = $('#sessionChatApprovals');
+  current.approvalViews ||= new Map();
+  const ids = new Set(approvals.map(a => a.id));
+  for (const [id, view] of current.approvalViews) {
+    if (!ids.has(id)) { view.node.remove(); current.approvalViews.delete(id); }
+  }
+  for (const approval of approvals) {
+    const source = JSON.stringify(approval);
+    const previous = current.approvalViews.get(approval.id);
+    if (previous?.source === source) continue;
+    const template = document.createElement('template');
+    template.innerHTML = window.WorkHubUI.chatApprovals([cleanHistoryApproval(approval)]);
+    const node = template.content.firstElementChild;
+    if (previous) previous.node.replaceWith(node);
+    else container.append(node);
+    current.approvalViews.set(approval.id, { source, node });
+  }
 }
 function applyChatState(current, chat) {
   if (sessionHistoryState !== current) return;
@@ -67,6 +83,7 @@ function applyChatState(current, chat) {
   const scroll = $('#sessionHistoryScroll');
   const follow = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
   current.chat = chat;
+  updateSessionChatActivity(current.requirement, current.session, chat);
   renderChatControls(current);
   renderChatApprovals(current);
   if (JSON.stringify(previous?.entries) !== JSON.stringify(chat.entries)) {
@@ -114,6 +131,7 @@ function openSessionChat(current) {
   current.chatAbort = new AbortController();
   current.chatError = '';
   current.approvalSignature = null;
+  current.approvalViews = new Map();
   $('#sessionChatInput').value = chatDrafts.get(chatDraftKey(current)) || '';
   $('#sessionChatLiveEntries').textContent = '';
   $('#sessionChatApprovals').textContent = '';
@@ -173,17 +191,40 @@ $('#handoffSessionChat').addEventListener('click', async () => {
 });
 async function answerChatApproval(form, decision) {
   const current = sessionHistoryState;
-  if (!current?.chat?.busy || form.dataset.sending) return;
+  if (!current?.chat?.busy || current.stopping || current.chat.status === 'stopping' || form.dataset.sending) return;
+  const approval = current.chat.approvals.find(a => a.id === form.dataset.chatApproval);
+  if (!approval) return;
   const answers = {};
   form.querySelectorAll('[data-free-answer-for]').forEach(input => {
     const id = input.dataset.freeAnswerFor;
     const choice = [...form.querySelectorAll('[data-answer-for]')].find(s => s.dataset.answerFor === id);
     answers[id] = [input.value.trim() || choice?.value || ''];
   });
-  form.dataset.sending = '1'; form.querySelectorAll('button').forEach(b => { b.disabled = true; });
-  try { applyChatState(current, await api(chatPath(current) + '/approval', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval, decision, answers }) })); }
+  const accepts = approval.choices ? approval.choices.some(c => c.id === decision && c.accepts) : decision === 'accept';
+  const disabled = [...form.querySelectorAll('button, input, select, textarea')].map(node => [node, node.disabled]);
+  try {
+    const content = accepts ? window.WorkHubUI.readElicitation(form, approval.elicitation) : undefined;
+    form.dataset.sending = '1'; disabled.forEach(([node]) => { node.disabled = true; });
+    current.chatError = ''; renderChatControls(current);
+    applyChatState(current, await api(chatPath(current) + '/approval', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval, decision, answers: accepts ? answers : {}, ...(content === undefined ? {} : { content }) }) }));
+  }
   catch (error) { if (sessionHistoryState === current) { current.chatError = error.message; renderChatControls(current); } }
-  finally { delete form.dataset.sending; form.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
+  finally { delete form.dataset.sending; disabled.forEach(([node, value]) => { node.disabled = value; }); }
 }
-$('#sessionChatApprovals').addEventListener('submit', event => { event.preventDefault(); const form = event.target.closest('[data-chat-approval]'); if (form) answerChatApproval(form, 'accept'); });
-$('#sessionChatApprovals').addEventListener('click', event => { const button = event.target.closest('[data-chat-decision]'); if (button) answerChatApproval(button.closest('form'), button.dataset.chatDecision); });
+$('#sessionChatApprovals').addEventListener('submit', event => { event.preventDefault(); const form = event.target.closest('[data-chat-approval]'); if (form) answerChatApproval(form, event.submitter?.value || 'accept'); });
+$('#sessionChatApprovals').addEventListener('click', async event => {
+  const link = event.target.closest('[data-elicitation-open]');
+  if (link) {
+    event.preventDefault();
+    const current = sessionHistoryState;
+    const form = link.closest('[data-chat-approval]');
+    if (!current?.chat?.busy || current.stopping || current.chat.status === 'stopping' || form.dataset.sending || link.dataset.opening) return;
+    link.dataset.opening = '1';
+    try { await api(chatPath(current) + '/approval/open', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval }) }); }
+    catch (error) { if (sessionHistoryState === current) { current.chatError = error.message; renderChatControls(current); } }
+    finally { delete link.dataset.opening; }
+    return;
+  }
+  const button = event.target.closest('[data-chat-decision]');
+  if (button) answerChatApproval(button.closest('form'), button.dataset.chatDecision);
+});

@@ -88,6 +88,8 @@ npm run desktop:package -- --debug
 
 产物集中在 `dist/desktop/<版本>/<target>/release/`，debug 包单独放在 `debug/`。包括安装器、`README.md`、Go/Rust 完整依赖许可 `THIRD-PARTY-NOTICES.txt`、记录源码提交及未提交状态的 `release.json`，以及覆盖这些文件的 `SHA256SUMS`。包内也携带许可文本。校验和用于核对文件完整性，不等同发布者签名；Linux 可运行 `sha256sum -c SHA256SUMS`，macOS 可运行 `shasum -a 256 -c SHA256SUMS`，Windows 可用 `Get-FileHash -Algorithm SHA256` 对照。
 
+Windows 发布目录另含 `Upgrade.cmd`、`Upgrade-WorkHub.ps1` 和安全停止后台的 helper。完整解压后双击 `Upgrade.cmd`，脚本校验包内文件，关闭当前安装目录的桌面窗口，安全停止默认后台，将完整业务数据和旧版程序备份到 `%LOCALAPPDATA%\WorktreeHubBackups\<时间戳>`，核对数据库备份后覆盖安装并重新打开应用。已有安装位置从当前用户卸载注册表读取；新装默认 `%LOCALAPPDATA%\Work Hub`。有 Git 写操作时停止并提示重试；自定义 `--data` 的后台需先手动安全停止。脚本不搬迁仓库、worktree 或 Codex 历史。
+
 应用版本以 `package.json` 为准，Tauri 直接读取它；`src-tauri/Cargo.toml` 的版本必须相同，更新版本时也需更新并提交 `Cargo.lock`。后台身份为应用版本加业务源码摘要。打包命令在编译前拒绝版本不一致、错误系统的目标以及不完整的签名配置，清理本次目标的旧安装包，避免误发上一次产物。Go、Tauri、WSL helper 随同一次构建交付。
 
 `.github/workflows/desktop.yml` 在手动运行或推送 `desktop-v<版本>` 标签时构建四个目标，上传 Actions artifacts；不自动创建或公开 GitHub Release。标签必须与应用版本一致。标签构建要求 macOS/Windows 发布签名；手动运行默认允许未签名测试包。Windows/Linux 作业包含实际安装、后台运行时升级保护、设置保留和卸载保留数据的验收脚本；macOS 作业从 DMG 复制应用到临时安装目录，检查宿主与 sidecar 的完整生命周期。这些作业需要在远端实际运行后，才能作为对应平台的验收结论。

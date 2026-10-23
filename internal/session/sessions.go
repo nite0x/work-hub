@@ -16,14 +16,41 @@ import (
 )
 
 type RequirementSession struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Cwd       string `json:"cwd"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
-	Source    string `json:"source"`
-	Available bool   `json:"available"`
-	Error     string `json:"error,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Cwd          string `json:"cwd"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	Source       string `json:"source"`
+	Available    bool   `json:"available"`
+	Error        string `json:"error,omitempty"`
+	ChatStatus   string `json:"chat_status,omitempty"`
+	CompletedRun string `json:"completed_run,omitempty"`
+}
+
+// Runtime activity is deliberately not persisted with session associations.
+func (a *Service) decorateSessionActivity(s *RequirementSession) {
+	if run := a.ChatFor(s.ID); run != nil {
+		run.mu.Lock()
+		if run.state.Busy {
+			s.ChatStatus = run.state.Status
+		} else if run.state.TurnID != "" {
+			s.CompletedRun = run.state.ID
+		}
+		run.mu.Unlock()
+	}
+	if s.ChatStatus == "" {
+		if bridge := a.BridgeFor(s.ID); bridge != nil {
+			bridge.mu.Lock()
+			if bridge.active {
+				s.ChatStatus = "running"
+				if bridge.waiting {
+					s.ChatStatus = "waiting"
+				}
+			}
+			bridge.mu.Unlock()
+		}
+	}
 }
 
 func sessionName(s codex.Session) string {
@@ -211,6 +238,9 @@ func (a *Service) RequirementSessionsHandler(w http.ResponseWriter, r *http.Requ
 		s.Name, s.Cwd, s.CreatedAt, s.UpdatedAt, s.Available = sessionName(current), current.Cwd, current.CreatedAt, current.UpdatedAt, true
 	}
 	sort.SliceStable(stored, func(i, j int) bool { return stored[i].UpdatedAt > stored[j].UpdatedAt })
+	for i := range stored {
+		a.decorateSessionActivity(&stored[i])
+	}
 	httpx.WriteJSON(w, 200, map[string]any{"sessions": stored})
 }
 
@@ -221,6 +251,9 @@ func (a *Service) SessionReadFailure(w http.ResponseWriter, requirement string, 
 	if err != nil {
 		httpx.DbError(w, err)
 		return
+	}
+	for i := range stored {
+		a.decorateSessionActivity(&stored[i])
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"sessions": stored, "error": cause.Error()})
 }

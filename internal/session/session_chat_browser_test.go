@@ -65,6 +65,28 @@ func (c *browserLive) Call(ctx context.Context, method string, params any, out a
 					return
 				}
 			}
+			if strings.Contains(input, "MCP") {
+				for index, request := range []map[string]any{
+					{"serverName": "apix", "mode": "form", "message": `Allow the apix MCP server to run tool "list_mcp_servers"?`, "requestedSchema": map[string]any{"type": "object", "properties": map[string]any{}}, "_meta": map[string]any{"codex_approval_kind": "mcp_tool_call", "persist": []string{"session", "always"}}},
+					{"serverName": "fixture", "mode": "form", "message": "请选择测试环境和检查项目", "requestedSchema": map[string]any{"type": "object", "required": []string{"environment", "count", "enabled", "projects"}, "properties": map[string]any{
+						"environment": map[string]any{"type": "string", "title": "测试环境", "oneOf": []any{map[string]any{"const": "test", "title": "测试环境"}, map[string]any{"const": "staging", "title": "预发布环境"}}},
+						"count":       map[string]any{"type": "integer", "title": "执行次数", "minimum": 1, "maximum": 5, "default": 1},
+						"enabled":     map[string]any{"type": "boolean", "title": "运行检查", "default": false},
+						"projects":    map[string]any{"type": "array", "title": "检查项目", "minItems": 1, "items": map[string]any{"type": "string", "enum": []string{"frontend", "backend"}}},
+					}}},
+					{"serverName": "fixture", "mode": "url", "message": "在浏览器中完成操作后回到侧栏确认", "url": "https://example.com/fixture-login", "elicitationId": "fixture-login"},
+				} {
+					c.request("mcpServer/elicitation/request", fmt.Sprintf("browser-mcp-%d", index), request)
+					select {
+					case <-c.decision:
+					case <-c.stop:
+						return
+					}
+				}
+				c.event("item/completed", map[string]any{"turnId": "turn", "item": map[string]any{"id": "new-reply", "type": "agentMessage", "text": "侧栏已完成工具授权、表单填写和 URL 流程确认。"}})
+				c.event("turn/completed", map[string]any{"turn": map[string]any{"id": "turn", "status": "completed"}})
+				return
+			}
 			c.event("item/started", map[string]any{"turnId": "turn", "item": map[string]any{"id": "new-command", "type": "commandExecution", "command": "go test ./...", "cwd": c.cwd, "status": "inProgress"}})
 			c.request("item/commandExecution/requestApproval", "browser-approval", map[string]any{"itemId": "new-command", "command": "go test ./...", "cwd": c.cwd, "reason": "验证当前修改需要执行测试", "availableDecisions": []string{"accept", "decline"}})
 			select {

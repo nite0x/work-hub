@@ -8,10 +8,12 @@ import { SessionList, SessionPicker, NewSession, type Session, type SessionsData
 import { HistoryMessage, FileChange, ChatApprovals, HistoryAttention, type HistoryEntry, type Approval } from "./session-timeline"
 import { Branch, EmptyState, SourceOptions, StatusBadge, TreeStatus, canOpenMember, branchSummary, expectedBranch, reusesDirectory } from "./shared"
 import type { GitOverview, PickerRow, Project, Task, Worktree } from "./types"
+import {readElicitation} from "../chat/approval"
 
 // Components render inert markup. The existing controllers keep ownership of
 // events, form state, native dialog lifecycle, polling and API requests.
 export const workspaceUI = {
+  readElicitation,
   tasks: (tasks: Task[]) => renderToStaticMarkup(<TaskList tasks={tasks} />),
   taskDetail: (task: Task, projects: Project[], environment: string) => renderToStaticMarkup(<TaskDetail task={task} projects={projects} environment={environment} />),
   projects: (projects: Project[], selectedID: string | null) => renderToStaticMarkup(<Projects projects={projects} selectedID={selectedID} />),
