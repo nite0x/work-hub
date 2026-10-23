@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/httpx"
+	"worktree-hub/internal/platform"
 )
 
 func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +76,10 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if a.BusyWorkspace("", plan.Cwd) {
+		httpx.WriteError(w, 409, "此工作目录已有对话正在运行，请等待完成或停止后再发送")
+		return
+	}
 	if err := a.AppTerminalConflict("", plan.Cwd); err != nil {
 		httpx.WriteError(w, 409, "所选目录仍有终端工作，为避免同时修改，请先关闭终端 Codex 或切换其关联会话到侧栏")
 		return
@@ -103,7 +107,7 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 	var result struct {
 		Thread codex.Session `json:"thread"`
 	}
-	params := map[string]any{"cwd": plan.Cwd, "sandbox": "workspace-write", "approvalPolicy": "on-request", "developerInstructions": "当前工作属于任务 " + q.Name + "。开始修改前先阅读 " + filepath.Join(q.Path, "BRIEF.md") + " 和适用的 AGENTS.md；各项目的 Git、构建及测试在对应仓库执行。"}
+	params := map[string]any{"cwd": plan.Cwd, "sandbox": "workspace-write", "approvalPolicy": "on-request", "developerInstructions": "当前工作属于任务 " + q.Name + "。开始修改前先阅读 " + platform.JoinWorkspacePath(q.Path, "BRIEF.md") + " 和适用的 AGENTS.md；各项目的 Git、构建及测试在对应仓库执行。"}
 	if err := c.Call(requestCtx, "thread/start", params, &result); err != nil || result.Thread.ID == "" {
 		httpx.WriteError(w, 503, "Codex 创建结果未确认，请刷新会话列表检查后再操作")
 		return

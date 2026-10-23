@@ -110,7 +110,7 @@ func (h *environmentHub) connectLocked(e Environment) (*App, error) {
 		return nil, err
 	}
 	a.token = h.local.token
-	a.Workspace.ReadOnlySessions = true
+	a.Workspace.ReadOnlySessions = h.local.Workspace.ReadOnlySessions
 	h.apps[e.ID] = a
 	h.stops[e.ID] = a.Projects.StartMasterSync(context.Background())
 	return a, nil
@@ -218,7 +218,7 @@ func (h *environmentHub) addHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	h.entries = entries
 	a.token = h.local.token
-	a.Workspace.ReadOnlySessions = true
+	a.Workspace.ReadOnlySessions = h.local.Workspace.ReadOnlySessions
 	h.apps[e.ID] = a
 	h.stops[e.ID] = a.Projects.StartMasterSync(context.Background())
 	e.Connected = true

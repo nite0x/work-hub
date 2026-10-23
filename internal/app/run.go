@@ -17,12 +17,24 @@ import (
 	"syscall"
 	"time"
 
+	"worktree-hub/internal/codex"
 	"worktree-hub/internal/platform"
 	"worktree-hub/internal/workspace"
 )
 
 // Run starts the desktop host, HTTP service, or workspace helper.
 func Run() {
+	if len(os.Args) > 1 && os.Args[1] == "--codex-live" {
+		platform.ConfigureCommandEnvironment()
+		if home, err := os.UserHomeDir(); err == nil {
+			_ = os.Setenv("PATH", filepath.Join(home, ".local", "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+		if err := codex.RelayDaemon(context.Background(), os.Stdin, os.Stdout); err != nil {
+			log.Print(err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--workspace-agent" {
 		if home, err := os.UserHomeDir(); err == nil {
 			_ = os.Setenv("PATH", filepath.Join(home, ".local", "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -54,7 +66,8 @@ func Run() {
 	data := flag.String("data", platform.DefaultDataDir(), "SQLite and launcher directory")
 	root := flag.String("root", defaultRoot, "parent directory for workspaces")
 	headless := flag.Bool("headless", runtime.GOOS != "windows", "run without the desktop window")
-	interactive := flag.Bool("interactive-sessions", false, "enable legacy sidebar chat (Linux only)")
+	interactive := flag.Bool("interactive-sessions", false, "enable task chat (enabled by default; retained for compatibility)")
+	readOnly := flag.Bool("read-only-sessions", false, "disable task chat and show session history only")
 	stopService := flag.Bool("stop", false, "stop the background service when no Git operation is running")
 	prepareUpgrade := flag.Bool("prepare-upgrade", false, "safely stop an existing backend before replacing installed files; succeed when already stopped")
 	desktopStart := flag.Bool("desktop-start", false, "start or reuse the desktop backend and print its JSON handshake")
@@ -127,7 +140,7 @@ func Run() {
 		log.Fatal(err)
 	}
 	defer a.Close()
-	a.Workspace.ReadOnlySessions = !*interactive || runtime.GOOS != "linux"
+	a.Workspace.ReadOnlySessions = *readOnly || runtime.GOOS != "linux" && runtime.GOOS != "windows"
 	hub, err := newEnvironmentHub(a)
 	if err != nil {
 		log.Fatal(err)

@@ -15,6 +15,8 @@
   <link rel="stylesheet" href="/features/tasks/workspace.css">
   <link rel="stylesheet" href="/features/sessions/sessions.css">
   <link rel="stylesheet" href="/features/settings/settings.css">
+  <link rel="stylesheet" href="/chat/assistant.css">
+  <script src="/chat/loader.js" defer></script>
   <script src="/core/core.js" defer></script>
   <script src="/features/projects/projects.js" defer></script>
   <script src="/features/tasks/requirements.js" defer></script>
@@ -191,6 +193,7 @@
     <p class="session-command-output-hint">Esc 关闭 · 输出独立滚动，保留对话位置</p>
   </dialog>
   <aside id="sessionHistoryPanel" class="session-history-panel" role="dialog" aria-modal="false" aria-labelledby="sessionHistoryTitle" hidden>
+    <div id="assistantChatRoot"></div>
     <header class="session-history-header">
       <div class="dialog-header"><div><div class="eyebrow" id="sessionHistoryEyebrow">SESSION HISTORY</div><h2 id="sessionHistoryTitle" tabindex="-1">会话详情</h2></div><button type="button" id="closeSessionHistory" class="icon-button" aria-label="关闭会话详情">×</button></div>
       <div id="sessionHistoryMeta" class="session-history-meta"></div>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -145,7 +146,27 @@ func TestBrowserChatFixture(t *testing.T) {
 		}
 		return nil
 	}
-	server := httptest.NewUnstartedServer(a.handler())
+	production := a.handler()
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/task-inventory" {
+			task, _ := a.Workspace.Store.Requirement(q.ID)
+			raw, _ := json.Marshal(task)
+			var row map[string]any
+			_ = json.Unmarshal(raw, &row)
+			row["environment_id"] = "local"
+			row["environment_name"] = "本机"
+			row["connected"] = true
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"requirements": []any{row}, "environments": []any{map[string]any{"id": "local", "name": "本机", "connected": true}}, "project_count": 1})
+			return
+		}
+		if r.URL.Path == "/api/environments" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"environments": []any{map[string]any{"id": "local", "name": "本机", "connected": true}}, "distributions": []string{}, "wsl_supported": false})
+			return
+		}
+		production.ServeHTTP(w, r)
+	}))
 	listener, err := net.Listen("tcp", "127.0.0.1:44317")
 	if err != nil {
 		t.Fatal(err)

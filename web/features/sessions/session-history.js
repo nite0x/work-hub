@@ -109,7 +109,7 @@ function renderHistoryTimeline(current, older = false, background = true) {
 
 async function loadSessionHistory(older = false, background = false) {
   const current = sessionHistoryState;
-  if (!current?.session || current.loading || (older && !current.cursor)) return;
+  if (current?.assistant || !current?.session || current.loading || (older && !current.cursor)) return;
   current.loading = true;
   current.backgroundRefresh = background;
   current.abort = new AbortController();
@@ -159,6 +159,33 @@ async function loadSessionHistory(older = false, background = false) {
 function openSessionHistory(requirement, session = null) {
   const readonly = typeof sessionReadOnly !== 'undefined' && sessionReadOnly;
   if (readonly && !session) return;
+  if (!readonly && window.WorkHubAssistant) {
+    closeSessionHistory(false);
+    const environment = activeEnvironment;
+    const task = state.requirements.find(q => q.id === requirement);
+    const cached = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
+    sessionHistoryState = { requirement, session, entries: [], assistant: true };
+    const currentPanel = sessionHistoryState;
+    const panel = $('#sessionHistoryPanel');
+    panel.hidden = false;
+    panel.setAttribute('data-assistant-ui', '');
+    panel.setAttribute('aria-labelledby', 'assistantChatTitle');
+    window.WorkHubAssistant.open({
+      task, session: session ? cached || { id: session, name: '会话详情', cwd: '' } : null, environment,
+      request: (path, options) => api(path, { ...options, environment }),
+      stream: (path, signal) => fetch(path, { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal }),
+      close: () => closeSessionHistory(),
+      created: created => {
+        if (activeEnvironment !== environment) return;
+        const data = requirementSessions.get(requirement) || { sessions: [] };
+        data.sessions = [created, ...data.sessions.filter(s => s.id !== created.id)];
+        requirementSessions.set(requirement, data);
+        if (sessionHistoryState === currentPanel) sessionHistoryState.session = created.id;
+        updateRequirementSessionsView(requirement);
+      }
+    });
+    return;
+  }
   closeCommandOutput();
   if (typeof closeSessionChat === 'function') closeSessionChat(sessionHistoryState);
   stopHistoryRefresh(sessionHistoryState);
@@ -201,8 +228,9 @@ function openSessionHistory(requirement, session = null) {
 
 function closeSessionHistory(restoreFocus = true) {
   closeCommandOutput();
+  if (sessionHistoryState?.assistant) { window.WorkHubAssistant?.close(); $('#sessionHistoryPanel').removeAttribute('data-assistant-ui'); $('#sessionHistoryPanel').setAttribute('aria-labelledby', 'sessionHistoryTitle'); }
   const current = sessionHistoryState;
-  if (typeof closeSessionChat === 'function') closeSessionChat(current);
+  if (!current?.assistant && typeof closeSessionChat === 'function') closeSessionChat(current);
   stopHistoryRefresh(current);
   sessionHistoryState = null;
   $('#sessionHistoryAttention').hidden = true;
@@ -239,7 +267,7 @@ document.addEventListener('keydown', event => {
 window.addEventListener('hashchange', () => closeSessionHistory(false));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) sessionHistoryState?.pushAbort?.abort();
-  else {
+  else if (!sessionHistoryState?.assistant) {
     loadSessionHistory(false, true);
     if (typeof startHistoryPush === 'function') startHistoryPush(sessionHistoryState);
   }

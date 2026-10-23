@@ -18,7 +18,8 @@ import (
 )
 
 type AgentHooks struct {
-	WatchHistory func(context.Context, string, func(json.RawMessage) error) error
+	WatchHistory     func(context.Context, string, func(json.RawMessage) error) error
+	TerminalConflict func(string, string) error
 }
 
 // The helper only serves the private stdin/stdout channel opened by Windows.
@@ -83,6 +84,12 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 					respond(Response{ID: request.ID, More: true, Data: raw})
 					return requestCtx.Err()
 				})
+			} else if request.Op == "session-conflict" {
+				if hooks.TerminalConflict == nil {
+					err = fmt.Errorf("辅助程序不支持会话占用检查，请重新安装")
+				} else {
+					err = hooks.TerminalConflict(request.Method, request.Path)
+				}
 			} else {
 				value, err = executeWorkspaceRequest(requestCtx, request)
 			}

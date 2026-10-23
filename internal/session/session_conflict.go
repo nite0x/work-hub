@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -40,7 +41,13 @@ func (a *Service) TerminalOwner(id, cwd string) *terminalBridge {
 // Conservatively treat any interactive Codex in the session's directory as
 // an owner, even if its initial command line doesn't contain its session ID.
 // This also covers manually launched CLI sessions outside Hub's launchers.
-func terminalSessionConflict(id, cwd string) error { return scanTerminalSessions("/proc", id, cwd) }
+func TerminalSessionConflict(id, cwd string) error { return terminalSessionConflict(id, cwd) }
+func terminalSessionConflict(id, cwd string) error {
+	if runtime.GOOS == "windows" {
+		return nativeTerminalConflict(id, cwd)
+	}
+	return scanTerminalSessions("/proc", id, cwd)
+}
 func scanTerminalSessions(proc, id, cwd string) error {
 	return scanTerminalSessionsExcept(proc, id, cwd, 0)
 }
@@ -83,8 +90,7 @@ func scanTerminalSessionsExcept(proc, id, cwd string, except int) error {
 			continue
 		}
 		// These are tools and servers, not an interactive terminal composer.
-		subcommands := map[string]bool{"app-server": true, "exec-server": true, "exec": true, "review": true, "login": true, "logout": true, "mcp": true, "plugin": true, "features": true, "doctor": true, "queue": true, "agents": true, "cloud": true, "debug": true, "sandbox": true, "completion": true, "update": true, "archive": true, "unarchive": true, "delete": true, "migrate-rollouts": true, "remote-control": true}
-		if len(args) > 1 && subcommands[args[1]] {
+		if len(args) > 1 && isCodexServerCommand(args[1]) {
 			continue
 		}
 		match, dir := false, ""
@@ -116,4 +122,12 @@ func scanTerminalSessionsExcept(proc, id, cwd string, except int) error {
 		}
 	}
 	return nil
+}
+
+func isCodexServerCommand(command string) bool {
+	switch command {
+	case "app-server", "exec-server", "exec", "review", "login", "logout", "mcp", "plugin", "features", "doctor", "queue", "agents", "cloud", "debug", "sandbox", "completion", "update", "archive", "unarchive", "delete", "migrate-rollouts", "remote-control":
+		return true
+	}
+	return false
 }

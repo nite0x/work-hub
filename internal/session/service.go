@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/model"
@@ -33,6 +34,12 @@ type Service struct {
 func New(environment *workspace.Service, plans LaunchPlanner) *Service {
 	s := &Service{Workspace: environment, plans: plans, openSessions: codex.OpenSessionClient, openLive: codex.OpenLive, watchHistory: WatchCodexHistory, terminalConflict: terminalSessionConflict, chats: map[string]*ChatRun{}, bridges: map[string]*terminalBridge{}}
 	if environment.Remote != nil {
+		s.openLive = environment.Remote.OpenCodex
+		s.terminalConflict = func(id, cwd string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return environment.Remote.Call(ctx, workspace.Request{Op: "session-conflict", Path: cwd, Method: id}, nil)
+		}
 		s.openSessions = func(ctx context.Context) (codex.SessionClient, error) {
 			return &workspace.Sessions{Context: ctx, Client: environment.Remote}, nil
 		}

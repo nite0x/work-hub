@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -114,7 +115,14 @@ func TestInstalledCodexEphemeralTextTurn(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	if err := c.Call(ctx, "thread/start", map[string]any{"cwd": t.TempDir(), "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "untrusted"}, &started); err != nil {
+	// Windows Codex keeps a directory handle in its shared daemon after an
+	// ephemeral turn. This tool-free probe uses the existing temporary root so
+	// it creates no directory that testing.T must delete while the daemon lives.
+	directory := os.TempDir()
+	if runtime.GOOS != "windows" {
+		directory = t.TempDir()
+	}
+	if err := c.Call(ctx, "thread/start", map[string]any{"cwd": directory, "ephemeral": true, "sandbox": "read-only", "approvalPolicy": "untrusted"}, &started); err != nil {
 		t.Fatal(err)
 	}
 	var turn struct {

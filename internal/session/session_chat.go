@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +14,8 @@ import (
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/httpx"
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/platform"
+	"worktree-hub/internal/workspace"
 )
 
 type ChatApproval struct {
@@ -202,6 +202,10 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, err.Error())
 		return
 	}
+	if a.BusyWorkspace("", cwd) && !a.ChatBusy(r.PathValue("session")) {
+		httpx.WriteError(w, 409, "此工作目录已有其他对话运行，请等待完成或停止后再发送")
+		return
+	}
 	a.chatMu.Lock()
 	if previous := a.chats[r.PathValue("session")]; previous != nil {
 		s := previous.snapshot()
@@ -290,11 +294,12 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		return
 	}
 	s := metadata.Thread.Session
-	if s.ID != run.session || !filepath.IsAbs(s.Cwd) {
+	if s.ID != run.session || !platform.AbsoluteWorkspacePath(s.Cwd) {
 		fail("会话工作目录不可用")
 		return
 	}
-	if info, err := os.Stat(s.Cwd); err != nil || !info.IsDir() {
+	fileCtx := workspace.WithClient(ctx, a.Workspace.Remote)
+	if info, err := workspace.Stat(fileCtx, s.Cwd, true); err != nil || !info.IsDir() {
 		fail("会话原工作目录不可用")
 		return
 	}

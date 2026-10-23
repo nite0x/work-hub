@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+npm run chat:build
 output="${1:-bin/windows-amd64}"
 mkdir -p "$output/agents"
 # Embed the same multi-resolution icon used by the web UI.

@@ -8,9 +8,24 @@
     "desktop:build": "tauri build",
     "desktop:package": "node scripts/package-desktop.mjs",
     "desktop:check": "node --test scripts/desktop-packaging.test.mjs",
-    "desktop:test": "npm run desktop:prepare && cargo test --manifest-path src-tauri/Cargo.toml"
+    "desktop:test": "npm run desktop:prepare && cargo test --manifest-path src-tauri/Cargo.toml",
+    "chat:build": "node scripts/build-chat.mjs",
+    "chat:check": "tsc -p tsconfig.chat.json",
+    "chat:test": "tsx --test scripts/chat-*.test.ts"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.4"
+    "@tauri-apps/cli": "2.12.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^29.1.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "^0.15.31",
+    "@assistant-ui/react-markdown": "^0.14.24",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   }
 }

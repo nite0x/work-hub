@@ -55,6 +55,9 @@ jobs:
         shell: bash
         run: |
           npm run desktop:check
+          npm run chat:check
+          npm run chat:test
+          npm run chat:build
           node --test scripts/*.test.cjs
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             test "$GITHUB_REF_NAME" = "desktop-v$(node -p 'require("./package.json").version')"

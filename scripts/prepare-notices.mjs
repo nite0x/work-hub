@@ -4,7 +4,7 @@ import { root, run, targets } from './desktop-lib.mjs';
 
 // Include full license texts from the locked Go and Rust dependencies, including
 // build dependencies. No registry paths or developer home directories are shipped.
-const sections = ['Work Hub — Third-party notices\nGenerated from go.mod/go.sum and src-tauri/Cargo.lock.\n'];
+const sections = ['Work Hub — Third-party notices\nGenerated from Go, Rust and bundled browser dependencies.\n', readFileSync(path.join(root, 'web/chat/THIRD-PARTY-NOTICES.txt'), 'utf8')];
 const overrides = JSON.parse(readFileSync(path.join(root, 'scripts/licenses/overrides.json')));
 function add(name, directory, license, licenseFile, override) {
   const names = readdirSync(directory).filter(file => /^(licen[cs]e|copying|copyright|notice|unlicense)([._-]|$)/i.test(file) && statSync(path.join(directory, file)).isFile());
