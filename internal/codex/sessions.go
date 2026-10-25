@@ -24,6 +24,11 @@ type codexClient struct {
 }
 
 type Session struct {
+	Path   string `json:"path,omitempty"`
+	Status struct {
+		Type        string   `json:"type"`
+		ActiveFlags []string `json:"activeFlags,omitempty"`
+	} `json:"status,omitempty"`
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Preview     string `json:"preview"`
@@ -31,6 +36,8 @@ type Session struct {
 	CreatedAt   int64  `json:"createdAt"`
 	UpdatedAt   int64  `json:"updatedAt"`
 	HistoryMode string `json:"historyMode,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"reasoningEffort,omitempty"`
 }
 
 type SessionPage struct {
@@ -65,7 +72,7 @@ func OpenSessionClient(ctx context.Context) (SessionClient, error) {
 	}
 	c := &codexClient{cmd: cmd, in: in, out: bufio.NewScanner(out), cancel: cancel}
 	c.out.Buffer(make([]byte, 4096), 4<<20)
-	if err := c.Call("initialize", map[string]any{"clientInfo": map[string]string{"name": "worktree_hub", "version": "0.1.0"}}, nil); err != nil {
+	if err := c.Call("initialize", map[string]any{"clientInfo": map[string]string{"name": "worktree_hub", "version": "0.1.0"}, "capabilities": map[string]bool{"experimentalApi": true}}, nil); err != nil {
 		c.Close()
 		return nil, err
 	}

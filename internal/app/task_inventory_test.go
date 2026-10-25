@@ -42,7 +42,7 @@ func TestTaskInventoryPreservesOfflineTasksAndEnvironmentIdentity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(`INSERT INTO requirements VALUES(?, 'Remote task', 'original', 'notes', 'codex/original', '/original/workspace/task', ?, 'creating', '9999')`, q.ID, p); err != nil {
+	if _, err := s.DB.Exec(`INSERT INTO requirements(id,name,slug,description,branch,path,primary_project_id,state,created_at) VALUES(?, 'Remote task', 'original', 'notes', 'codex/original', '/original/workspace/task', ?, 'creating', '9999')`, q.ID, p); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state,error) VALUES(?, ?, '/original/workspace/task/remote', 'baseline', 'creating', '')`, q.ID, p); err != nil {

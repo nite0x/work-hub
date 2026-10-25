@@ -7,10 +7,11 @@ function environmentOptions() {
 async function loadEnvironments() {
   const data = await api('/api/environments', { environment: 'local' });
   environmentInventory = data.environments;
-  for (const id of ['environmentSelect', 'projectEnvironment']) {
+  for (const id of ['environmentSelect', 'projectEnvironment', 'sessionsEnvironment']) {
     $('#' + id).innerHTML = environmentOptions();
     $('#' + id).value = activeEnvironment;
   }
+  $('#sessionEnvironmentField').hidden = data.environments.length < 2;
   $('#reconnectEnvironment').hidden = activeEnvironment === 'local';
   $('#environmentDistro').innerHTML = data.distributions.map(name => `<option>${esc(name)}</option>`).join('');
   $('#addEnvironment').disabled = !data.distributions.length;
@@ -23,12 +24,13 @@ async function loadEnvironments() {
   renderSettings();
 }
 async function selectEnvironment(id, route = '/requirements', updateHistory = true) {
-  if (state.busy) { $('#environmentSelect').value = activeEnvironment; $('#projectEnvironment').value = activeEnvironment; toast('请等待当前操作完成后切换环境'); return; }
+  if (state.busy) { $('#environmentSelect').value = activeEnvironment; $('#projectEnvironment').value = activeEnvironment; $('#sessionsEnvironment').value = activeEnvironment; toast('请等待当前操作完成后切换环境'); return; }
   route = route.replace(/^#/, '');
   const changed = activeEnvironment !== id;
+  if (changed && typeof suspendSessionWorkspace === 'function') suspendSessionWorkspace();
   if (typeof suspendTaskWorkspace === 'function') suspendTaskWorkspace();
-  closeSessionHistory(false);
-  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  if (changed) closeSessionHistory(false);
+  document.querySelectorAll('dialog[open]').forEach(dialog => { if (changed || dialog.id !== 'conversationDialog') dialog.close(); });
   if (changed) requirementSessions.clear();
   if (changed) environmentRevision++;
   activeEnvironment = id;
@@ -43,12 +45,14 @@ async function selectEnvironment(id, route = '/requirements', updateHistory = tr
   $('#reconnectEnvironment').hidden = id === 'local';
   $('#environmentSelect').value = id;
   $('#projectEnvironment').value = id;
+  $('#sessionsEnvironment').value = id;
   $('#environmentStatus').textContent = environmentName(id);
   render();
   await refresh();
 }
 $('#environmentSelect').addEventListener('change', event => selectEnvironment(event.target.value, '/settings'));
 $('#projectEnvironment').addEventListener('change', event => selectEnvironment(event.target.value, '/projects'));
+$('#sessionsEnvironment').addEventListener('change', event => selectEnvironment(event.target.value, '/sessions'));
 window.addEventListener('popstate', () => {
   const id = new URLSearchParams(location.search).get('environment') || 'local';
   if (state.busy) {

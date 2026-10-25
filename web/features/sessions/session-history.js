@@ -2,7 +2,7 @@
 let sessionHistoryState = null;
 const historyRefreshInterval = 1000;
 const sessionHistoryViews = new Map();
-function sessionHistoryViewKey(requirement, session, environment = typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment) { return JSON.stringify([environment, requirement, session || 'new']); }
+function sessionHistoryViewKey(requirement, session, environment = typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment) { return JSON.stringify([environment, session ? 'session' : requirement, session || 'new']); }
 
 function historyEntryKey(entry) { return JSON.stringify([entry.turn_id, entry.id]); }
 
@@ -125,7 +125,7 @@ async function loadSessionHistory(older = false, background = false) {
   const pushRevision = current.pushRevision;
   const query = older ? '?cursor=' + encodeURIComponent(current.cursor) : '';
   try {
-    const path = `/api/requirements/${encodeURIComponent(current.requirement)}/sessions/${encodeURIComponent(current.session)}/history`;
+    const path = `/api/sessions/${encodeURIComponent(current.session)}/history`;
     let page = await api(path + query, { signal: current.abort.signal });
     if (sessionHistoryState !== current) return;
     let fresh = page.entries;
@@ -150,7 +150,7 @@ async function loadSessionHistory(older = false, background = false) {
       mergeHistoryPush(current, current.pushSnapshot.filter(entry => entry.status === 'inProgress' || pushRevision !== current.pushRevision));
     }
     if (!background || overlap < 0) current.cursor = page.next_cursor;
-    $('#sessionHistoryTitle').textContent = page.session.name;
+    $('#sessionHistoryTitle').textContent = page.session.name || '未命名对话';
     $('#sessionHistoryMeta').textContent = page.session.cwd + '\n' + page.session.id;
     renderHistoryTimeline(current, older, background);
     current.pushNeedsSync = pushRevision !== current.pushRevision;
@@ -164,6 +164,11 @@ async function loadSessionHistory(older = false, background = false) {
 }
 
 function openSessionHistory(requirement, session = null) {
+  if (typeof openSessionWorkspaceHistory === 'function') return openSessionWorkspaceHistory(requirement, session);
+  return openSessionHistoryPanel(requirement, session);
+}
+
+function openSessionHistoryPanel(requirement, session = null, context = {}) {
   if (session) markSessionRead(requirement, session);
   if (typeof taskConversationOpened === 'function' && sessionHistoryState?.requirement === requirement && sessionHistoryState.session === session && (!sessionHistoryState.environment || sessionHistoryState.environment === activeEnvironment)) {
     taskConversationOpened(requirement, session);
@@ -171,19 +176,21 @@ function openSessionHistory(requirement, session = null) {
   }
   const readonly = typeof sessionReadOnly !== 'undefined' && sessionReadOnly;
   if (readonly && !session) return;
-  if (!readonly && window.WorkHubAssistant) {
+  if (window.WorkHubAssistant) {
     closeSessionHistory(false);
     const environment = activeEnvironment;
     const task = state.requirements.find(q => q.id === requirement);
-    const cached = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
-    sessionHistoryState = { requirement, session, environment, entries: [], assistant: true };
+    const cached = context.session || requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
+    sessionHistoryState = { requirement, session, environment, entries: [], assistant: true, browserTarget: context.browserTarget };
     const currentPanel = sessionHistoryState;
     const panel = $('#sessionHistoryPanel');
     panel.hidden = false;
     panel.setAttribute('data-assistant-ui', '');
     panel.setAttribute('aria-labelledby', 'assistantChatTitle');
     window.WorkHubAssistant.open({
-      task, session: session ? cached || { id: session, name: '会话详情', cwd: '' } : null, environment,
+      workspace: {tasks: state.requirements, projects: state.projects},
+      task: context.target ? undefined : task, target: context.target, session: session ? cached || { id: session, name: '会话详情', cwd: '' } : null, environment, environmentName: environmentName(environment), readOnly: readonly, persistDraft: true,
+      managed: (session, action) => window.dispatchEvent(new CustomEvent("workhub:session-managed", {detail:{session,action,environment}})),
       request: (path, options) => api(path, { ...options, environment }),
       stream: (path, signal) => fetch(path, { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal }),
       close: () => closeSessionHistory(),
@@ -197,6 +204,7 @@ function openSessionHistory(requirement, session = null) {
         data.sessions = [created, ...data.sessions.filter(s => s.id !== created.id)];
         requirementSessions.set(requirement, data);
         if (sessionHistoryState === currentPanel) sessionHistoryState.session = created.id;
+        context.created?.(created);
         updateRequirementSessionsView(requirement);
       }
     });
@@ -208,7 +216,7 @@ function openSessionHistory(requirement, session = null) {
   if (typeof closeSessionChat === 'function') closeSessionChat(sessionHistoryState);
   stopHistoryRefresh(sessionHistoryState);
   const cachedView = sessionHistoryViews.get(sessionHistoryViewKey(requirement, session));
-  sessionHistoryState = { requirement, session, environment: typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment, entries: cachedView?.entries || [], cursor: cachedView?.cursor || null, loading: false, restoreScroll: cachedView };
+  sessionHistoryState = { requirement, session, environment: typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment, entries: cachedView?.entries || [], cursor: cachedView?.cursor || null, loading: false, restoreScroll: cachedView, target: context.target, browserTarget: context.browserTarget, browserContext: context };
   $('#sessionHistoryAttention').hidden = true;
   $('#sessionHistoryAttention').textContent = '';
   $('#sessionHistoryEyebrow').textContent = session ? 'SESSION HISTORY' : 'NEW CONVERSATION';
@@ -220,14 +228,14 @@ function openSessionHistory(requirement, session = null) {
   $('#sessionHistoryError').hidden = true;
   $('#loadOlderHistory').hidden = true;
   $('#sessionHistoryStatus').textContent = '';
-  const cached = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
+  const cached = context.session || requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
   $('#sessionHistoryTitle').textContent = cached?.name || '会话详情';
   $('#sessionHistoryMeta').textContent = cached ? cached.cwd + '\n' + session : session;
   $('#sessionHistoryEntries').textContent = '';
   const resume = $('#resumeHistorySession');
   resume.dataset.requirement = requirement;
   resume.dataset.session = session;
-  resume.disabled = state.requirements.find(q => q.id === requirement)?.state !== 'ready' || !cached?.available;
+  resume.disabled = !cached?.available;
   $('#sessionHistoryPanel').hidden = false;
   if (typeof taskConversationOpened === 'function') taskConversationOpened(requirement, session);
   $('#sessionChatForm').hidden = readonly;
@@ -247,6 +255,8 @@ function openSessionHistory(requirement, session = null) {
 }
 
 function closeSessionHistory(restoreFocus = true) {
+  if (restoreFocus && typeof conversationMode !== 'undefined' && conversationMode === 'modal') { closeConversationWorkspace(); return; }
+  if (sessionHistoryState && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') window.dispatchEvent(new CustomEvent('workhub:chat-layout', { detail: { phase: 'before' } }));
   if (restoreFocus && typeof collapseTaskConversation === 'function' && taskWorkspaceCurrent) { collapseTaskConversation(); return; }
   closeCommandOutput();
   if (sessionHistoryState?.assistant) { window.WorkHubAssistant?.close(); $('#sessionHistoryPanel').removeAttribute('data-assistant-ui'); $('#sessionHistoryPanel').setAttribute('aria-labelledby', 'sessionHistoryTitle'); }
@@ -295,7 +305,7 @@ window.addEventListener('workhub:chat-layout', event => {
   const current = sessionHistoryState;
   if (!current || current.assistant) return;
   const scroll = $('#sessionHistoryScroll');
-  if (event.detail.phase === 'before' && !document.getElementById('taskConversation').hidden) {
+  if (event.detail.phase === 'before' && !$('#sessionHistoryPanel').hidden) {
     current.reading = {top: scroll.scrollTop, bottom: scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 80};
   } else if (event.detail.visible && current.reading) scroll.scrollTop = current.reading.bottom ? scroll.scrollHeight : current.reading.top;
 });
@@ -311,7 +321,7 @@ document.addEventListener('keydown', event => {
       event.preventDefault(); return;
     }
   }
-  if (event.key === 'Escape' && sessionHistoryState && !document.querySelector('dialog[open]')) { event.preventDefault(); closeSessionHistory(); }
+  if (event.key === 'Escape' && sessionHistoryState && !document.querySelector('dialog[open]') && !(typeof conversationVisible === 'function' && conversationVisible())) { event.preventDefault(); closeSessionHistory(); }
 });
 window.addEventListener('hashchange', () => { if (typeof syncTaskWorkspace !== 'function') closeSessionHistory(false); });
 document.addEventListener('visibilitychange', () => {

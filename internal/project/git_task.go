@@ -32,7 +32,7 @@ func (a *Service) validateGitTask(project string, in GitAction) error {
 	if err != nil {
 		return fmt.Errorf("任务不可用，请刷新")
 	}
-	if q.State != "ready" {
+	if q.State == "archived" || q.State == "creating" {
 		return fmt.Errorf("任务尚未就绪或已归档")
 	}
 	for _, m := range q.Members {

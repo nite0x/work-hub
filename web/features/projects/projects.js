@@ -2,6 +2,85 @@
 
 let projectAddedCallback = null;
 let projectOpenTool;
+let projectFilter = 'all';
+let projectDetailOpen = false;
+
+const projectWidthKey = 'workhub:project-list-width:v1';
+let projectListWidth = 248;
+let projectResizeDrag = null;
+try {
+  const saved = Number(localStorage.getItem(projectWidthKey));
+  if (Number.isFinite(saved) && saved >= 200 && saved <= 10000) projectListWidth = saved;
+} catch { /* Keep the default when storage is unavailable. */ }
+$('#content').style.setProperty('--project-list-width', projectListWidth + 'px');
+
+function projectResizeBounds() {
+  const workspace = $('.project-workspace');
+  if (!workspace || window.innerWidth <= 1020) return null;
+  const width = workspace.getBoundingClientRect().width;
+  return width >= 568 ? { min: 200, max: Math.floor(width - 368) } : null;
+}
+function syncProjectResize() {
+  const handle = $('[data-project-resize]');
+  const bounds = projectResizeBounds();
+  if (!handle || !bounds) return;
+  handle.setAttribute('aria-valuemax', String(bounds.max));
+  handle.setAttribute('aria-valuenow', String(Math.round($('#projectListPane').getBoundingClientRect().width)));
+}
+function resizeProjectList(width) {
+  const bounds = projectResizeBounds();
+  if (!bounds) return;
+  projectListWidth = Math.round(Math.max(bounds.min, Math.min(bounds.max, width)));
+  $('#content').style.setProperty('--project-list-width', projectListWidth + 'px');
+  syncProjectResize();
+}
+function rememberProjectWidth() {
+  try { localStorage.setItem(projectWidthKey, String(projectListWidth)); } catch { /* Retain the in-memory width. */ }
+}
+function finishProjectResize(event) {
+  if (!projectResizeDrag || event?.pointerId != null && event.pointerId !== projectResizeDrag.id) return;
+  const drag = projectResizeDrag;
+  projectResizeDrag = null;
+  const content = $('#content');
+  document.querySelectorAll('.project-workspace[data-resizing]').forEach(node => delete node.dataset.resizing);
+  if (content.hasPointerCapture?.(drag.id)) content.releasePointerCapture(drag.id);
+  if (drag.moved) rememberProjectWidth();
+}
+document.addEventListener('pointerdown', event => {
+  const handle = event.target.closest('[data-project-resize]');
+  if (!handle || event.button !== 0 || projectResizeDrag || !projectResizeBounds()) return;
+  event.preventDefault();
+  handle.focus({ preventScroll: true });
+  projectResizeDrag = { id: event.pointerId, x: event.clientX, width: $('#projectListPane').getBoundingClientRect().width, moved: false };
+  $('.project-workspace').dataset.resizing = '';
+  // Capture on the stable host so polling can replace the markup during a drag.
+  $('#content').setPointerCapture?.(event.pointerId);
+});
+document.addEventListener('pointermove', event => {
+  if (!projectResizeDrag || event.pointerId !== projectResizeDrag.id) return;
+  if (!projectResizeBounds()) { finishProjectResize(event); return; }
+  projectResizeDrag.moved = true;
+  resizeProjectList(projectResizeDrag.width + event.clientX - projectResizeDrag.x);
+  $('.project-workspace').dataset.resizing = '';
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) document.addEventListener(type, finishProjectResize);
+document.addEventListener('keydown', event => {
+  if (!event.target.closest('[data-project-resize]')) return;
+  const bounds = projectResizeBounds();
+  if (!bounds || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const width = $('#projectListPane').getBoundingClientRect().width;
+  resizeProjectList(event.key === 'Home' ? bounds.min : event.key === 'End' ? bounds.max : width + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 40 : 10));
+  rememberProjectWidth();
+});
+window.addEventListener('resize', () => { if (!projectResizeBounds()) finishProjectResize(); syncProjectResize(); });
+window.addEventListener('blur', () => finishProjectResize());
+window.addEventListener('pagehide', () => finishProjectResize());
+if (typeof ResizeObserver !== 'undefined') {
+  const observer = new ResizeObserver(syncProjectResize);
+  observer.observe($('#content'));
+  window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+}
 
 function preferredProjectOpenTool() {
   if (projectOpenTool) return projectOpenTool;
@@ -49,8 +128,7 @@ function renderProjects() {
   if (!state.projects.length) return empty('你的项目，从这里连接', '输入已有 Git 仓库的主目录。已有 worktree 会自动发现，后续每 10 秒刷新本地状态。', 'new-project', '添加第一个项目');
   const text = $('#search').value.trim().toLowerCase();
   const projects = state.projects.filter(p => `${p.name} ${p.path}`.toLowerCase().includes(text));
-  if (!projects.length) return empty('没有匹配的项目', '试试其他项目名称或路径。');
-  return window.WorkHubUI.projects(projects, state.selectedProject);
+  return window.WorkHubUI.projects(projects, state.selectedProject, preferredProjectOpenTool(), projectFilter, projectDetailOpen);
 }
 
 function openProject(onAdded = null, environment = activeEnvironment) {
@@ -60,7 +138,39 @@ function openProject(onAdded = null, environment = activeEnvironment) {
   $('#projectEnvironmentSelect').innerHTML = environmentOptions();
   $('#projectEnvironmentSelect').value = environment;
   $('#projectEnvironmentSelect').disabled = !!onAdded;
+  updateProjectDirectoryPicker();
 }
+
+function updateProjectDirectoryPicker() {
+  const remote = $('#projectEnvironmentSelect').value !== 'local';
+  $('#chooseProjectDirectory').disabled = remote;
+  $('#projectDirectoryHint').hidden = !remote;
+}
+
+$('#projectEnvironmentSelect').addEventListener('change', updateProjectDirectoryPicker);
+$('#chooseProjectDirectory').addEventListener('click', async () => {
+  if (state.busy || $('#projectEnvironmentSelect').value !== 'local') return;
+  const button = $('#chooseProjectDirectory');
+  const environment = $('#projectEnvironmentSelect');
+  const environmentWasDisabled = environment.disabled;
+  environment.disabled = true;
+  button.disabled = true;
+  button.textContent = '正在选择…';
+  try {
+    await mutation('请在系统窗口中选择仓库文件夹', async () => {
+      const result = await api('/api/dialogs/directory', { environment: 'local', method: 'POST', body: '{}' });
+      if (result.path && environment.value === 'local') {
+        $('#projectPath').value = result.path;
+        $('#projectPath').dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, $('#projectError'));
+  } finally {
+    environment.disabled = environmentWasDisabled;
+    button.textContent = '选择文件夹…';
+    updateProjectDirectoryPicker();
+    $('#projectPath').focus();
+  }
+});
 
 $('#projectForm').addEventListener('submit', async event => {
   event.preventDefault(); const data = new FormData(event.target);
@@ -81,7 +191,7 @@ $('#projectForm').addEventListener('submit', async event => {
 document.addEventListener('click', event => {
   const choice = event.target.closest('[data-project-open-choice]');
   if (choice && !choice.disabled && !state.busy) rememberProjectOpenTool(choice);
-  document.querySelectorAll('.task-action-menu[open]').forEach(menu => {
+  document.querySelectorAll('.task-action-menu[open], .project-more[open]').forEach(menu => {
     if (!menu.contains(event.target) || event.target.closest('button:not(:disabled)')) menu.open = false;
   });
   const button = event.target.closest('[data-action^="project-open-"]');

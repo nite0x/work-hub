@@ -49,8 +49,8 @@ export function Action({ action, id, children, ...props }: ComponentProps<typeof
   return <Button type="button" variant="outline" size="sm" data-action={action} data-id={id} {...props}>{children}</Button>
 }
 
-export function ProjectOpenActions({ project, path, disabled }: { project: string; path: string; disabled?: boolean }) {
-  return <div className="workspace-project-actions mt-2"><Action action="project-open-remote" id={project} data-path={path} disabled={disabled}>远端仓库 ↗</Action><Action action="project-open-vscode" id={project} data-path={path} disabled={disabled}>VS Code ↗</Action><Action action="project-open-idea" id={project} data-path={path} disabled={disabled}>IDEA ↗</Action></div>
+export function ProjectOpenActions(props: Parameters<typeof TaskOpenActions>[0]) {
+  return <div className="workspace-project-actions mt-2"><TaskOpenActions {...props} /></div>
 }
 export type ProjectOpenTool = "vscode" | "idea" | "terminal"
 export const projectOpenLabels: Record<ProjectOpenTool, string> = { vscode: "VS Code", idea: "IDEA", terminal: "终端" }

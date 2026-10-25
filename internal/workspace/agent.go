@@ -115,6 +115,10 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 
 func executeWorkspaceRequest(ctx context.Context, r Request) (any, error) {
 	switch r.Op {
+	case "rollout-activity":
+		return codex.RolloutActivity(r.Path), nil
+	case "read-image":
+		return ReadImage(ctx, r.Path)
 	case "export-metadata":
 		return store.ExportMetadata(ctx, r.Path)
 	case "validate-terminal":

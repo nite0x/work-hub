@@ -29,6 +29,7 @@ func (a *App) handler() http.Handler {
 		mux.HandleFunc("POST /api/environments/{environment}/reconnect", a.environments.reconnectHandler)
 	}
 	mux.Handle("GET /api/state", overview.New(a.Workspace, a.Projects))
+	mux.HandleFunc("POST /api/dialogs/directory", a.pickDirectoryHandler)
 	mux.HandleFunc("GET /api/task-inventory", a.taskInventoryHandler)
 	a.Projects.RegisterRoutes(mux)
 	a.Tasks.RegisterRoutes(mux, a.Projects.InvalidateStateAfter)

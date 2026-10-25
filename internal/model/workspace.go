@@ -24,6 +24,7 @@ type Requirement struct {
 	State            string   `json:"state"`
 	CreatedAt        string   `json:"created_at"`
 	Members          []Member `json:"members"`
+	HasWorkspace     bool     `json:"has_workspace"`
 }
 type Member struct {
 	ProjectID   string    `json:"project_id"`

@@ -1,6 +1,6 @@
-import {useEffect, useMemo, useState, useSyncExternalStore} from "react";
+import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from "react";
 import {AssistantRuntimeProvider, MessageNotSentError, useExternalStoreRuntime, type ThreadMessageLike} from "@assistant-ui/react";
-import {RefreshCwIcon} from "lucide-react";
+import {PlusIcon, RefreshCwIcon, SearchIcon, GitBranchIcon, FolderIcon, TerminalIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
 import {TooltipIconButton} from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {Alert, AlertDescription} from "@/components/ui/alert";
@@ -14,9 +14,13 @@ import {useChatReading} from "./use-chat-reading";
 import {cleanText, convertEntries, mergeEntries, type Approval} from "./model";
 import {readElicitation} from "./approval";
 import {ApprovalActions, ElicitationFields} from "./approval-fields";
+import {ChatControls, ChatPermissions, ChatSearch, ChatSessionMenu, ChatStatus} from "./controls";
+import {ChatMediaProvider, ChatMessageText, ChatUserImage} from "./media";
 import {ChatImageAttachmentAdapter} from "./attachments";
+import {conversationContext} from "../workspace/conversation-context";
+import {QuestionComposer} from "./questions";
 
-const labels: Record<string, string> = {handoff: "等待终端本轮工作结束后交接…", idle: "可以在这里继续对话", starting: "正在连接 Codex…", running: "Codex 正在工作…", waiting: "等待你的审批或回答", stopping: "正在请求停止…", completed: "本轮已完成", interrupted: "本轮已停止", failed: "本轮未完成，请检查进展", conflict: "会话暂不可发送"};
+const chatComponents = {Text: ChatMessageText, UserImage: ChatUserImage};
 const toThreadMessage = (message: ThreadMessageLike) => message;
 
 function ApprovalCard({approval, controller}: {approval: Approval; controller: ChatController}) {
@@ -60,10 +64,23 @@ function ApprovalCard({approval, controller}: {approval: Approval; controller: C
 }
 
 export function ChatPanel({controller}: {controller: ChatController}) {
+  const readOnly = !!controller.options.readOnly;
+  const panel = useRef<HTMLElement>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const closeSearch = () => {setSearchOpen(false); controller.setSearch(""); searchTrigger.current?.focus();};
   const reading = useChatReading(controller);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const attachments = useMemo(() => new ChatImageAttachmentAdapter(), []);
-  const messages = useMemo(() => convertEntries(mergeEntries(state.entries, state.chat.entries)), [state.entries, state.chat.entries]);
+  const question = !readOnly ? state.chat.approvals.find(a => a.kind === "questions" && a.questions?.length) : undefined;
+  const approvals = state.chat.approvals.filter(a => a !== question);
+  const previousQuestion = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (previousQuestion.current && !question) panel.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="会话消息"]')?.focus();
+    previousQuestion.current = question?.id;
+  }, [question?.id]);
+  const entries = useMemo(() => mergeEntries(state.entries, state.chat.entries), [state.entries, state.chat.entries]);
+  const messages = useMemo(() => convertEntries(entries), [entries]);
   const runtime = useExternalStoreRuntime({
     adapters: {attachments},
     messages, convertMessage: toThreadMessage,
@@ -71,7 +88,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
     isLoading: state.loading && messages.length === 0,
     hasEarlier: !!state.cursor,
     onLoadEarlier: () => controller.history(true),
-    isSendDisabled: !!state.chat.blocked || state.submitting || controller.options.task.state !== "ready",
+    isSendDisabled: !!state.chat.external && (state.chat.busy || state.chat.status === "unknown") || !controller.canSend() || !!state.chat.blocked || state.submitting || !!state.session?.archived || (state.chat.busy && (!state.chat.turn_id || !["running","waiting"].includes(state.chat.status))),
     onNew: async message => {
       reading.latest();
       const text = message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
@@ -79,7 +96,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
       controller.draftAttachments = message.attachments || [];
       try { await controller.send(text, images); } catch (error) { throw new MessageNotSentError((error as Error).message); }
     },
-    onCancel: controller.stop,
+    onCancel: state.chat.external && state.chat.busy ? undefined : controller.stop,
   });
   useEffect(() => { controller.connect(); return () => controller.disconnect(); }, [controller]);
   useEffect(() => { runtime.thread.composer.setText(state.draft); }, [runtime, state.draft]);
@@ -92,36 +109,61 @@ export function ChatPanel({controller}: {controller: ChatController}) {
     }
     const unsubscribe = composer.subscribe(() => {
       const draft = composer.getState();
-      if (!draft.submission && !controller.getSnapshot().submitting) controller.draftAttachments = draft.attachments;
+      if (!draft.submission && !controller.getSnapshot().submitting) { controller.draftAttachments = draft.attachments; controller.attachmentsChanged(); }
     });
     const unsubscribeErrors = composer.unstable_on("attachmentAddError", event => controller.setError(event.message));
     return () => { unsubscribe(); unsubscribeErrors(); };
   }, [controller, runtime, state.draftRestore]);
   const task = controller.options.task;
-  const path = state.session?.cwd || task.members.find(m => m.project_id === state.project)?.path;
-  const project = task.members.find(m => m.path === path);
-  const status = state.chat.blocked || (state.chat.busy || ["failed", "interrupted", "conflict"].includes(state.chat.status) ? labels[state.chat.status] || state.chat.status : "");
-  const footer = status || state.chat.notice || state.chat.can_handoff || state.error || state.chat.error;
-  return <AssistantRuntimeProvider runtime={runtime}>
-    <section className="shadcn-scope assistant-chat-scope flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-labelledby="assistantChatTitle">
-      <header className="chat-panel-header shrink-0 space-y-2 border-b px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <h2 id="assistantChatTitle" tabIndex={-1} className="chat-panel-title m-0 min-w-0 truncate text-base font-semibold">{state.session?.name || "新建会话"}</h2>
+  const path = state.chat.context?.cwd || state.context?.cwd || state.session?.cwd || controller.options.target?.cwd || task?.members.find(m => m.project_id === state.project)?.path || "";
+  const context = conversationContext(path, controller.options.workspace || (task ? {tasks: [task], projects: []} : undefined), task?.id || controller.options.target?.task_id);
+  const additionalDirectories = state.chat.context?.additional_directories || state.context?.additional_directories || [];
+  const status = state.chat.blocked;
+  const footer = state.draftNotice || status || state.chat.notice || state.chat.can_handoff || state.error || state.chat.error;
+  const terminal = state.terminal;
+  return <AssistantRuntimeProvider runtime={runtime}><ChatMediaProvider controller={controller} entries={entries}>
+    <section ref={panel} className="shadcn-scope assistant-chat-scope flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-labelledby="assistantChatTitle" onKeyDownCapture={event=>{
+      if (state.chat.busy && event.key==="Enter" && (event.ctrlKey||event.metaKey) && !event.shiftKey && !event.nativeEvent.isComposing && event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) {event.preventDefault();event.stopPropagation();runtime.thread.composer.send();}
+    }}>
+      <header className="chat-panel-header shrink-0 border-b px-4 py-3">
+        <div className="chat-panel-toolbar">
+          <div className="chat-panel-heading"><h2 id="assistantChatTitle" tabIndex={-1} className="chat-panel-title m-0 min-w-0 truncate text-sm font-semibold" title={state.session?.name}>{state.session ? state.session.name || "未命名对话" : "新建会话"}</h2>
+          </div>
+          <div className="chat-panel-actions">
+            <ChatStatus controller={controller} />
+            {state.session && <>
+              <TooltipIconButton ref={searchTrigger} tooltip="查找消息" aria-label="查找消息" aria-expanded={searchOpen} onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}><SearchIcon /></TooltipIconButton>
+              <TooltipIconButton tooltip="刷新历史" aria-label="刷新历史" disabled={state.loading} onClick={() => void controller.history()}><RefreshCwIcon className={state.loading ? "animate-spin motion-reduce:animate-none" : ""} /></TooltipIconButton>
+            </>}
+            {!readOnly && state.session && controller.options.newConversation && <TooltipIconButton tooltip="新建会话" aria-label="新建会话" disabled={!!task && task.state !== "ready"} onClick={controller.options.newConversation}><PlusIcon /></TooltipIconButton>}
+            <ChatSessionMenu controller={controller} portal={panel} />
+          </div>
         </div>
-        {state.session && <details className="chat-context text-xs text-muted-foreground"><summary>{project?.project_name || "工作目录"}</summary><div className="space-y-2 pt-2"><p className="break-all font-mono">{path}</p><TooltipIconButton tooltip="刷新历史" aria-label="刷新历史" disabled={state.loading} onClick={() => void controller.history()}><RefreshCwIcon /></TooltipIconButton></div></details>}
-        {!state.session && <div className="space-y-2"><Label htmlFor="assistantChatProject">工作项目</Label><NativeSelect id="assistantChatProject" value={state.project} disabled={state.submitting} onChange={e => controller.setProject(e.target.value)}>{task.members.map(m => <NativeSelectOption key={m.project_id} value={m.project_id}>{m.project_name}{m.project_id === task.primary_project_id ? "（主项目）" : ""}</NativeSelectOption>)}</NativeSelect></div>}
+        <details className="chat-workspace-context">
+          <summary><span className="chat-workspace-project"><FolderIcon aria-hidden="true" />{context.project || "工作目录"}</span>{context.branch && <span className="chat-workspace-branch" title={`分支 · ${context.branch}`}><GitBranchIcon aria-hidden="true" />{context.branch}</span>}<span className="chat-workspace-kind">{context.kind}</span><span className="chat-workspace-task" title={context.tasks.map(t => t.name).join("、")}>{context.tasks.length ? `任务 · ${context.tasks.map(t => t.name).join("、")}` : "未关联任务"}</span></summary>
+          <dl className="chat-context-facts grid gap-2 text-xs"><dt>执行环境</dt><dd>{controller.options.environmentName || (controller.options.environment === "local" ? "本机" : controller.options.environment)}</dd><dt>{state.chat.busy ? "运行目录" : "工作目录"}</dt><dd>{path || "请选择工作目录"}</dd>{additionalDirectories.length > 0 && <><dt>额外工作目录</dt><dd>{additionalDirectories.join("、")}</dd></>}</dl>
+          {!readOnly && state.session && <Button type="button" size="sm" variant="outline" className="chat-workspace-resume" disabled={!state.session.available} onClick={() => void controller.resume()}><TerminalIcon aria-hidden="true" />在终端继续</Button>}
+        </details>
+        {readOnly && <div className="flex items-center gap-2"><ChatControls controller={controller} portal={panel} />{state.session && <Button type="button" variant="ghost" size="sm" data-session-action="global-resume" data-session={state.session.id} onClick={() => void controller.resume()} disabled={!state.session.available}>在终端继续 ↗</Button>}</div>}
+        {state.session && <ChatSearch controller={controller} container={reading.container} open={searchOpen} onClose={closeSearch} />}
+        {!state.session && task && <div className="mt-2 space-y-2"><Label htmlFor="assistantChatProject">工作项目</Label><NativeSelect id="assistantChatProject" value={state.project} disabled={state.submitting} onChange={e => controller.setProject(e.target.value)}>{task.members.map(m => <NativeSelectOption key={m.project_id} value={m.project_id}>{m.project_name}{m.project_id === task.primary_project_id ? "（主项目）" : ""}</NativeSelectOption>)}</NativeSelect></div>}
       </header>
       {state.historyError && <Alert variant="destructive" className="shrink-0 rounded-none"><AlertDescription>{state.historyError}</AlertDescription></Alert>}
       <div ref={reading.container} className="relative min-h-0 flex-1" onChange={event => {
         if (event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) controller.setDraft(event.target.value);
-      }}><Thread managedScroll autoFocus={false} />{reading.hasNew && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
-      {state.chat.approvals.length > 0 && <div className="max-h-[40%] shrink-0 space-y-2 overflow-y-auto border-t p-4" aria-live="polite">{state.chat.approvals.map(a => <ApprovalCard key={a.id} approval={a} controller={controller} />)}</div>}
+      }}><Thread components={chatComponents} managedScroll autoFocus={false} readOnly={readOnly} composer={question ? <QuestionComposer key={JSON.stringify([state.chat.id, question.id])} approval={question} controller={controller} /> : undefined} composerLeadingControls={<ChatPermissions controller={controller} portal={panel} />} composerControls={<ChatControls controller={controller} portal={panel} />} />{reading.hasNew && !question && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
+      {readOnly && (terminal?.waiting || !!terminal?.confirmations?.length) && <Alert className="max-h-[40%] shrink-0 overflow-y-auto rounded-none" role="alert"><AlertDescription>
+        <p>终端有待确认事项，请在原终端处理。{!terminal.connected && "连接已断开，以下提示尚未核实。"}</p>
+        {terminal.confirmations?.map(item => <div key={item.id} className="space-y-2"><strong>{cleanText(item.title)}</strong>{item.details && <pre className="whitespace-pre-wrap wrap-anywhere">{cleanText(item.details)}</pre>}{item.questions?.map(q => <p key={q.id}>{cleanText(q.header)} · {cleanText(q.question)}{q.options?.map(o => <span key={o.label} className="block">{cleanText(o.label)} · {cleanText(o.description)}</span>)}</p>)}</div>)}
+      </AlertDescription></Alert>}
+      {approvals.length > 0 && <div className="max-h-[40%] shrink-0 space-y-2 overflow-y-auto border-t p-4" aria-live="polite">{approvals.map(a => <ApprovalCard key={a.id} approval={a} controller={controller} />)}</div>}
       {footer && <footer className="shrink-0 space-y-2 border-t px-5 py-3 text-xs text-muted-foreground">
         {status && <div role="status">{status}</div>}
+        {state.draftNotice && <p role="status">{state.draftNotice}</p>}
         {state.chat.notice && <p className="m-0">{state.chat.notice}</p>}
         {state.chat.can_handoff && !state.chat.busy && <Button type="button" size="sm" variant="outline" disabled={state.submitting} onClick={() => void controller.handoff()}>在这里继续（等终端本轮结束）</Button>}
         {(state.error || state.chat.error) && <Alert variant="destructive"><AlertDescription>{state.error || state.chat.error}</AlertDescription></Alert>}
       </footer>}
     </section>
-  </AssistantRuntimeProvider>;
+  </ChatMediaProvider></AssistantRuntimeProvider>;
 }

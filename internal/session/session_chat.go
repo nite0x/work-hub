@@ -2,9 +2,7 @@ package session
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -36,35 +34,41 @@ type ChatQuestion struct {
 	Header   string `json:"header"`
 	Question string `json:"question"`
 	IsSecret bool   `json:"isSecret"`
+	IsOther  bool   `json:"isOther"`
 	Options  []struct {
 		Label       string `json:"label"`
 		Description string `json:"description"`
 	} `json:"options"`
 }
 type ChatState struct {
-	Revision   uint64         `json:"revision"`
-	ID         string         `json:"id,omitempty"`
-	Status     string         `json:"status"`
-	Busy       bool           `json:"busy"`
-	TurnID     string         `json:"turn_id,omitempty"`
-	Entries    []HistoryEntry `json:"entries"`
-	Approvals  []ChatApproval `json:"approvals"`
-	Error      string         `json:"error,omitempty"`
-	Blocked    string         `json:"blocked,omitempty"`
-	CanHandoff bool           `json:"can_handoff"`
-	Notice     string         `json:"notice,omitempty"`
+	SessionName    string         `json:"session_name,omitempty"`
+	External       bool           `json:"external,omitempty"`
+	Revision       uint64         `json:"revision"`
+	ID             string         `json:"id,omitempty"`
+	Status         string         `json:"status"`
+	Busy           bool           `json:"busy"`
+	TurnID         string         `json:"turn_id,omitempty"`
+	Entries        []HistoryEntry `json:"entries"`
+	Approvals      []ChatApproval `json:"approvals"`
+	Error          string         `json:"error,omitempty"`
+	Blocked        string         `json:"blocked,omitempty"`
+	CanHandoff     bool           `json:"can_handoff"`
+	Notice         string         `json:"notice,omitempty"`
+	AcceptedInputs []string       `json:"accepted_inputs,omitempty"`
+	Context        *ChatContext   `json:"context,omitempty"`
 }
 type ChatRun struct {
-	mu                        sync.Mutex
-	state                     ChatState
-	requirement, session, cwd string
-	client                    codex.LiveClient
-	cancel                    context.CancelFunc
-	notify                    chan struct{}
-	finished                  chan struct{}
-	ended                     time.Time
-	created                   *codex.Session
-	handoff                   bool
+	mu           sync.Mutex
+	state        ChatState
+	session, cwd string
+	client       codex.LiveClient
+	cancel       context.CancelFunc
+	notify       chan struct{}
+	finished     chan struct{}
+	ended        time.Time
+	created      *codex.Session
+	handoff      bool
+	settings     TurnSettings
 }
 
 func (run *ChatRun) snapshot() ChatState {
@@ -73,6 +77,7 @@ func (run *ChatRun) snapshot() ChatState {
 	s := run.state
 	s.Entries = append([]HistoryEntry{}, s.Entries...)
 	s.Approvals = append([]ChatApproval{}, s.Approvals...)
+	s.AcceptedInputs = append([]string{}, s.AcceptedInputs...)
 	return s
 }
 func (run *ChatRun) change(fn func(*ChatState)) {
@@ -99,7 +104,7 @@ func (a *Service) BusyWorkspace(session, cwd string) bool {
 	defer a.chatMu.Unlock()
 	for _, run := range a.chats {
 		run.mu.Lock()
-		busy := run.state.Busy && (run.session == session || run.cwd == cwd)
+		busy := run.state.Busy && (run.session == session || platform.SameWorkspacePath(run.cwd, cwd))
 		run.mu.Unlock()
 		if busy {
 			return true
@@ -127,64 +132,55 @@ func (a *Service) CloseChats() {
 		}
 	}
 }
-func (a *Service) LinkedChatSession(w http.ResponseWriter, r *http.Request) (model.Requirement, string, bool) {
-	a.Workspace.Mu.Lock()
-	defer a.Workspace.Mu.Unlock()
-	q, ok := a.SessionRequirement(w, r)
-	if !ok {
-		return q, "", false
-	}
-	var cwd string
-	err := a.Workspace.Store.DB.QueryRow(`SELECT cwd FROM requirement_sessions WHERE requirement_id=? AND session_id=?`, q.ID, r.PathValue("session")).Scan(&cwd)
-	if errors.Is(err, sql.ErrNoRows) {
-		httpx.WriteError(w, 404, "会话未关联到该任务")
-		return q, "", false
-	}
-	if err != nil {
-		httpx.DbError(w, err)
-		return q, "", false
-	}
-	return q, cwd, true
-}
+
 func (a *Service) ChatStateHandler(w http.ResponseWriter, r *http.Request) {
-	_, cwd, ok := a.LinkedChatSession(w, r)
+	record, ok := a.requestSession(w, r)
+	cwd := record.Cwd
 	if !ok {
 		return
 	}
+	state := ChatState{Status: "idle", Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}
 	if run := a.ChatFor(r.PathValue("session")); run != nil {
-		s := run.snapshot()
-		if run.requirement == r.PathValue("id") {
-			if !s.Busy {
-				s.Blocked = ""
-				if err := a.AppTerminalConflict(r.PathValue("session"), cwd); err != nil {
-					s.Blocked = err.Error()
-				}
+		state = run.snapshot()
+	}
+	if !state.Busy {
+		if external, ok := a.externalActivity(r.Context(), record.ID); ok && (state.ID == "" || external.TurnID != "" && external.TurnID != state.TurnID) {
+			state.Status = external.Status
+			state.ID = ""
+			state.Revision = 0
+			state.Entries = []HistoryEntry{}
+			state.Approvals = []ChatApproval{}
+			state.Context = nil
+			state.Error = ""
+			state.AcceptedInputs = nil
+			state.External = true
+			state.TurnID = external.TurnID
+			state.Busy = external.Status == "running" || external.Status == "waiting"
+			if state.Busy {
+				state.Notice = "对话正在原生 Codex 中运行，进展会自动同步；请在原窗口处理停止或确认。"
+			} else if external.Status == "unknown" {
+				state.Notice = "暂时无法核实原生运行状态，请在 Codex 窗口确认。"
 			}
-			if !s.Busy {
-				a.DecorateHandoff(&s, r.PathValue("session"), cwd)
-			}
-			httpx.WriteJSON(w, 200, s)
-			return
-		}
-		if s.Busy {
-			httpx.WriteJSON(w, 200, ChatState{Status: "conflict", Blocked: "此会话正在另一个任务页面运行"})
-			return
 		}
 	}
-	s := ChatState{Status: "idle", Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}
-	if err := a.AppTerminalConflict(r.PathValue("session"), cwd); err != nil {
-		s.Status, s.Blocked = "conflict", err.Error()
+	if !state.Busy {
+		state.Blocked = ""
+		if err := a.AppTerminalConflict(r.PathValue("session"), cwd); err != nil {
+			state.Blocked = err.Error()
+		}
+		a.DecorateHandoff(&state, r.PathValue("session"), cwd)
 	}
-	a.DecorateHandoff(&s, r.PathValue("session"), cwd)
-	httpx.WriteJSON(w, 200, s)
+	a.prepareHistoryMedia(record.ID, state.Entries)
+	httpx.WriteJSON(w, 200, state)
 }
 func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	var input struct {
-		Text      string   `json:"text"`
-		RequestID string   `json:"request_id"`
-		Images    []string `json:"images"`
+		Text      string       `json:"text"`
+		RequestID string       `json:"request_id"`
+		Images    []string     `json:"images"`
+		Settings  TurnSettings `json:"settings"`
 	}
 	if !httpx.DecodeLimit(w, r, &input, chatRequestLimit) {
 		return
@@ -198,15 +194,30 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "请输入消息或添加图片（文字最多 64000 字节）并提供发送标识")
 		return
 	}
-	q, cwd, ok := a.LinkedChatSession(w, r)
+	record, ok := a.requestSession(w, r)
+	cwd := record.Cwd
 	if !ok {
 		return
 	}
-	a.Workspace.Mu.Lock()
-	plan, err := a.plans.MakeLaunchPlan(r.Context(), q.ID)
-	a.Workspace.Mu.Unlock()
-	if err != nil {
-		httpx.WriteError(w, 409, err.Error())
+	if previous := a.ChatFor(record.ID); previous != nil {
+		snapshot := previous.snapshot()
+		if snapshot.ID == input.RequestID {
+			a.prepareHistoryMedia(record.ID, snapshot.Entries)
+			httpx.WriteJSON(w, 200, snapshot)
+			return
+		}
+	}
+	if external, ok := a.externalActivity(r.Context(), record.ID); ok && (external.Status == "running" || external.Status == "waiting") && !a.ChatBusy(record.ID) {
+		httpx.WriteError(w, 409, "此对话仍在原生 Codex 中运行，请在原窗口继续或等待完成")
+		return
+	}
+	plan := savedSessionPlan(record)
+	if record.Archived {
+		httpx.WriteError(w, 409, "请先恢复已归档会话")
+		return
+	}
+	if err := input.Settings.validate(); err != nil {
+		httpx.WriteError(w, 400, err.Error())
 		return
 	}
 	if a.BusyWorkspace("", cwd) && !a.ChatBusy(r.PathValue("session")) {
@@ -216,7 +227,7 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 	a.chatMu.Lock()
 	if previous := a.chats[r.PathValue("session")]; previous != nil {
 		s := previous.snapshot()
-		if s.ID == input.RequestID && previous.requirement == q.ID {
+		if s.ID == input.RequestID {
 			a.chatMu.Unlock()
 			httpx.WriteJSON(w, 200, s)
 			return
@@ -228,7 +239,8 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	run := &ChatRun{requirement: q.ID, session: r.PathValue("session"), cwd: cwd, cancel: cancel, notify: make(chan struct{}, 1), finished: make(chan struct{}), state: ChatState{ID: input.RequestID, Status: "starting", Busy: true, Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}}
+	run := &ChatRun{session: r.PathValue("session"), cwd: cwd, cancel: cancel, notify: make(chan struct{}, 1), finished: make(chan struct{}), state: ChatState{ID: input.RequestID, Status: "starting", Busy: true, Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}}
+	run.settings = input.Settings
 	// Keep only recent finished snapshots; active turns are never evicted.
 	for id, old := range a.chats {
 		old.mu.Lock()
@@ -294,6 +306,7 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			} `json:"status"`
 		} `json:"thread"`
 	}
+	titleObservedAt := time.Now().UnixNano()
 	if run.created != nil {
 		metadata.Thread.Session = *run.created
 	} else if err := call("thread/read", map[string]any{"threadId": run.session, "includeTurns": false}, &metadata); err != nil {
@@ -310,9 +323,33 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		fail("会话原工作目录不可用")
 		return
 	}
-	run.mu.Lock()
-	run.cwd = s.Cwd
-	run.mu.Unlock()
+	if run.created == nil {
+		if err := a.SaveSession("", s, "codex", titleObservedAt); err != nil {
+			fail(err.Error())
+			return
+		}
+	}
+	a.chatMu.Lock()
+	occupied := false
+	for _, other := range a.chats {
+		if other == run {
+			continue
+		}
+		other.mu.Lock()
+		occupied = occupied || (other.state.Busy && platform.SameWorkspacePath(other.cwd, s.Cwd))
+		other.mu.Unlock()
+	}
+	if !occupied {
+		run.mu.Lock()
+		run.cwd = s.Cwd
+		run.mu.Unlock()
+	}
+	a.chatMu.Unlock()
+	if occupied {
+		fail("会话原工作目录已有其他对话运行")
+		return
+	}
+	plan.Cwd = s.Cwd
 	checkOwner := func() error {
 		if err := a.AppTerminalConflict(run.session, s.Cwd); err != nil {
 			return err
@@ -327,6 +364,7 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		return
 	}
 	var resumed struct {
+		ChatContext
 		Thread struct {
 			Status struct {
 				Type string `json:"type"`
@@ -336,7 +374,7 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 	}
 	if run.created != nil {
 		resumed.Sandbox = map[string]any{"type": "workspaceWrite", "writableRoots": []any{s.Cwd}, "networkAccess": false}
-	} else if err := call("thread/resume", map[string]any{"threadId": run.session, "excludeTurns": true}, &resumed); err != nil {
+	} else if err := call("thread/resume", map[string]any{"threadId": run.session, "excludeTurns": true, "config": chatQuestionConfig()}, &resumed); err != nil {
 		fail(err.Error())
 		return
 	}
@@ -351,16 +389,65 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		return
 	}
 	params := map[string]any{"threadId": run.session, "cwd": s.Cwd, "input": chatTurnInput(text, images)}
-	// Preserve the session's model and approval policy. Only add the requirement's
-	// project roots when the session already uses the workspace-write sandbox.
+	if err := a.applyTurnSettings(ctx, c, params, run.settings, s.Model, resumed.ChatContext.Effort); err != nil {
+		fail(err.Error())
+		return
+	}
+	resumed.ChatContext.Sandbox = resumed.Sandbox
+	if run.created != nil {
+		resumed.ChatContext.ApprovalPolicy = "on-request"
+		resumed.ChatContext.ApprovalsReviewer = "user"
+	}
+	if mode, ok := params["collaborationMode"].(map[string]any); ok {
+		if settings, ok := mode["settings"].(map[string]any); ok {
+			resumed.ChatContext.Model, _ = settings["model"].(string)
+			resumed.ChatContext.Effort, _ = settings["reasoning_effort"].(string)
+		}
+	}
+	resumed.ChatContext.Cwd = s.Cwd
+	resumed.ChatContext.AdditionalDirectories = plan.AdditionalDirectories
+	if resumed.ChatContext.Model == "" {
+		resumed.ChatContext.Model = s.Model
+	}
+	if run.settings.Model != "" {
+		resumed.ChatContext.Model = run.settings.Model
+	}
+	if run.settings.Effort != "" {
+		resumed.ChatContext.Effort = run.settings.Effort
+	}
+	if effort, ok := params["effort"].(string); ok {
+		resumed.ChatContext.Effort = effort
+	}
+	resumed.ChatContext.Mode = run.settings.Mode
+	// Preserve model, approval policy and the roots chosen at creation; opening
+	// the same session from another task never adds that task's directories.
 	if resumed.Sandbox["type"] == "workspaceWrite" {
 		roots, _ := resumed.Sandbox["writableRoots"].([]any)
-		for _, dir := range append([]string{plan.Cwd}, plan.AdditionalDirectories...) {
-			roots = append(roots, dir)
+		for _, dir := range uniqueDirectories(append([]string{plan.Cwd}, plan.AdditionalDirectories...)) {
+			present := false
+			for _, root := range roots {
+				if path, ok := root.(string); ok && platform.SameWorkspacePath(path, dir) {
+					present = true
+					break
+				}
+			}
+			if !present {
+				roots = append(roots, dir)
+			}
 		}
 		resumed.Sandbox["writableRoots"] = roots
 		params["sandboxPolicy"] = resumed.Sandbox
 	}
+	if run.settings.Permission != "" {
+		setTurnPermissions(params, run.settings.Permission, uniqueDirectories(append([]string{plan.Cwd}, plan.AdditionalDirectories...)))
+		resumed.ChatContext.ApprovalPolicy = params["approvalPolicy"]
+		resumed.ChatContext.ApprovalsReviewer = params["approvalsReviewer"].(string)
+		resumed.ChatContext.Sandbox = params["sandboxPolicy"]
+	}
+	if resumed.ChatContext.Effort == "" {
+		resumed.ChatContext.Effort = s.Effort
+	}
+	run.change(func(state *ChatState) { state.Context = &resumed.ChatContext })
 	var started struct {
 		Turn struct {
 			ID string `json:"id"`
@@ -385,6 +472,10 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			if !ok {
 				fail("Codex 实时连接断开，请刷新历史检查已保存的进展")
 				return
+			}
+			if event.Method == "thread/name/updated" {
+				a.syncSessionName(run, event)
+				continue
 			}
 			if run.handle(event) {
 				return
@@ -427,11 +518,11 @@ func (run *ChatRun) interrupt() error {
 	return client.Call(ctx, "turn/interrupt", map[string]any{"threadId": run.session, "turnId": id}, nil)
 }
 func (a *Service) ControlledRun(w http.ResponseWriter, r *http.Request, id string) *ChatRun {
-	if _, _, ok := a.LinkedChatSession(w, r); !ok {
+	if _, ok := a.requestSession(w, r); !ok {
 		return nil
 	}
 	run := a.ChatFor(r.PathValue("session"))
-	if run == nil || run.requirement != r.PathValue("id") || run.snapshot().ID != id {
+	if run == nil || run.snapshot().ID != id {
 		httpx.WriteError(w, 409, "页面运行已变化，请重新打开会话后重试")
 		return nil
 	}
@@ -489,6 +580,7 @@ func (a *Service) ChatEventsHandler(w http.ResponseWriter, r *http.Request) {
 	last := ^uint64(0)
 	for {
 		s := run.snapshot()
+		a.prepareHistoryMedia(r.PathValue("session"), s.Entries)
 		if s.Revision != last {
 			raw, _ := json.Marshal(s)
 			_, err := fmt.Fprintf(w, "data: %s\n\n", raw)

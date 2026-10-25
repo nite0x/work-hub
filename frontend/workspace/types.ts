@@ -19,7 +19,7 @@ export interface Member {
 }
 export interface Task {
   id: string; name: string; slug: string; description?: string; branch: string;
-  path: string; state: string; primary_project_id: string; members: Member[];
+  path: string; state: string; primary_project_id: string; members: Member[]; has_workspace?: boolean;
   created_at: string; environment_id: string; environment_name: string; connected: boolean;
 }
 export interface GitBranch {

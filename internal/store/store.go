@@ -91,9 +91,21 @@ CREATE TABLE IF NOT EXISTS session_create_requests (
 	if err != nil {
 		return err
 	}
-	columns, err := tableColumns(s.DB, "members")
-	if err != nil || columns["mode"] {
+	requirementColumns, err := tableColumns(s.DB, "requirements")
+	if err != nil {
 		return err
+	}
+	if !requirementColumns["has_workspace"] {
+		if _, err := s.DB.Exec(`ALTER TABLE requirements ADD COLUMN has_workspace INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return err
+		}
+	}
+	columns, err := tableColumns(s.DB, "members")
+	if err != nil {
+		return err
+	}
+	if columns["mode"] {
+		return s.migrateSessions()
 	}
 	// Existing directories may participate in multiple tasks. Retain every old
 	// member while removing the old exclusive-path constraint.
@@ -107,7 +119,10 @@ INSERT INTO members_v2(requirement_id,project_id,path,base_commit,state,error) S
 DROP TABLE members;
 ALTER TABLE members_v2 RENAME TO members;
 COMMIT;`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.migrateSessions()
 }
 
 func tableColumns(db *sql.DB, name string) (map[string]bool, error) {
@@ -154,14 +169,22 @@ func (s *Store) Requirements() ([]model.Requirement, error) {
 	if !columns["mode"] {
 		memberScope = "'new','refs/heads/master',''"
 	}
-	rows, err := s.DB.Query(`SELECT id,name,slug,description,branch,path,primary_project_id,state,created_at FROM requirements ORDER BY created_at DESC,id`)
+	requirementColumns, err := tableColumns(s.DB, "requirements")
+	if err != nil {
+		return nil, err
+	}
+	workspaceColumn := "1"
+	if requirementColumns["has_workspace"] {
+		workspaceColumn = "has_workspace"
+	}
+	rows, err := s.DB.Query(`SELECT id,name,slug,description,branch,path,primary_project_id,state,created_at,` + workspaceColumn + ` FROM requirements ORDER BY created_at DESC,id`)
 	if err != nil {
 		return nil, err
 	}
 	out := []model.Requirement{}
 	for rows.Next() {
 		var v model.Requirement
-		if err := rows.Scan(&v.ID, &v.Name, &v.Slug, &v.Description, &v.Branch, &v.Path, &v.PrimaryProjectID, &v.State, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Name, &v.Slug, &v.Description, &v.Branch, &v.Path, &v.PrimaryProjectID, &v.State, &v.CreatedAt, &v.HasWorkspace); err != nil {
 			rows.Close()
 			return nil, err
 		}

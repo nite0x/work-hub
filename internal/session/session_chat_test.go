@@ -18,14 +18,15 @@ import (
 )
 
 type fakeLiveClient struct {
-	mu          sync.Mutex
-	updates     chan codex.Event
-	methods     []string
-	replies     []string
-	cwd         string
-	session     string
-	active      bool
-	startParams map[string]any
+	mu           sync.Mutex
+	updates      chan codex.Event
+	methods      []string
+	replies      []string
+	cwd          string
+	session      string
+	active       bool
+	startParams  map[string]any
+	threadParams map[string]map[string]any
 }
 
 func (c *fakeLiveClient) Events() <-chan codex.Event { return c.updates }
@@ -53,6 +54,12 @@ func (c *fakeLiveClient) request(method string, id any, params map[string]any) {
 func (c *fakeLiveClient) Call(ctx context.Context, method string, params any, out any) error {
 	c.mu.Lock()
 	c.methods = append(c.methods, method)
+	if method == "thread/start" || method == "thread/resume" {
+		if c.threadParams == nil {
+			c.threadParams = map[string]map[string]any{}
+		}
+		c.threadParams[method] = params.(map[string]any)
+	}
 	c.mu.Unlock()
 	var result any = map[string]any{}
 	switch method {

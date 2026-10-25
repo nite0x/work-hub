@@ -5,6 +5,6 @@ import (
 	"net"
 )
 
-// macOS desktop sessions are read-only. The Linux TUI relay is intentionally
-// unavailable: no peer PID is granted and the relay rejects the connection.
+// macOS uses the normal terminal launcher. The Linux TUI relay is unavailable:
+// no peer PID is granted and the relay rejects the connection.
 func bridgePeerContext(ctx context.Context, _ net.Conn) context.Context { return ctx }

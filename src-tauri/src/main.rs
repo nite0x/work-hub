@@ -111,17 +111,10 @@ fn menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         Some("CmdOrCtrl+W"),
     )?;
-    let stop = MenuItem::with_id(
-        app,
-        "stop",
-        "退出并停止后台",
-        true,
-        Some("CmdOrCtrl+Shift+Q"),
-    )?;
     let quit = MenuItem::with_id(
         app,
         "quit",
-        "退出桌面端（保留后台）",
+        "退出并停止后台",
         true,
         Some("CmdOrCtrl+Q"),
     )?;
@@ -134,7 +127,6 @@ fn menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::separator(app)?,
             &close,
             &quit,
-            &stop,
         ],
     )?;
     let edit = Submenu::with_items(
@@ -216,8 +208,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "reconnect" => connect(app.clone(), false),
-            "stop" => connect(app.clone(), true),
-            "quit" => app.exit(0),
+            "quit" => connect(app.clone(), true),
             "close" => { if let Some(window) = app.get_webview_window("main") { let _ = window.close(); } }
             _ => (),
         })

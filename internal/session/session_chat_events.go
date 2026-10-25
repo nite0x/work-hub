@@ -11,6 +11,23 @@ import (
 	"worktree-hub/internal/model"
 )
 
+func (a *Service) syncSessionName(run *ChatRun, event codex.Event) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+		Name     string `json:"threadName"`
+	}
+	if json.Unmarshal(event.Params, &p) != nil || p.ThreadID != run.session || strings.TrimSpace(p.Name) == "" {
+		return
+	}
+	name := sessionName(codex.Session{Name: p.Name})
+	a.controlMu.Lock()
+	defer a.controlMu.Unlock()
+	if updated, err := a.Workspace.Store.ObserveSessionTitle(run.session, name); err != nil || !updated {
+		return
+	}
+	run.change(func(s *ChatState) { s.SessionName = name })
+}
+
 func (run *ChatRun) handle(event codex.Event) bool {
 	var p struct {
 		ThreadID  string           `json:"threadId"`
@@ -73,17 +90,8 @@ func (run *ChatRun) handle(event codex.Event) bool {
 	}
 	switch event.Method {
 	case "item/started", "item/completed":
-		if p.Item.Type == "fileChange" {
-			text := ""
-			for _, change := range p.Item.Changes {
-				text += change.Path + "\n" + change.Diff + "\n"
-			}
-			run.change(func(s *ChatState) {
-				upsertLiveEntry(s, HistoryEntry{ID: p.Item.ID, TurnID: p.TurnID, Kind: "change", Text: text, Status: p.Item.Status})
-			})
-		}
 		if e, ok := visibleHistoryEntry(codexHistoryEntry{TurnID: p.TurnID, Item: p.Item}); ok {
-			if e.Kind == "assistant" {
+			if e.Kind == "assistant" || e.Status == "" && e.Kind == "activity" {
 				if event.Method == "item/started" {
 					e.Status = "inProgress"
 				} else {
@@ -95,6 +103,12 @@ func (run *ChatRun) handle(event codex.Event) bool {
 	case "item/agentMessage/delta":
 		run.change(func(s *ChatState) {
 			entry := liveEntry(s, p.ItemID, p.TurnID, "assistant")
+			entry.Text = boundedChatText(entry.Text + p.Delta)
+		})
+	case "item/plan/delta":
+		run.change(func(s *ChatState) {
+			entry := liveEntry(s, p.ItemID, p.TurnID, "activity")
+			entry.Tool = "计划"
 			entry.Text = boundedChatText(entry.Text + p.Delta)
 		})
 	case "item/commandExecution/outputDelta":

@@ -43,6 +43,7 @@ import {
   type TextMessagePartComponent,
   type ToolCallMessagePartComponent,
   useAuiState,
+  useAui,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
@@ -71,6 +72,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -93,6 +95,8 @@ const reasoningDuration = (timing: ThreadGroupPart["timing"]) =>
  * tool group; without it they render like any other tool call.
  */
 export type ThreadComponents = {
+  Text?: ComponentType;
+  UserImage?: ImageMessagePartComponent;
   AssistantMessage?: ComponentType | undefined;
   Welcome?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
@@ -136,9 +140,13 @@ const taskAwareGroupBy = (
 };
 
 export type ThreadProps = {
+  composer?: ReactNode;
+  composerControls?: ReactNode;
+  composerLeadingControls?: ReactNode;
   components?: ThreadComponents | undefined;
   autoFocus?: boolean | undefined;
   managedScroll?: boolean | undefined;
+  readOnly?: boolean | undefined;
 };
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
@@ -182,22 +190,30 @@ const ThreadHistorySkeleton: FC = () => (
 
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
+  composer,
+  composerControls,
+  composerLeadingControls,
   autoFocus = true,
   managedScroll = false,
+  readOnly = false,
 }) => {
   const isEmpty = useAuiState(isNewChatView);
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} autoFocus={autoFocus} managedScroll={managedScroll} />
+      <ThreadRoot composer={composer} composerControls={composerControls} composerLeadingControls={composerLeadingControls} isEmpty={isEmpty} autoFocus={autoFocus} managedScroll={managedScroll} readOnly={readOnly} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: boolean }> = ({
+const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: boolean; readOnly: boolean; composer?: ReactNode; composerControls?: ReactNode; composerLeadingControls?: ReactNode }> = ({
+  composer,
+  composerControls,
+  composerLeadingControls,
   isEmpty,
   autoFocus,
   managedScroll,
+  readOnly,
 }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
 
@@ -205,7 +221,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: bool
     <ThreadPrimitive.Root
       className="aui-root aui-thread-root bg-background @container flex h-full flex-col"
       style={{
-        ["--thread-max-width" as string]: "44rem",
+        ["--thread-max-width" as string]: "56rem",
         ["--composer-bg" as string]:
           "color-mix(in oklab, var(--color-muted) 30%, transparent)",
         ["--composer-radius" as string]: "1rem",
@@ -225,7 +241,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: bool
           )}
         >
           <AuiIf condition={isNewChatView}>
-            <Welcome />
+            {readOnly ? <p className="text-center text-sm text-muted-foreground">此会话尚无已保存的消息或命令记录。</p> : <Welcome />}
           </AuiIf>
           <AuiIf condition={isHistoryLoadingView}>
             <ThreadHistorySkeleton />
@@ -235,7 +251,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: bool
 
           <div
             data-slot="aui_message-group"
-            className="mb-14 flex flex-col gap-y-6 empty:hidden"
+            className={cn("mb-6 flex flex-col gap-y-5 empty:hidden", !isEmpty && !readOnly && "mt-auto")}
           >
             <ThreadPrimitive.Messages>
               {() => <ThreadMessage />}
@@ -246,13 +262,13 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: bool
             className={cn(
               "aui-thread-viewport-footer bg-background flex flex-col gap-4 overflow-visible pb-4 md:pb-6",
               !isEmpty &&
-                "sticky bottom-0 mt-auto rounded-t-(--composer-radius)",
+                "sticky bottom-0 rounded-t-(--composer-radius)",
             )}
           >
             <ThreadScrollToBottom />
-            <ThreadFollowupSuggestions />
-            <Composer autoFocus={autoFocus} />
-            <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
+            {!readOnly && !composer && <ThreadFollowupSuggestions />}
+            {!readOnly && (composer ?? <Composer autoFocus={autoFocus} controls={composerControls} leadingControls={composerLeadingControls} />)}
+            <AuiIf condition={(s) => !readOnly && !composer && isNewChatView(s) && s.composer.isEmpty}>
               <ThreadSuggestions />
             </AuiIf>
           </ThreadPrimitive.ViewportFooter>
@@ -363,7 +379,7 @@ const SpokenActionBar: FC = () => {
       className="aui-spoken-action-bar text-muted-foreground flex shrink-0 gap-1"
     >
       <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip="Copy" className="size-6">
+        <TooltipIconButton tooltip="复制" className="size-6">
           <AuiIf condition={(s) => s.message.isCopied}>
             <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
           </AuiIf>
@@ -462,7 +478,7 @@ const ThreadWelcome: FC = () => {
   return (
     <div className="aui-thread-welcome-root mb-6 flex flex-col px-2">
       <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-2xl font-medium tracking-tight duration-200">
-        今天想在这个任务中完成什么？
+        想在这个工作目录中完成什么？
       </p>
     </div>
   );
@@ -502,7 +518,7 @@ const ThreadSuggestionItem: FC = () => {
   );
 };
 
-const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+const Composer: FC<{ autoFocus: boolean; controls?: ReactNode; leadingControls?: ReactNode }> = ({ autoFocus, controls, leadingControls }) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
@@ -514,6 +530,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           <ComposerPrimitive.Input
             placeholder="补充说明、询问进展，或交代下一步…"
             submitMode="ctrlEnter"
+            title="Ctrl+Enter 或 ⌘+Enter 发送；Enter 换行"
             maxLength={32000}
             addAttachmentOnPaste
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
@@ -522,14 +539,16 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             enterKeyHint="send"
             aria-label="会话消息"
           />
-          <ComposerAction />
+          <ComposerAction controls={controls} leadingControls={leadingControls} />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
   );
 };
 
-const ComposerAction: FC = () => {
+const ComposerAction: FC<{ controls?: ReactNode; leadingControls?: ReactNode }> = ({ controls, leadingControls }) => {
+  const aui=useAui();
+  const canSend=useAuiState(s=>s.composer.canSend);
   // The stop control only cancels the send while no run it could stop is going.
   const isSending = useAuiState(
     (s) =>
@@ -539,12 +558,14 @@ const ComposerAction: FC = () => {
 
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
-      <div className="flex-1">
+      <div className="chat-composer-leading flex min-w-0 items-center gap-1">
         <AuiIf condition={(s) => s.thread.capabilities.attachments}>
           <ComposerAddAttachment />
         </AuiIf>
+        {leadingControls}
       </div>
-      <div className="flex items-center gap-1.5">
+      <div className="chat-composer-trailing flex min-w-0 items-center gap-1.5">
+        {controls}
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>
@@ -579,7 +600,7 @@ const ComposerAction: FC = () => {
         </AuiIf>
         <AuiIf
           condition={(s) =>
-            (!s.composer.canCancel ||
+            !s.thread.isRunning && (!s.composer.canCancel || !s.composer.isEmpty ||
               (s.thread.voice !== undefined &&
                 s.composer.submission === undefined)) &&
             !shouldShowComposerResume(s)
@@ -598,6 +619,9 @@ const ComposerAction: FC = () => {
               <ArrowUpIcon className="aui-composer-send-icon size-4" />
             </TooltipIconButton>
           </ComposerPrimitive.Send>
+        </AuiIf>
+        <AuiIf condition={s=>s.thread.isRunning && !s.composer.isEmpty}>
+          <TooltipIconButton type="button" tooltip="补充到本轮" aria-label="发送消息" className="aui-composer-send size-7 rounded-full" disabled={!canSend} onClick={()=>aui.composer.send()}><ArrowUpIcon className="size-4" /></TooltipIconButton>
         </AuiIf>
         <AuiIf condition={shouldShowComposerResume}>
           <ComposerPrimitive.Resume asChild>
@@ -655,6 +679,7 @@ const AssistantMessage: FC = () => {
     ToolGroup,
     ReasoningGroup,
     TaskGroup: TaskGroupComponent,
+    Text = MarkdownText,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
 
@@ -715,7 +740,7 @@ const AssistantMessage: FC = () => {
                 );
               }
               case "text":
-                return <MarkdownText />;
+                return <Text />;
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
@@ -739,7 +764,7 @@ const AssistantMessage: FC = () => {
                   <span
                     data-slot="aui_assistant-message-indicator"
                     className="animate-pulse font-sans"
-                    aria-label="Assistant is working"
+                    aria-label="Codex 正在工作"
                   >
                     {"●"}
                   </span>
@@ -771,7 +796,7 @@ const AssistantActionBar: FC = () => {
       className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200"
     >
       <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip="Copy">
+        <TooltipIconButton tooltip="复制">
           <AuiIf condition={(s) => s.message.isCopied}>
             <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
           </AuiIf>
@@ -798,15 +823,15 @@ const AssistantActionBar: FC = () => {
           </TooltipIconButton>
         </ActionBarPrimitive.FeedbackNegative>
       </AuiIf>
-      <ActionBarPrimitive.Reload asChild>
-        <TooltipIconButton tooltip="Refresh">
+      <AuiIf condition={(s) => s.thread.capabilities.reload}><ActionBarPrimitive.Reload asChild>
+        <TooltipIconButton tooltip="重新生成">
           <RefreshCwIcon />
         </TooltipIconButton>
-      </ActionBarPrimitive.Reload>
+      </ActionBarPrimitive.Reload></AuiIf>
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
-            tooltip="More"
+            tooltip="更多"
             className="data-[state=open]:bg-accent"
           >
             <MoreHorizontalIcon />
@@ -821,7 +846,7 @@ const AssistantActionBar: FC = () => {
           <ActionBarPrimitive.ExportMarkdown asChild>
             <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
               <DownloadIcon className="size-4" />
-              Export as Markdown
+              导出为 Markdown
             </ActionBarMorePrimitive.Item>
           </ActionBarPrimitive.ExportMarkdown>
         </ActionBarMorePrimitive.Content>
@@ -851,11 +876,14 @@ const UserFilePart: FileMessagePartComponent = (part) => (
   </div>
 );
 
-const UserImagePart: ImageMessagePartComponent = (part) => (
+const UserImagePart: ImageMessagePartComponent = (part) => {
+ const {UserImage = Image}=useContext(ThreadComponentsContext);
+ return (
   <div data-slot="aui_user-message-image" className="py-1">
-    <Image {...part} />
+    <UserImage {...part} />
   </div>
 );
+};
 
 const UserMessage: FC = () => {
   const messageID = useAuiState(s => s.message.id);
@@ -894,11 +922,11 @@ const UserActionBar: FC = () => {
       autohide="not-last"
       className="aui-user-action-bar-root flex flex-col items-end"
     >
-      <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
+      <AuiIf condition={s=>s.thread.capabilities.edit}><ActionBarPrimitive.Edit asChild>
+        <TooltipIconButton tooltip="编辑" className="aui-user-action-edit">
           <PencilIcon />
         </TooltipIconButton>
-      </ActionBarPrimitive.Edit>
+      </ActionBarPrimitive.Edit></AuiIf>
     </ActionBarPrimitive.Root>
   );
 };

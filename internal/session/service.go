@@ -1,4 +1,5 @@
-// Package session owns session links, history, chat runs and terminal handoff.
+// Package session indexes Codex threads and owns history, chat runs and terminal
+// handoff. Task/project scopes are adapters, never session owners.
 package session
 
 import (
@@ -17,6 +18,10 @@ type LaunchPlanner interface {
 	MakeLaunchPlan(context.Context, string) (model.LaunchPlan, error)
 }
 
+func savedSessionPlan(s model.Session) model.LaunchPlan {
+	return model.LaunchPlan{Cwd: s.Cwd, AdditionalDirectories: append([]string{}, s.AdditionalDirectories...)}
+}
+
 type Service struct {
 	Workspace        *workspace.Service
 	plans            LaunchPlanner
@@ -31,6 +36,8 @@ type Service struct {
 	bridgeMu         sync.Mutex
 	controlMu        sync.Mutex
 	bridges          map[string]*terminalBridge
+	mediaOnce        sync.Once
+	mediaKey         [32]byte
 }
 
 func New(environment *workspace.Service, plans LaunchPlanner) *Service {

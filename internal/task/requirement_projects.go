@@ -38,12 +38,6 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 		httpx.WriteError(w, 409, "请先取消归档或等待任务创建完成，再添加项目")
 		return
 	}
-	// Use the persisted workspace even when the service now runs with a different --root.
-	resolved, err := workspace.Eval(r.Context(), q.Path)
-	if err != nil || !platform.SameWorkspacePath(resolved, q.Path) || !platform.AbsoluteWorkspacePath(q.Path) || platform.BaseWorkspacePath(q.Path) != q.Slug {
-		httpx.WriteError(w, 422, "工作区目录丢失或被移动，请先恢复原目录")
-		return
-	}
 	ps, err := a.Workspace.Store.ProjectMap()
 	if err != nil {
 		httpx.DbError(w, err)
@@ -97,6 +91,20 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 		httpx.WriteJSON(w, 422, map[string]any{"error": "添加前检查未通过，未添加任何项目", "details": problems})
 		return
 	}
+	preview := q
+	preview.Members = append(append([]model.Member{}, q.Members...), added...)
+	needsWorkspace := false
+	for _, m := range added {
+		needsWorkspace = needsWorkspace || m.Mode == "new"
+		q.HasWorkspace = q.HasWorkspace || m.Mode == "new"
+	}
+	if needsWorkspace {
+		err = ensureTaskWorkspace(r.Context(), preview)
+	}
+	if err != nil {
+		httpx.WriteError(w, 422, err.Error())
+		return
+	}
 	tx, err := a.Workspace.Store.DB.Begin()
 	if err != nil {
 		httpx.DbError(w, err)
@@ -109,7 +117,7 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 	}
-	if _, err := tx.Exec(`UPDATE requirements SET state='creating' WHERE id=?`, q.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE requirements SET state='creating',has_workspace=? WHERE id=?`, q.HasWorkspace, q.ID); err != nil {
 		httpx.DbError(w, err)
 		return
 	}
@@ -134,6 +142,12 @@ func appendProjectsBrief(q model.Requirement, added []model.Member) error {
 	return appendProjectsBriefContext(context.Background(), q, added)
 }
 func appendProjectsBriefContext(ctx context.Context, q model.Requirement, added []model.Member) error {
+	if !q.HasWorkspace {
+		return nil
+	}
+	if _, err := workspace.Stat(ctx, q.Path, false); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err := WriteBriefContext(ctx, q); err != nil {
 		return err
 	}

@@ -36,18 +36,23 @@ async function refresh(force = false) {
     $('#offlineBanner').hidden = !failures.length;
     const pending = scoped.status === 'fulfilled' && scoped.value?.status_refreshing || inventory.status === 'fulfilled' && inventory.value.status_refreshing;
     nextRefresh = pending ? 1000 : 10000;
-    $('#syncText').textContent = failures.length ? '部分环境暂不可用' : pending ? '状态更新中 · 显示最近结果' : '已读取任务';
-    $('#syncDot').classList.remove('offline');
+    $('#syncText').textContent = failures.length ? '部分环境异常' : pending ? '更新中…' : '已更新';
+    $('#syncText').title = failures.length ? failures.join('\n') : pending ? '正在更新状态，当前显示最近结果' : '工作台状态已更新';
+    $('#syncDot').classList.toggle('offline', !!failures.length);
+    $('#syncDot').classList.toggle('updating', !!pending && !failures.length);
     if (changed || !state.loaded) { render(); refreshRequirementProjectPicker(); }
     else {
       updateCheckTimes();
-      if (state.view === 'requirements' && state.selectedRequirement) refreshRequirementSessions(state.selectedRequirement, false);
+      if (typeof refreshSessionWorkspace === 'function') refreshSessionWorkspace(false);
     }
   } catch (error) {
     if (revision !== environmentRevision || error.name === 'AbortError') return;
     $('#offlineBanner').textContent = '状态刷新失败：' + error.message;
     $('#offlineBanner').hidden = false;
     $('#syncText').textContent = '连接中断';
+    $('#syncText').title = error.message;
+    $('#syncDot').classList.remove('updating');
+    $('#syncDot').classList.toggle('offline', true);
     if (!state.loaded) $('#content').innerHTML = window.WorkHubUI.offline();
   } finally {
     if (revision !== environmentRevision) return;
@@ -80,7 +85,7 @@ function updateCheckTimes() {
 
 function readRoute() {
   const route = location.hash.slice(1);
-  state.view = route === '/settings' ? 'settings' : route === '/projects' ? 'projects' : 'requirements';
+  state.view = route === '/settings' ? 'settings' : route === '/projects' ? 'projects' : route === '/sessions' ? 'sessions' : 'requirements';
   const match = route.match(/^\/requirements\/([a-zA-Z0-9_-]+)$/);
   state.selectedRequirement = match ? match[1] : null;
 }
@@ -91,49 +96,52 @@ function navigate(route) {
 }
 window.addEventListener('hashchange', () => {
   readRoute(); $('#search').value = '';
-  render(); window.scrollTo(0, 0); $('#pageTitle').focus({ preventScroll: true });
+  render(); $('main').scrollTop = 0; $(state.view === 'projects' ? '#panelTitle' : '#pageTitle').focus({ preventScroll: true });
   refresh();
 });
 function render() {
   if (typeof saveTaskWorkspace === 'function') saveTaskWorkspace();
   const settingsView = state.view === 'settings';
+  const sessionsView = state.view === 'sessions';
   const reqView = state.view === 'requirements';
   const detailView = reqView && !!state.selectedRequirement;
   const requirement = detailView ? state.requirements.find(q => q.id === state.selectedRequirement) : null;
   document.body.classList.toggle('task-detail-page', !!requirement);
+  document.body.classList.toggle('projects-page', state.view === 'projects');
   $('#taskPageActions').hidden = !requirement;
   if (requirement) $('#taskPageActions').innerHTML = window.WorkHubUI.taskActions(requirement, environmentName());
-  document.title = settingsView ? '设置 · Work Hub' : requirement ? requirement.name + ' · Work Hub' : 'Work Hub';
+  document.title = sessionsView ? '会话 · Work Hub' : settingsView ? '设置 · Work Hub' : requirement ? requirement.name + ' · Work Hub' : 'Work Hub';
   $('#backToRequirements').hidden = !detailView;
-  $('#stats').hidden = detailView || settingsView;
+  $('.page-heading').hidden = state.view === 'projects';
+  $('#stats').hidden = true;
   $('#panelToolbar').hidden = detailView;
-  $('#newButton').hidden = detailView || settingsView;
+  $('#newButton').hidden = detailView || settingsView || sessionsView;
   $('#settingsPage').hidden = !settingsView;
-  $('#workContent').hidden = settingsView;
+  $('#workContent').hidden = settingsView || sessionsView;
+  $('#sessionsPage').hidden = !sessionsView;
+  document.body.classList.toggle('sessions-page-open', sessionsView);
   $('#reqCount').textContent = taskInventory.requirements.filter(q => q.state !== 'archived').length;
   $('#projectCount').textContent = taskInventory.project_count;
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
-  $('#breadcrumbTitle').textContent = settingsView ? '设置' : reqView ? '任务' : '项目与 Worktree';
-  $('#eyebrow').textContent = settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
-  $('#pageTitle').textContent = settingsView ? '设置' : detailView ? requirement?.name || '任务不存在' : reqView ? '任务' : '项目与 Worktree';
+  $('#eyebrow').textContent = sessionsView ? 'SESSIONS' : settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
+  $('#pageTitle').textContent = sessionsView ? '会话' : settingsView ? '设置' : detailView ? requirement?.name || '任务不存在' : reqView ? '任务' : '项目';
   $('#pageSubtitle').textContent = settingsView ? '管理执行环境、终端工具与每日更新。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
-  $('#pageSubtitle').hidden = detailView;
+  $('#pageSubtitle').hidden = detailView || sessionsView;
   $('#newButton').innerHTML = `<span>＋</span> ${reqView ? '创建任务' : '添加项目'}`;
   $('#panelTitle').textContent = reqView ? '全部任务' : '已登记项目';
-  $('#search').placeholder = reqView ? '搜索任务名称、分支…' : '搜索项目名称、目录…';
+  $('#search').placeholder = reqView ? '搜索任务名称、说明…' : '搜索项目名称、目录…';
   $('#archiveFilterWrap').hidden = !reqView;
   $('#projectEnvironmentWrap').hidden = reqView;
+  $('#projectAddButton').hidden = state.view !== 'projects';
   renderSettings();
-  $('#rootPath').textContent = reqView && !detailView ? '全部执行环境' : 'WORKSPACE ROOT  ' + state.root;
-  if (settingsView) { if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(null); return; }
-  const trees = allTrees();
-  $('#stats').innerHTML = reqView
-    ? stat('进行中的任务', taskInventory.requirements.filter(q => q.state !== 'archived').length, '汇总所有执行环境', '▤') + stat('已就绪任务', taskInventory.requirements.filter(q => q.state === 'ready').length, '所有项目已准备完成', '✓') + stat('已登记项目', taskInventory.project_count, '所有环境的 Git 仓库', '◇') + stat('任务工作目录', taskInventory.requirements.reduce((sum, q) => sum + q.members.length, 0), '各任务保留原有目录', '⑂')
-    : stat('已登记项目', state.projects.length, '本地独立 Git 仓库', '◇') + stat('全部 Worktree', trees.length, '含主目录及其他工具创建的目录', '⑂') + stat('有修改的目录', trees.filter(t => t.dirty > 0).length, '当前未提交的代码现场', '◌') + stat('未关联任务', trees.filter(t => !t.requirement_id).length, '主目录或其他工作目录', '↳');
+  if (typeof syncSessionWorkspace === 'function') syncSessionWorkspace();
+  if (settingsView || sessionsView) { if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(null); return; }
+  $('#stats').innerHTML = '';
   $('#content').innerHTML = detailView
     ? requirement ? requirementDetail(requirement) : !state.loaded ? empty('暂时无法读取任务', '请检查任务所属环境的连接，可在设置中重新连接。') : empty('这个任务不存在', '可返回任务列表，重新选择一个任务。')
     : reqView ? renderRequirements() : renderProjects();
-  if (requirement) refreshRequirementSessions(requirement.id, false);
+  if (state.view === 'projects') syncProjectResize();
+  if (typeof refreshSessionWorkspace === 'function') refreshSessionWorkspace(false);
   if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(requirement);
   syncTaskDescription();
 }
@@ -145,8 +153,13 @@ async function handleAction(action, target) {
   if (action === 'new-project') return openProject();
   if (action === 'new-worktree') return openWorktree(id);
   if (action === 'new-requirement') return openRequirement();
+  if (action === 'edit-task') return openTaskEdit(id);
+  if (action === 'change-task-directory') return openTaskDirectory(id, target.dataset.project);
+  if (action === 'remove-task-project') return removeTaskProject(id, target.dataset.project);
   if (action === 'add-requirement-projects') return openRequirementProjects(id);
-  if (action === 'select-project') { state.selectedProject = id === state.selectedProject ? null : id; render(); return; }
+  if (action === 'select-project') { state.selectedProject = id; projectDetailOpen = true; render(); $('#projectDetail h2')?.focus({ preventScroll: true }); return; }
+  if (action === 'project-list') { projectDetailOpen = false; render(); $('#content [aria-pressed="true"][data-action="select-project"]')?.focus(); return; }
+  if (action === 'project-filter') { projectFilter = target.dataset.filter; projectDetailOpen = false; render(); $('#content [data-filter="' + projectFilter + '"]')?.focus(); return; }
   if (action === 'jump-requirement') { navigate('/requirements/' + id); return; }
   if (action === 'workspace-terminal') return mutation('正在打开项目终端', async () => {
     const result = await api(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify({ action: 'terminal', path: target.dataset.path }) });
@@ -157,7 +170,7 @@ async function handleAction(action, target) {
     try { const plan = await api(`/api/requirements/${id}/launch`); showCommand(plan.command); } catch (e) { toast(e.message, true); } return;
   }
   if (action === 'launch') return mutation('正在打开 Codex 终端', async () => { const r = await api(`/api/requirements/${id}/launch`, { method: 'POST', body: '{}' }); toast(r.message); });
-  if (action === 'retry') return mutation('正在重试失败项目', async () => { const q = await api(`/api/requirements/${id}/retry`, { method: 'POST', body: '{}' }); toast(q.state === 'ready' ? '全部项目已就绪' : '仍有项目未就绪，请查看失败原因', q.state !== 'ready'); });
+  if (action === 'retry') return mutation('正在重试失败项目', async () => { const q = await api(`/api/requirements/${id}/retry`, { method: 'POST', body: JSON.stringify({project_id: target.dataset.project || ''}) }); toast(q.state === 'ready' ? '全部项目已就绪' : '仍有项目未就绪，请查看失败原因', q.state !== 'ready'); });
   if (action === 'archive') {
     const q = state.requirements.find(q => q.id === id);
     return mutation('正在更新任务状态', async () => { const r = await api(`/api/requirements/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived: q.state !== 'archived' }) }); toast(r.message); });
@@ -180,7 +193,7 @@ document.addEventListener('click', event => {
 });
 $('#newButton').addEventListener('click', () => state.view === 'requirements' ? openRequirement() : openProject());
 $('#refreshButton').addEventListener('click', () => refresh(true));
-$('#search').addEventListener('input', render);
+$('#search').addEventListener('input', () => { if (state.view === 'projects') projectDetailOpen = false; render(); });
 $('#archiveFilter').addEventListener('change', render);
 document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (state.busy) event.preventDefault(); }));
 

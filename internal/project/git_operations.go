@@ -54,7 +54,12 @@ type GitAction struct {
 }
 
 func (a *Service) RegisteredProject(ctx context.Context, id string) (model.Project, error) {
-	ps, err := a.Workspace.Store.ProjectMap()
+	return LookupProject(ctx, a.Workspace, id)
+}
+
+// LookupProject validates the registered repository without starting a status cache.
+func LookupProject(ctx context.Context, environment *workspace.Service, id string) (model.Project, error) {
+	ps, err := environment.Store.ProjectMap()
 	if err != nil {
 		return model.Project{}, err
 	}

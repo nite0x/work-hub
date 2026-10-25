@@ -39,7 +39,9 @@ func (a *Service) LaunchHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Service) LaunchCodexPlan(w http.ResponseWriter, p model.LaunchPlan) {
-	if a.Workspace.ReadOnlySessions || runtime.GOOS == "windows" || a.Workspace.Remote != nil {
+	// The managed terminal relay verifies peers through Linux /proc. Other
+	// platforms use the normal terminal launcher while in-app chat stays enabled.
+	if a.Workspace.ReadOnlySessions || runtime.GOOS != "linux" || a.Workspace.Remote != nil {
 		if err := a.Workspace.LaunchSimpleTerminal(p); err != nil {
 			httpx.WriteJSON(w, 503, map[string]string{"error": err.Error(), "command": p.Command})
 			return

@@ -1,6 +1,7 @@
 'use strict';
 const requirementSessions = new Map();
 let sessionPickerRequirement = null;
+let sessionPickerEnvironment = null;
 let sessionPickerCursor = null;
 let sessionPickerLoading = false;
 let sessionPickerGeneration = 0;
@@ -26,7 +27,7 @@ function saveSessionRead(session) {
 }
 function sessionWithUnread(session) {
   const seen = sessionReadProgress(session);
-  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && !document.hidden && !document.getElementById('taskConversation')?.hidden;
+  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && (!sessionHistoryState.environment || sessionHistoryState.environment === activeEnvironment) && !document.hidden && (typeof conversationReadingSession === 'function' ? conversationReadingSession(session.id) : !document.getElementById('taskConversation')?.hidden);
   if (open) saveSessionRead(session);
   return { ...session, unread: !open && ((session.updated_at || 0) > seen.time || !!session.completed_run && session.completed_run !== seen.run) };
 }
@@ -35,14 +36,18 @@ function markSessionRead(requirement, session) {
   if (item) { saveSessionRead(item); updateRequirementSessionsView(requirement); }
 }
 function updateSessionChatActivity(requirement, session, chat) {
-  const item = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
-  if (!item) return;
-  const status = chat.busy ? chat.status : '';
-  const completed = !chat.busy && chat.turn_id ? chat.id : item.completed_run;
-  if (item.chat_status === status && item.completed_run === completed) return;
-  item.chat_status = status;
-  item.completed_run = completed;
-  updateRequirementSessionsView(requirement);
+  if (typeof browserSessionActivity === 'function') browserSessionActivity(session, chat);
+  // Every task sharing this directory observes the same session activity.
+  for (const [id, data] of requirementSessions) {
+    const item = data.sessions.find(s => s.id === session);
+    if (!item) continue;
+    const status = chat.busy ? chat.status : '';
+    const completed = !chat.busy && chat.turn_id ? chat.id : item.completed_run;
+    if (item.chat_status === status && item.completed_run === completed) continue;
+    item.chat_status = status;
+    item.completed_run = completed;
+    updateRequirementSessionsView(id);
+  }
 }
 
 function sessionTime(value) {
@@ -85,7 +90,7 @@ async function refreshRequirementSessions(id, force = true) {
   const data = { sessions: previous?.sessions || [], loading: true, error: '', checkedAt: Date.now() };
   requirementSessions.set(id, data);
   try {
-    const result = await api(`/api/requirements/${encodeURIComponent(id)}/sessions`);
+    const result = await api(`/api/sessions?task_id=${encodeURIComponent(id)}&linked=true`);
     data.sessions = result.sessions;
     data.error = result.error || '';
   } catch (error) { data.error = error.message; }
@@ -109,11 +114,16 @@ async function loadSessionPicker(more = false) {
   if (more && sessionPickerCursor) params.set('cursor', sessionPickerCursor);
   if (sessionPickerSearch) params.set('search', sessionPickerSearch);
   try {
-    const page = await api('/api/codex/sessions?' + params);
+    const [page, nearby] = await Promise.all([
+      api('/api/codex/sessions?' + params, {environment:sessionPickerEnvironment}),
+      !more && !sessionPickerSearch ? api('/api/sessions?task_id=' + encodeURIComponent(sessionPickerRequirement), {environment:sessionPickerEnvironment}).catch(() => ({sessions:[]})) : Promise.resolve({sessions:[]}),
+    ]);
     if (generation !== sessionPickerGeneration) return;
     const byID = new Map((more ? sessionPickerItems : []).map(s => [s.id, s]));
-    page.data.forEach(s => byID.set(s.id, s));
-    sessionPickerItems = [...byID.values()];
+    [...nearby.sessions, ...page.data].forEach(s => byID.set(s.id, s));
+    const task = state.requirements.find(q => q.id === sessionPickerRequirement);
+    const paths = new Set(task ? [task.path,...task.members.map(m => m.path)] : []);
+    sessionPickerItems = [...byID.values()].sort((a,b) => Number(paths.has(b.cwd))-Number(paths.has(a.cwd)));
     sessionPickerCursor = page.nextCursor;
     renderSessionPicker();
   } catch (error) {
@@ -126,9 +136,11 @@ async function loadSessionPicker(more = false) {
 
 async function linkPickedSession(id) {
   const requirement = sessionPickerRequirement;
+  const environment = sessionPickerEnvironment;
   await mutation('正在关联会话', async () => {
-    const result = await api(`/api/requirements/${encodeURIComponent(requirement)}/sessions`, { method: 'POST', body: JSON.stringify({ session_id: id }) });
-    await refreshRequirementSessions(requirement);
+    const result = await api(`/api/requirements/${encodeURIComponent(requirement)}/sessions`, { environment, method: 'POST', body: JSON.stringify({ session_id: id }) });
+    if (environment === activeEnvironment) await refreshRequirementSessions(requirement);
+    window.dispatchEvent(new CustomEvent('workhub:task-sessions', {detail:{task:requirement, environment}}));
     $('#sessionDialog').close();
     toast(result.message);
   }, $('#sessionPickerError'));
@@ -143,6 +155,8 @@ document.addEventListener('click', async event => {
   if (action === 'picker') {
     if (sessionPickerLoading) return;
     sessionPickerRequirement = id;
+    sessionPickerEnvironment = activeEnvironment;
+    refreshRequirementSessions(id).then(() => { if (sessionPickerRequirement === id && $('#sessionDialog').open) renderSessionPicker(); });
     sessionPickerGeneration++;
     sessionPickerCursor = null;
     sessionPickerSearch = '';
@@ -153,7 +167,7 @@ document.addEventListener('click', async event => {
   }
   if (action === 'link') return linkPickedSession(target.dataset.session);
   if (action === 'resume') return mutation('正在打开会话终端', async () => {
-    const result = await api(`/api/requirements/${encodeURIComponent(id)}/sessions/${encodeURIComponent(target.dataset.session)}/resume`, { method: 'POST', body: '{}' });
+    const result = await api(`/api/sessions/${encodeURIComponent(target.dataset.session)}/resume`, { method: 'POST', body: '{}' });
     toast(result.message);
   });
 });

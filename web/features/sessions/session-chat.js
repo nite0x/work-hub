@@ -3,8 +3,8 @@ const chatDrafts = new Map();
 const chatLabels = { idle: '可以在这里继续对话', starting: '正在连接并核实会话占用…', running: 'Codex 正在工作…', waiting: '等待你的审批或回答', stopping: '正在请求停止…', completed: '本轮已完成', interrupted: '本轮已停止', failed: '本轮未完成，请检查进展', conflict: '会话暂不可发送' };
 chatLabels.handoff = '正在交接：等待终端本轮工作结束…';
 
-function chatPath(current) { return `/api/requirements/${encodeURIComponent(current.requirement)}/sessions/${encodeURIComponent(current.session)}/chat`; }
-function chatDraftKey(current) { return JSON.stringify([current.environment || (typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment), current.requirement, current.session || 'new']); }
+function chatPath(current) { return `/api/sessions/${encodeURIComponent(current.session)}/chat`; }
+function chatDraftKey(current) { return JSON.stringify([current.environment || (typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment), current.session ? 'session' : current.target || current.requirement, current.session || 'new']); }
 function renderChatTimeline(current) {
   const live = current.chat?.entries || [];
   const liveIDs = new Set(live.map(e => e.turn_id + ':' + e.id));
@@ -28,7 +28,7 @@ function renderChatTimeline(current) {
 }
 function renderChatControls(current) {
   const chat = current.chat;
-  const ready = state.requirements.find(q => q.id === current.requirement)?.state === 'ready';
+  const ready = !!current.session || !!current.target || state.requirements.find(q => q.id === current.requirement)?.state === 'ready';
   const isNew = !current.session;
   $('#sendSessionChat').disabled = !ready || current.submitting || !chat || chat.busy || !!chat.blocked || !$('#sessionChatInput').value.trim();
   $('#stopSessionChat').disabled = !chat?.busy || current.stopping || chat.status === 'stopping';

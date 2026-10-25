@@ -1,9 +1,12 @@
 package app
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/platform"
 	"worktree-hub/internal/project"
 	"worktree-hub/internal/session"
 	"worktree-hub/internal/task"
@@ -11,15 +14,17 @@ import (
 )
 
 type App struct {
-	Workspace    *workspace.Service
-	Projects     *project.Service
-	Tasks        *task.Service
-	Sessions     *session.Service
-	token        string
-	environments *environmentHub
-	shutdown     func()
-	closeOnce    sync.Once
-	closeErr     error
+	Workspace           *workspace.Service
+	Projects            *project.Service
+	Tasks               *task.Service
+	Sessions            *session.Service
+	token               string
+	environments        *environmentHub
+	shutdown            func()
+	closeOnce           sync.Once
+	closeErr            error
+	pickDirectory       func(context.Context) (string, error)
+	directoryPickerBusy atomic.Bool
 }
 
 func openApp(dataDir, root string) (*App, error) { return openAppForWorkspace(dataDir, root, nil) }
@@ -29,7 +34,7 @@ func openAppForWorkspace(dataDir, root string, remote *workspace.Client) (*App, 
 		return nil, err
 	}
 	tasks := task.New(env)
-	return &App{Workspace: env, Tasks: tasks, Projects: project.New(env), Sessions: session.New(env, tasks), token: model.NewID() + model.NewID()}, nil
+	return &App{Workspace: env, Tasks: tasks, Projects: project.New(env), Sessions: session.New(env, tasks), token: model.NewID() + model.NewID(), pickDirectory: platform.PickDirectory}, nil
 }
 
 // Close releases the resources owned by this application, including partially

@@ -52,7 +52,7 @@ async function startHistoryPush(current) {
   current.pushAbort = controller;
   const environment = activeEnvironment;
   try {
-    const response = await fetch(`/api/requirements/${encodeURIComponent(current.requirement)}/sessions/${encodeURIComponent(current.session)}/history/events`, {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(current.session)}/history/events`, {
       headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal: controller.signal
     });
     if (!response.ok) { const body = await response.json(); throw new Error(body.error || '实时连接失败'); }

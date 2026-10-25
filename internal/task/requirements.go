@@ -34,6 +34,9 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	defer a.Workspace.Mu.Unlock()
 	in.Name = strings.TrimSpace(in.Name)
 	in.Slug = strings.TrimSpace(in.Slug)
+	if in.Slug == "" {
+		in.Slug = "task-" + model.NewID()[:12]
+	}
 	in.Branch = strings.TrimSpace(in.Branch)
 	if in.Name == "" || len([]rune(in.Name)) > 100 || len(in.Description) > 20000 {
 		httpx.WriteError(w, 400, "请填写任务名称（最多 100 字），说明最多 20000 字节")
@@ -51,12 +54,18 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 		httpx.DbError(w, err)
 		return
 	}
-	if _, ok := ps[in.PrimaryProjectID]; !ok {
-		httpx.WriteError(w, 400, "请选择已登记的主项目")
-		return
+	if in.PrimaryProjectID != "" {
+		if _, ok := ps[in.PrimaryProjectID]; !ok {
+			httpx.WriteError(w, 400, "请选择已登记的主项目")
+			return
+		}
 	}
-	ids := []string{in.PrimaryProjectID}
-	seen := map[string]bool{in.PrimaryProjectID: true}
+	ids := []string{}
+	seen := map[string]bool{}
+	if in.PrimaryProjectID != "" {
+		ids = append(ids, in.PrimaryProjectID)
+		seen[in.PrimaryProjectID] = true
+	}
 	for _, id := range in.ProjectIDs {
 		if !seen[id] {
 			if _, ok := ps[id]; !ok {
@@ -82,9 +91,12 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 			seen[selection.ProjectID] = true
 		}
 	}
-	if len(ids) > 30 {
-		httpx.WriteError(w, 400, "单个任务最多包含 30 个项目")
+	if len(ids) == 0 || len(ids) > 30 {
+		httpx.WriteError(w, 400, "请选择 1–30 个项目")
 		return
+	}
+	if in.PrimaryProjectID == "" {
+		in.PrimaryProjectID = ids[0]
 	}
 	var count int
 	if err := a.Workspace.Store.DB.QueryRow(`SELECT count(*) FROM requirements WHERE slug=? COLLATE NOCASE`, in.Slug).Scan(&count); err != nil {
@@ -124,21 +136,26 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	for _, m := range q.Members {
 		hasNew = hasNew || m.Mode == "new"
 	}
+	q.HasWorkspace = hasNew
 	if !hasNew {
 		q.Branch = ""
 	}
-	if err := workspace.Mkdir(r.Context(), directory, 0755, false); err != nil {
-		httpx.WriteError(w, 409, "无法创建工作区目录："+err.Error())
-		return
+	if hasNew {
+		if err := workspace.Mkdir(r.Context(), directory, 0755, false); err != nil {
+			httpx.WriteError(w, 409, "无法创建工作区目录："+err.Error())
+			return
+		}
 	}
 	tx, err := a.Workspace.Store.DB.Begin()
 	if err != nil {
-		_ = workspace.Remove(r.Context(), directory)
+		if hasNew {
+			_ = workspace.Remove(r.Context(), directory)
+		}
 		httpx.DbError(w, err)
 		return
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO requirements(id,name,slug,description,branch,path,primary_project_id,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, q.ID, q.Name, q.Slug, q.Description, q.Branch, q.Path, q.PrimaryProjectID, q.State, q.CreatedAt)
+	_, err = tx.Exec(`INSERT INTO requirements(id,name,slug,description,branch,path,primary_project_id,state,created_at,has_workspace) VALUES(?,?,?,?,?,?,?,?,?,?)`, q.ID, q.Name, q.Slug, q.Description, q.Branch, q.Path, q.PrimaryProjectID, q.State, q.CreatedAt, q.HasWorkspace)
 	if err == nil {
 		for _, m := range q.Members {
 			_, err = tx.Exec(`INSERT INTO members(requirement_id,project_id,path,base_commit,state,mode,base_ref,branch) VALUES(?,?,?,?,?,?,?,?)`, q.ID, m.ProjectID, m.Path, m.BaseCommit, m.State, m.Mode, m.BaseRef, m.Branch)
@@ -151,7 +168,9 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 		err = tx.Commit()
 	}
 	if err != nil {
-		_ = workspace.Remove(r.Context(), directory)
+		if hasNew {
+			_ = workspace.Remove(r.Context(), directory)
+		}
 		httpx.DbError(w, err)
 		return
 	}
@@ -277,6 +296,12 @@ func writeBrief(q model.Requirement) error {
 	return WriteBriefContext(context.Background(), q)
 }
 func WriteBriefContext(ctx context.Context, q model.Requirement) error {
+	if !q.HasWorkspace {
+		return nil
+	}
+	if _, err := workspace.Stat(ctx, q.Path, false); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n%s\n\n## 项目与工作目录\n\n各项目使用下列工作目录；新建工作目录的来源与提交分别记录。\n\n", q.Name, q.Description)
 	for _, m := range q.Members {
@@ -302,6 +327,12 @@ func WriteBriefContext(ctx context.Context, q model.Requirement) error {
 	return nil
 }
 func (a *Service) RetryHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ProjectID string `json:"project_id"`
+	}
+	if r.ContentLength != 0 && !httpx.Decode(w, r, &input) {
+		return
+	}
 	a.Workspace.Mu.Lock()
 	defer a.Workspace.Mu.Unlock()
 	q, err := a.Workspace.Store.Requirement(r.PathValue("id"))
@@ -317,18 +348,36 @@ func (a *Service) RetryHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, "请先取消归档")
 		return
 	}
-	resolved, err := workspace.Eval(r.Context(), q.Path)
-	// Existing requirements retain their persisted location when --root changes.
-	if err != nil || !platform.SameWorkspacePath(resolved, q.Path) || !platform.AbsoluteWorkspacePath(q.Path) || platform.BaseWorkspacePath(q.Path) != q.Slug {
-		httpx.WriteError(w, 422, "工作区目录丢失或被移动，请先恢复原目录")
-		return
+	var selected map[string]bool
+	if input.ProjectID != "" {
+		selected = map[string]bool{input.ProjectID: true}
+		found := false
+		for _, m := range q.Members {
+			found = found || m.ProjectID == input.ProjectID
+		}
+		if !found {
+			httpx.WriteError(w, 404, "项目未关联当前任务")
+			return
+		}
+	}
+	needsWorkspace := false
+	for _, m := range q.Members {
+		if (selected == nil || selected[m.ProjectID]) && m.Mode != "project" && m.Mode != "worktree" {
+			needsWorkspace = true
+		}
+	}
+	if needsWorkspace {
+		if err := ensureTaskWorkspace(r.Context(), q); err != nil {
+			httpx.WriteError(w, 422, err.Error())
+			return
+		}
 	}
 	ps, err := a.Workspace.Store.ProjectMap()
 	if err != nil {
 		httpx.DbError(w, err)
 		return
 	}
-	if err := a.Prepare(r.Context(), &q, ps); err != nil {
+	if err := a.PrepareMembers(r.Context(), &q, ps, selected); err != nil {
 		httpx.DbError(w, err)
 		return
 	}

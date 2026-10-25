@@ -282,20 +282,22 @@ func (s *HistoryPush) apply(session string, event codex.Event) bool {
 		if !ok {
 			return false
 		}
-		if entry.Kind == "assistant" {
+		if entry.Kind == "assistant" || entry.Kind == "activity" && entry.Status == "" {
 			entry.Status = "completed"
 			if event.Method == "item/started" {
 				entry.Status = "inProgress"
 			}
 		}
 		s.upsert(entry)
-	case "item/agentMessage/delta", "item/commandExecution/outputDelta":
+	case "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/plan/delta":
 		index := slices.IndexFunc(s.Entries, func(e HistoryEntry) bool { return e.ID == p.ItemID && e.TurnID == p.TurnID })
 		entry := HistoryEntry{ID: p.ItemID, TurnID: p.TurnID, Status: "inProgress"}
 		if index >= 0 {
 			entry = s.Entries[index]
 		}
-		if event.Method == "item/agentMessage/delta" {
+		if event.Method == "item/plan/delta" {
+			entry.Kind, entry.Tool, entry.Text = "activity", "计划", entry.Text+p.Delta
+		} else if event.Method == "item/agentMessage/delta" {
 			entry.Kind, entry.Text = "assistant", entry.Text+p.Delta
 		} else {
 			entry.Kind = "command"
@@ -331,6 +333,7 @@ func (a *Service) SessionHistoryEventsHandler(w http.ResponseWriter, r *http.Req
 	controller := http.NewResponseController(w)
 	emit := func(state HistoryPush) error {
 		_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		a.prepareHistoryMedia(r.PathValue("session"), state.Entries)
 		raw, err := json.Marshal(state)
 		if err != nil {
 			return err

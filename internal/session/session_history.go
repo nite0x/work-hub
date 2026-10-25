@@ -1,12 +1,11 @@
 package session
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/httpx"
@@ -15,18 +14,22 @@ import (
 // Only user-visible messages and command records cross the HTTP boundary.
 // Do not forward raw thread items (which can contain internal reasoning).
 type HistoryEntry struct {
-	ID            string  `json:"id"`
-	TurnID        string  `json:"turn_id"`
-	Kind          string  `json:"kind"`
-	Text          string  `json:"text,omitempty"`
-	Command       string  `json:"command,omitempty"`
-	Cwd           string  `json:"cwd,omitempty"`
-	Status        string  `json:"status,omitempty"`
-	Output        *string `json:"output"`
-	ExitCode      *int    `json:"exit_code"`
-	DurationMs    *int64  `json:"duration_ms"`
-	StartedAtMs   *int64  `json:"started_at_ms"`
-	CompletedAtMs *int64  `json:"completed_at_ms"`
+	LocalImages     map[string]string `json:"local_images,omitempty"`
+	LocalImagePaths []string          `json:"-"`
+	ID              string            `json:"id"`
+	TurnID          string            `json:"turn_id"`
+	Kind            string            `json:"kind"`
+	Text            string            `json:"text,omitempty"`
+	Command         string            `json:"command,omitempty"`
+	Cwd             string            `json:"cwd,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	Output          *string           `json:"output"`
+	ExitCode        *int              `json:"exit_code"`
+	DurationMs      *int64            `json:"duration_ms"`
+	StartedAtMs     *int64            `json:"started_at_ms"`
+	CompletedAtMs   *int64            `json:"completed_at_ms"`
+	Tool            string            `json:"tool,omitempty"`
+	Images          []string          `json:"images,omitempty"`
 }
 
 type codexHistoryItem struct {
@@ -40,6 +43,11 @@ type codexHistoryItem struct {
 	AggregatedOutput *string         `json:"aggregatedOutput"`
 	ExitCode         *int            `json:"exitCode"`
 	DurationMs       *int64          `json:"durationMs"`
+	Server           string          `json:"server"`
+	Tool             string          `json:"tool"`
+	Query            string          `json:"query"`
+	Path             string          `json:"path"`
+	Review           string          `json:"review"`
 	Changes          []struct {
 		Path string `json:"path"`
 		Diff string `json:"diff"`
@@ -70,6 +78,7 @@ func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
 			Text string `json:"text"`
 			Path string `json:"path"`
 			Name string `json:"name"`
+			URL  string `json:"url"`
 		}
 		if err := json.Unmarshal(i.Content, &inputs); err != nil {
 			e.Text = "[无法读取此消息内容]"
@@ -81,9 +90,16 @@ func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
 			case "text":
 				parts = append(parts, input.Text)
 			case "image":
-				parts = append(parts, "[图片附件]")
+				// Only validated inline images cross this boundary. Never fetch an
+				// arbitrary URL or expose local files through a history preview.
+				if len(e.Images) < 4 && validateChatImages([]string{input.URL}) == nil {
+					e.Images = append(e.Images, input.URL)
+				} else {
+					parts = append(parts, "[图片附件]")
+				}
 			case "localImage":
-				parts = append(parts, "[图片附件] "+input.Path)
+				e.LocalImagePaths = append(e.LocalImagePaths, input.Path)
+				e.Images = append(e.Images, input.Path)
 			case "audio", "localAudio":
 				parts = append(parts, "[音频附件]")
 			case "skill":
@@ -100,8 +116,35 @@ func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
 	case "commandExecution":
 		e.Kind, e.Command, e.Cwd, e.Status = "command", i.Command, i.Cwd, i.Status
 		e.Output, e.ExitCode, e.DurationMs = i.AggregatedOutput, i.ExitCode, i.DurationMs
+	case "fileChange":
+		e.Kind, e.Status = "change", i.Status
+		for _, change := range i.Changes {
+			e.Text += change.Path + "\n" + change.Diff + "\n"
+		}
+	case "plan":
+		e.Kind, e.Text, e.Tool = "activity", i.Text, "计划"
+	case "mcpToolCall", "dynamicToolCall", "collabAgentToolCall":
+		// Tool names/status are useful progress. Raw arguments/results may
+		// contain credentials or internal payloads and stay with Codex.
+		e.Kind, e.Tool, e.Status, e.DurationMs = "activity", i.Tool, i.Status, i.DurationMs
+		if i.Server != "" {
+			e.Tool = i.Server + " · " + i.Tool
+		}
+	case "webSearch":
+		e.Kind, e.Tool, e.Text = "activity", "网页搜索", i.Query
+	case "imageView":
+		e.Kind, e.Tool, e.Text = "activity", "查看图片", i.Path
+	case "contextCompaction":
+		e.Kind, e.Tool, e.Text = "activity", "上下文整理", "Codex 已整理会话上下文"
+	case "enteredReviewMode", "exitedReviewMode":
+		e.Kind, e.Tool, e.Text = "activity", "代码审查", i.Review
 	default:
 		return e, false
+	}
+	e.Text = boundedChatText(e.Text)
+	if e.Output != nil {
+		out := boundedChatText(*e.Output)
+		e.Output = &out
 	}
 	return e, true
 }
@@ -112,6 +155,7 @@ func readSessionHistory(c codex.SessionClient, s codex.Session, cursor string) (
 	// response as well; the actual messages are represented by entries below.
 	history.Session.Name = sessionName(s)
 	history.Session.Preview = ""
+	history.Session.Path = ""
 	params := map[string]any{"threadId": s.ID, "sortDirection": "desc"}
 	if cursor != "" {
 		params["cursor"] = cursor
@@ -160,26 +204,9 @@ func readSessionHistory(c codex.SessionClient, s codex.Session, cursor string) (
 }
 
 func (a *Service) HistorySessionAllowed(w http.ResponseWriter, r *http.Request) bool {
-	a.Workspace.Mu.Lock()
-	_, ok := a.SessionRequirement(w, r)
-	if !ok {
-		a.Workspace.Mu.Unlock()
-		return false
-	}
-	var id string
-	err := a.Workspace.Store.DB.QueryRow(`SELECT session_id FROM requirement_sessions WHERE requirement_id=? AND session_id=?`, r.PathValue("id"), r.PathValue("session")).Scan(&id)
-	a.Workspace.Mu.Unlock()
-	if errors.Is(err, sql.ErrNoRows) {
-		httpx.WriteError(w, 404, "会话未关联到该任务，请先关联")
-		return false
-	}
-	if err != nil {
-		httpx.DbError(w, err)
-		return false
-	}
-	return true
+	_, ok := a.requestSession(w, r)
+	return ok
 }
-
 func (a *Service) SessionHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	if !a.HistorySessionAllowed(w, r) {
 		return
@@ -190,15 +217,24 @@ func (a *Service) SessionHistoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer c.Close()
+	titleObservedAt := time.Now().UnixNano()
 	s, err := readSession(c, r.PathValue("session"))
 	if err != nil {
 		httpx.WriteError(w, 503, "无法读取会话详情："+err.Error())
 		return
+	}
+	if err := a.SaveSession("", s, "codex", titleObservedAt); err != nil {
+		httpx.DbError(w, err)
+		return
+	}
+	if cached, err := a.Workspace.Store.Session(s.ID); err == nil {
+		s.Name = cached.Name
 	}
 	history, err := readSessionHistory(c, s, r.URL.Query().Get("cursor"))
 	if err != nil {
 		httpx.WriteError(w, 503, "无法读取会话历史："+err.Error())
 		return
 	}
+	a.prepareHistoryMedia(s.ID, history.Entries)
 	httpx.WriteJSON(w, 200, history)
 }

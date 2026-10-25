@@ -29,6 +29,10 @@ try {
   const host = JSON.parse((await run(binary, ['--desktop-start', '--data', data, '--root', workspace])).stdout);
   running = true;
   const descriptor = JSON.parse(await readFile(path.join(data, 'service.json'), 'utf8'));
+  assert.equal(descriptor.read_only_sessions, false);
+  const page = await (await fetch(host.url)).text();
+  assert.match(page, /name="session-mode" content="interactive"/);
+  assert.match(page, /src="\/features\/sessions\/session-create.js"/);
   const headers = { 'X-CSRF-Token': descriptor.token, 'Content-Type': 'application/json' };
   const request = async (endpoint, method = 'GET', body, expected = 200) => {
     const response = await fetch(host.url + endpoint, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -109,7 +113,11 @@ try {
   assert.deepEqual(history.entries.map(e => e.kind), ['user', 'command', 'assistant']);
   assert.equal(history.entries[1].exit_code, 0);
   assert(history.entries[1].output.includes('本地修改.txt'));
-  await request(`/api/requirements/${task.id}/sessions/${session.id}/chat`, 'POST', { text: 'must not run' }, 405);
+  const chat = await request(`/api/requirements/${task.id}/sessions/${session.id}/chat`);
+  assert.equal(chat.status, 'idle');
+  assert.equal(chat.blocked || '', '');
+  // Validation reaches the creation handler; no actual turn is started.
+  await request(`/api/requirements/${task.id}/sessions/new`, 'POST', {}, 400);
   const calls = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   assert(calls.every(call => !['thread/start', 'turn/start', 'thread/resume'].includes(call.rpc)));
   await request(`/api/requirements/${task.id}/archive`, 'POST', { archived: true });

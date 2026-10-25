@@ -2,6 +2,10 @@
 let requirementEnvironmentData = null;
 let requirementPickerRevision = 0;
 let requirementPickerTimer;
+let requirementDraftSlug = '';
+let requirementDraftToken = '';
+let taskEditContext = null;
+let taskDirectoryContext = null;
 // Both task dialogs use the same per-project directory and branch choices.
 const taskProjectPickers = new Map();
 const expandedTaskDescriptions = new Set();
@@ -44,7 +48,7 @@ function renderTaskProjectPicker(selector, projects, selected, environment, defa
   const picker = taskProjectPickers.get(selector);
   const rows = projects.map(p => {
     let choice = picker.choices.get(p.id);
-    if (!choice) { choice = { mode: 'project', path: '', source: '', branch: defaultBranch, branchEdited: false }; picker.choices.set(p.id, choice); }
+    if (!choice) { choice = { mode: 'new', path: '', source: '', branch: defaultBranch, branchEdited: false }; picker.choices.set(p.id, choice); }
     if (!choice.branchEdited) choice.branch = defaultBranch;
     const v = picker.overviews.get(p.id);
     const trees = (v?.project.worktrees || p.worktrees || []).filter(t => !t.bare && !t.missing && !t.prunable && !t.error && t.path !== p.path);
@@ -70,6 +74,7 @@ function renderTaskProjectPicker(selector, projects, selected, environment, defa
 function refreshTaskProjectPicker(selector) {
   if (selector === '#projectPicker' && $('#requirementDialog').open) renderRequirementProjectOptions();
   if (selector === '#requirementProjectPicker' && $('#requirementProjectsDialog').open) refreshRequirementProjectPicker();
+  if (selector === '#taskDirectoryPicker' && $('#taskDirectoryDialog').open) refreshTaskDirectoryPicker();
 }
 
 function taskProjectPickerInput(selector, event) {
@@ -96,9 +101,9 @@ function taskMemberReusesDirectory(m) { return window.WorkHubUI.reusesDirectory(
 
 function renderRequirements() {
   if (!taskInventory.loaded) return '<div class="loading">正在读取全部环境的任务…</div>';
-  if (!taskInventory.requirements.length) return empty('为下一项开发工作，创建一个任务', '选择执行环境，再选择该环境的主项目与参与项目，使用已有目录或新建工作目录。', 'new-requirement', '创建第一个任务');
+  if (!taskInventory.requirements.length) return empty('为下一项开发工作，创建一个任务', '选择项目及其工作目录，围绕同一个目标组织开发工作。', 'new-requirement', '创建第一个任务');
   const text = $('#search').value.trim().toLowerCase();
-  const reqs = taskInventory.requirements.filter(q => ($('#archiveFilter').checked || q.state !== 'archived') && `${q.name} ${q.slug} ${q.branch} ${taskBranchSummary(q)} ${q.environment_name}`.toLowerCase().includes(text));
+  const reqs = taskInventory.requirements.filter(q => ($('#archiveFilter').checked || q.state !== 'archived') && `${q.name} ${q.description || ''} ${q.slug} ${q.branch} ${taskBranchSummary(q)} ${q.environment_name}`.toLowerCase().includes(text));
   if (!reqs.length) return empty('没有匹配的任务', '尝试其他关键词，或勾选“显示归档”。');
   return window.WorkHubUI.tasks(reqs);
 }
@@ -114,6 +119,8 @@ function requirementDetail(q) {
 function openRequirement() {
   if (state.busy) return;
   resetTaskProjectPicker('#projectPicker');
+  requirementDraftToken = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  requirementDraftSlug = 'task-' + requirementDraftToken;
   const form = $('#requirementForm'); form.reset(); $('#requirementError').hidden = true;
   $('#requirementEnvironment').innerHTML = environmentOptions();
   $('#requirementEnvironment').value = activeEnvironment;
@@ -125,11 +132,7 @@ function renderRequirementProjectOptions(selectID = null) {
   const projects = requirementEnvironmentData?.projects || [];
   const selected = new Set([...$('#projectPicker').querySelectorAll('input:checked')].map(input => input.value));
   if (selectID) selected.add(selectID);
-  const primary = $('#primaryProject').value;
-  $('#primaryProject').innerHTML = '<option value="">请选择主项目</option>' + projects.map(p => `<option value="${esc(p.id)}" ${p.error ? 'disabled' : ''}>${esc(p.name)}${p.error ? '（不可用）' : ''}</option>`).join('');
-  if (projects.some(p => p.id === primary && !p.error)) $('#primaryProject').value = primary;
-  if (primary) selected.add(primary);
-  renderTaskProjectPicker('#projectPicker', projects, selected, $('#requirementEnvironment').value, 'codex/' + $('#requirementForm').elements.slug.value);
+  renderTaskProjectPicker('#projectPicker', projects, selected, $('#requirementEnvironment').value, 'codex/' + requirementDraftSlug);
   updatePreview();
 }
 
@@ -141,8 +144,6 @@ async function loadRequirementProjects(preserveSelection = false, selectID = nul
   $('#requirementError').hidden = true;
   if (!preserveSelection) {
     requirementEnvironmentData = null;
-    $('#primaryProject').value = '';
-    $('#primaryProject').innerHTML = '<option value="">正在读取项目…</option>';
     $('#projectPicker').textContent = '正在连接执行环境…';
     resetTaskProjectPicker('#projectPicker');
     $('#workspacePreview').textContent = '';
@@ -156,7 +157,6 @@ async function loadRequirementProjects(preserveSelection = false, selectID = nul
   } catch (error) {
     if (revision !== requirementPickerRevision || !$('#requirementDialog').open) return;
     requirementEnvironmentData = null;
-    $('#primaryProject').innerHTML = '<option value="">无法读取项目</option>';
     $('#projectPicker').textContent = '';
     $('#requirementError').textContent = error.message;
     $('#requirementError').hidden = false;
@@ -164,22 +164,15 @@ async function loadRequirementProjects(preserveSelection = false, selectID = nul
 }
 
 function updatePreview() {
-  const form = $('#requirementForm');
   const projects = requirementEnvironmentData?.projects || [];
-  const primary = form.elements.primary_project_id.value;
-  $('#projectPicker').querySelectorAll('input[name="project_ids"]').forEach(input => {
-    const project = projects.find(p => p.id === input.value);
-    if (input.value === primary) input.checked = true;
-    input.disabled = input.value === primary || !!project?.error;
-  });
-  const selected = [...$('#projectPicker').querySelectorAll('input:checked')].map(i => projects.find(p => p.id === i.value)).filter(Boolean);
-  const path = workspaceDisplayPath(requirementEnvironmentData?.root || '', form.elements.slug.value || '<目录标识>');
   const members = taskPickerSelection('#projectPicker');
-  $('#workspacePreview').textContent = path + '/  ← 任务说明\n' + members.map(m => {
+  const path = workspaceDisplayPath(requirementEnvironmentData?.root || '', requirementDraftSlug);
+  $('#workspacePreview').textContent = members.length ? members.map(m => {
     const p = projects.find(p => p.id === m.project_id);
-    return (m.mode === 'new' ? workspaceDisplayPath(path, p.folder) + '（新建）' : m.mode === 'project' ? p.path + '（项目原目录）' : (m.path || '请选择已有 Worktree')) + (p.id === primary ? '  ← 主项目' : '');
-  }).join('\n');
-  $('#requirementSubmit').disabled = !requirementEnvironmentData || requirementEnvironmentData.environment !== $('#requirementEnvironment').value || !projects.some(p => p.id === primary && !p.error) || selected.length > 30 || !taskProjectPickerReady('#projectPicker');
+    if (!p) return '';
+    return p.name + ' · ' + (m.mode === 'new' ? workspaceDisplayPath(path, p.folder) + '（新建 · ' + m.branch + '）' : m.mode === 'project' ? p.path + '（项目原目录）' : (m.path || '请选择已有 Worktree'));
+  }).join('\n') : '选择参与项目后，确认各项目实际使用的目录。';
+  $('#requirementSubmit').disabled = !requirementEnvironmentData || requirementEnvironmentData.environment !== $('#requirementEnvironment').value || !members.length || members.length > 30 || !taskProjectPickerReady('#projectPicker');
 }
 
 $('#requirementEnvironment').addEventListener('change', () => loadRequirementProjects());
@@ -195,30 +188,110 @@ $('#projectPicker').addEventListener('click', event => {
   const id = event.target.dataset.choiceRetry;
   if (id) { delete taskProjectPickers.get('#projectPicker').choices.get(id).error; renderRequirementProjectOptions(); }
 });
-$('#primaryProject').addEventListener('change', () => renderRequirementProjectOptions());
 $('#requirementForm').addEventListener('input', event => {
-  const form = event.currentTarget;
-  if (event.target.name === 'name' && !form.elements.slug.dataset.edited) {
-    form.elements.slug.value = form.elements.name.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+  if (event.target.name === 'name') {
+    const readable = event.target.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+    requirementDraftSlug = readable ? readable + '-' + requirementDraftToken : 'task-' + requirementDraftToken;
+    renderRequirementProjectOptions();
   }
-  if (event.target.name === 'slug') form.elements.slug.dataset.edited = '1';
-  if (event.target.name === 'name' || event.target.name === 'slug') renderRequirementProjectOptions();
   updatePreview();
 });
-$('#requirementForm').addEventListener('reset', event => { delete event.target.elements.slug.dataset.edited; });
 $('#requirementForm').addEventListener('change', updatePreview);
 $('#requirementForm').addEventListener('submit', async event => {
   if ($('#requirementSubmit').disabled) { event.preventDefault(); return; }
   event.preventDefault(); const data = new FormData(event.target);
-  const primary = data.get('primary_project_id');
   const projectIDs = [...$('#projectPicker').querySelectorAll('input:checked')].map(i => i.value);
-  const body = { name: data.get('name'), slug: data.get('slug'), description: data.get('description'), primary_project_id: primary, project_ids: projectIDs, members: taskPickerSelection('#projectPicker') };
+  const body = { name: data.get('name'), slug: requirementDraftSlug, description: data.get('description'), project_ids: projectIDs, members: taskPickerSelection('#projectPicker') };
   const environment = $('#requirementEnvironment').value;
   let created;
   await mutation('正在创建任务并准备工作目录', async () => {
     const q = await api('/api/requirements', { environment, method: 'POST', body: JSON.stringify(body) });
-    created = q; $('#search').value = ''; $('#requirementDialog').close();
+    created = q;
+    if (environment === activeEnvironment) state.requirements = [q, ...state.requirements.filter(current => current.id !== q.id)];
+    $('#search').value = ''; $('#requirementDialog').close();
     toast(q.state === 'ready' ? '任务已创建，全部项目已就绪' : '任务已保存，部分项目创建失败，可单独重试', q.state !== 'ready');
   }, $('#requirementError'));
   if (created) await selectEnvironment(environment, '/requirements/' + created.id);
 });
+
+function openTaskEdit(id) {
+  const q = state.requirements.find(q => q.id === id);
+  if (!q || state.busy) return;
+  taskEditContext = {id, environment: activeEnvironment};
+  $('#taskEditName').value = q.name;
+  $('#taskEditDescription').value = q.description || '';
+  $('#taskEditError').hidden = true;
+  $('#taskEditDialog').showModal();
+  $('#taskEditName').focus();
+}
+$('#taskEditForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (state.busy || !taskEditContext) return;
+  const context = {...taskEditContext};
+  const body = {name: $('#taskEditName').value, description: $('#taskEditDescription').value};
+  await mutation('正在保存任务信息', async () => {
+    await api(`/api/requirements/${encodeURIComponent(context.id)}`, {environment: context.environment, method: 'PATCH', body: JSON.stringify(body)});
+    $('#taskEditDialog').close(); toast('任务信息已保存');
+  }, $('#taskEditError'));
+});
+function openTaskDirectory(id, project) {
+  const q = state.requirements.find(q => q.id === id);
+  const m = q?.members.find(m => m.project_id === project);
+  if (!m || state.busy) return;
+  const p = state.projects.find(p => p.id === project);
+  if (!p) return;
+  const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,8);
+  taskDirectoryContext = {id, project, environment: activeEnvironment, path: workspaceDisplayPath(q.path, p.folder.slice(0,48) + '-' + suffix)};
+  resetTaskProjectPicker('#taskDirectoryPicker');
+  taskProjectPickers.get('#taskDirectoryPicker').choices.set(project, {mode: m.mode === 'new' ? 'worktree' : (m.mode || 'project'), path: m.path, source: '', branch: 'codex/' + q.slug + '-' + suffix, branchEdited: true});
+  $('#taskDirectoryCurrent').textContent = p.name + ' · 当前使用 ' + m.path + ' · ' + (m.worktree?.branch || m.branch || 'detached HEAD');
+  $('#taskDirectoryError').hidden = true;
+  $('#taskDirectoryPicker').innerHTML = '';
+  $('#taskDirectoryDialog').showModal();
+  refreshTaskDirectoryPicker();
+}
+function refreshTaskDirectoryPicker() {
+  const context = taskDirectoryContext;
+  if (!context || !$('#taskDirectoryDialog').open || context.environment !== activeEnvironment) return;
+  const q = state.requirements.find(q => q.id === context.id);
+  const p = state.projects.find(p => p.id === context.project);
+  if (!q || !p) return;
+  renderTaskProjectPicker('#taskDirectoryPicker', [p], new Set([p.id]), context.environment, 'codex/' + q.slug);
+  $('#taskDirectoryPicker input[name="project_ids"]').disabled = true;
+  updateTaskDirectoryPreview();
+}
+function updateTaskDirectoryPreview() {
+  if (!taskDirectoryContext) return;
+  const selected = taskPickerSelection('#taskDirectoryPicker')[0];
+  const p = state.projects.find(p => p.id === taskDirectoryContext.project);
+  const choice = taskProjectPickers.get('#taskDirectoryPicker')?.choices.get(p?.id);
+  $('#taskDirectoryPreview').textContent = !selected ? '' : selected.mode === 'new' ? taskDirectoryContext.path + '\n新建分支 ' + selected.branch : selected.mode === 'project' ? p.path + '（项目原目录）' : selected.path || '请选择已有 Worktree';
+  $('#taskDirectorySubmit').disabled = !selected || !taskProjectPickerReady('#taskDirectoryPicker') || !!choice?.error;
+}
+for (const type of ['input', 'change']) $('#taskDirectoryPicker').addEventListener(type, event => { taskProjectPickerInput('#taskDirectoryPicker', event); updateTaskDirectoryPreview(); });
+$('#taskDirectoryPicker').addEventListener('click', event => {
+  const id = event.target.dataset.choiceRetry;
+  if (id) { delete taskProjectPickers.get('#taskDirectoryPicker').choices.get(id).error; refreshTaskDirectoryPicker(); }
+});
+$('#taskDirectoryForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (state.busy || $('#taskDirectorySubmit').disabled || !taskDirectoryContext) return;
+  const context = {...taskDirectoryContext};
+  const selected = taskPickerSelection('#taskDirectoryPicker')[0];
+  if (selected.mode === 'new') selected.path = context.path;
+  await mutation('正在更换工作目录', async () => {
+    const q = await api(`/api/requirements/${encodeURIComponent(context.id)}/projects/${encodeURIComponent(context.project)}`, {environment: context.environment, method:'PUT', body:JSON.stringify(selected)});
+    $('#taskDirectoryDialog').close();
+    toast(q.members.find(m => m.project_id === context.project)?.state === 'ready' ? '已更换工作目录，旧目录保留' : '目录配置已保存，请查看准备失败原因', q.state !== 'ready');
+  }, $('#taskDirectoryError'));
+});
+async function removeTaskProject(id, project) {
+  const q = state.requirements.find(q => q.id === id);
+  const m = q?.members.find(m => m.project_id === project);
+  if (!m || !confirm(`从“${q.name}”移除“${m.project_name}”？\n工作目录、分支、代码和已有会话均保留。`)) return;
+  const environment = activeEnvironment;
+  await mutation('正在解除项目关联', async () => {
+    await api(`/api/requirements/${encodeURIComponent(id)}/projects/${encodeURIComponent(project)}`, {environment, method:'DELETE'});
+    toast('已移除项目关联，工作目录保留');
+  });
+}

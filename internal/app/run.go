@@ -140,7 +140,7 @@ func Run() {
 		log.Fatal(err)
 	}
 	defer a.Close()
-	a.Workspace.ReadOnlySessions = *readOnly || runtime.GOOS != "linux" && runtime.GOOS != "windows"
+	a.Workspace.ReadOnlySessions = *readOnly
 	hub, err := newEnvironmentHub(a)
 	if err != nil {
 		log.Fatal(err)

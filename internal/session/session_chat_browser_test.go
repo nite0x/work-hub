@@ -40,6 +40,19 @@ func (c *browserLive) Call(ctx context.Context, method string, params any, out a
 	if method == "thread/read" || method == "thread/resume" {
 		c.session = params.(map[string]any)["threadId"].(string)
 	}
+	if method == "turn/steer" {
+		p := params.(map[string]any)
+		text, _ := p["input"].([]any)[0].(map[string]any)["text"].(string)
+		c.event("item/completed", map[string]any{"turnId": "turn", "item": map[string]any{"type": "userMessage", "id": p["clientUserMessageId"], "content": chatTurnInput(text, nil)}})
+		if out != nil {
+			raw, _ := json.Marshal(map[string]any{"turnId": "turn"})
+			return json.Unmarshal(raw, out)
+		}
+		return nil
+	}
+	if method == "model/list" || method == "collaborationMode/list" {
+		return (&controlsLive{fakeLiveClient: c.fakeLiveClient}).Call(ctx, method, params, out)
+	}
 	err := c.fakeLiveClient.Call(ctx, method, params, out)
 	if method == "turn/interrupt" {
 		c.Close()
@@ -65,6 +78,25 @@ func (c *browserLive) Call(ctx context.Context, method string, params any, out a
 				case <-c.stop:
 					return
 				}
+			}
+			if strings.Contains(input, "问询") {
+				c.request("item/tool/requestUserInput", "browser-question", map[string]any{"questions": []any{
+					map[string]any{"id": "title", "header": "标题", "question": "对话标题你希望怎么处理？", "isOther": true, "options": []any{
+						map[string]any{"label": "首轮完成后自动生成简短主题（推荐）", "description": "保留手动改名"},
+						map[string]any{"label": "创建时可填写标题", "description": "未填写则暂用首条消息"},
+					}},
+					map[string]any{"id": "scope", "header": "适用范围", "question": "应用到哪些会话？", "isOther": true, "options": []any{
+						map[string]any{"label": "仅新建会话", "description": "保留已有会话标题"},
+						map[string]any{"label": "所有会话", "description": "统一使用新规则"},
+					}},
+				}})
+				select {
+				case decision := <-c.decision:
+					c.event("item/completed", map[string]any{"turnId": "turn", "item": map[string]any{"id": "new-reply", "type": "agentMessage", "text": "已收到问询回答：\n\n" + decision}})
+					c.event("turn/completed", map[string]any{"turn": map[string]any{"id": "turn", "status": "completed"}})
+				case <-c.stop:
+				}
+				return
 			}
 			if strings.Contains(input, "MCP") {
 				for index, request := range []map[string]any{
@@ -119,16 +151,34 @@ func TestBrowserChatFixture(t *testing.T) {
 	a.openSessions = func(context.Context) (codex.SessionClient, error) {
 		return &fakeSessionClient{request: func(method string, p map[string]any) (any, error) {
 			s := codex.Session{ID: "session", Name: "功能实现与测试", Cwd: q.Members[0].Path, UpdatedAt: time.Now().Unix(), HistoryMode: "paginated"}
+			if method == "model/list" {
+				return map[string]any{"data": []any{map[string]any{"id": "model", "model": "model", "displayName": "验收模型", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "high"}}}}}, nil
+			}
+			if method == "collaborationMode/list" {
+				return map[string]any{"data": []any{map[string]any{"mode": "plan"}, map[string]any{"mode": "default"}}}, nil
+			}
+			if method == "thread/name/set" {
+				return map[string]any{}, nil
+			}
 			if method == "thread/list" {
 				stored, _ := a.StoredSessions(q.ID)
 				all := []codex.Session{}
 				for _, entry := range stored {
+					archived, _ := p["archived"].(bool)
+					if entry.Archived != archived {
+						continue
+					}
 					all = append(all, codex.Session{ID: entry.ID, Name: entry.Name, Cwd: entry.Cwd, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, HistoryMode: "paginated"})
 				}
 				return codex.SessionPage{Data: all}, nil
 			}
 			if method == "thread/read" {
 				s.ID = p["threadId"].(string)
+				if stored, err := a.Workspace.Store.Session(s.ID); err == nil {
+					s.Name = stored.Name
+				}
+				s.Model = "model"
+				s.Effort = "medium"
 				return map[string]any{"thread": s}, nil
 			}
 			return map[string]any{"data": []any{map[string]any{"turnId": "saved", "item": map[string]any{"id": "saved-reply", "type": "agentMessage", "text": "已阅读任务说明，准备继续实现。"}}, map[string]any{"turnId": "saved", "item": map[string]any{"id": "saved-user", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "请先阅读任务说明并检查当前项目。"}}}}}}, nil

@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Check, Feedback, NativeSelect, Option } from "./workspace/shared"
-import { ProjectForm, TaskForm, TaskProjectsForm, WorktreeForm, GitDialog } from "./workspace/forms"
+import { ProjectForm, TaskForm, TaskProjectsForm, TaskEditForm, TaskDirectoryForm, WorktreeForm, GitDialog } from "./workspace/forms"
 import { workspaceUI } from "./workspace/renderers"
 import { SettingsPage, EnvironmentForm } from "./workspace/settings"
-import { SessionPickerDialog, CommandOutputDialog, SessionHistoryPanel } from "./workspace/sessions"
+import { SessionPickerDialog, CommandOutputDialog } from "./workspace/sessions"
+import { SessionBrowser, ConversationDialogHeader } from "./workspace/session-browser"
 import "./styles.css"
 
 function SearchField() {
@@ -61,17 +62,21 @@ mount("searchField", <SearchField />)
 mount("commandDialog", <CommandDialog />)
 mount("toast", <ToastContent />)
 mount("newTaskButton", <Button type="button" id="newButton">＋ 创建任务</Button>)
-mount("refreshControl", <Button type="button" id="refreshButton" variant="ghost" size="icon" title="刷新 Git 状态" aria-label="刷新 Git 状态"><RotateCw aria-hidden="true" /></Button>)
+mount("projectAddButton", <Button type="button" size="sm" data-action="new-project">＋ 添加项目</Button>)
+mount("refreshControl", <Button type="button" id="refreshButton" variant="ghost" size="icon-sm" title="刷新 Git 状态" aria-label="刷新 Git 状态"><RotateCw aria-hidden="true" /></Button>)
 mount("archiveFilterWrap", <Check id="archiveFilter" label="显示归档" />)
 mount("projectEnvironmentWrap", <label className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground"><span className="shrink-0 whitespace-nowrap">项目环境</span><NativeSelect id="projectEnvironment" aria-label="项目环境"><Option value="local">本机</Option></NativeSelect></label>)
 mount("offlineFeedback", <Feedback id="offlineBanner" variant="destructive" className="mb-4" hidden />)
 mount("projectDialog", <ProjectForm />)
 mount("requirementDialog", <TaskForm />)
 mount("requirementProjectsDialog", <TaskProjectsForm />)
+mount("taskEditDialog", <TaskEditForm />)
+mount("taskDirectoryDialog", <TaskDirectoryForm />)
 mount("worktreeDialog", <WorktreeForm />)
 mount("gitDialog", <GitDialog />)
 mount("settingsPage", <SettingsPage />)
 mount("environmentDialog", <EnvironmentForm />)
 mount("sessionDialog", <SessionPickerDialog />)
 mount("sessionCommandOutputDialog", <CommandOutputDialog />)
-mount("sessionHistoryPanel", <SessionHistoryPanel />)
+mount("sessionBrowserHome", <SessionBrowser />)
+mount("conversationDialogHeader", <ConversationDialogHeader />)

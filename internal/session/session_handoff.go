@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"worktree-hub/internal/httpx"
+	"worktree-hub/internal/platform"
 )
 
 func (a *Service) DecorateHandoff(s *ChatState, session, cwd string) {
@@ -43,12 +44,9 @@ func (a *Service) ChatHandoffHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "缺少交接标识")
 		return
 	}
-	q, cwd, ok := a.LinkedChatSession(w, r)
+	record, ok := a.requestSession(w, r)
+	cwd := record.Cwd
 	if !ok {
-		return
-	}
-	if q.State != "ready" {
-		httpx.WriteError(w, 409, "任务未就绪或已归档")
 		return
 	}
 	session := r.PathValue("session")
@@ -60,13 +58,13 @@ func (a *Service) ChatHandoffHandler(w http.ResponseWriter, r *http.Request) {
 		if b.peer != nil {
 			pid = b.peer.Pid
 		}
-		same = b.requirement == q.ID && b.cwd == cwd
+		same = platform.SameWorkspacePath(b.cwd, cwd)
 		b.mu.Unlock()
 	}
 	a.chatMu.Lock()
 	if old := a.chats[session]; old != nil {
 		s := old.snapshot()
-		if old.requirement == q.ID && s.ID == input.RequestID {
+		if s.ID == input.RequestID {
 			a.chatMu.Unlock()
 			httpx.WriteJSON(w, 200, s)
 			return
@@ -93,7 +91,7 @@ func (a *Service) ChatHandoffHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	run := &ChatRun{requirement: q.ID, session: session, cwd: cwd, handoff: true, cancel: cancel, notify: make(chan struct{}, 1), finished: make(chan struct{}), state: ChatState{ID: input.RequestID, Status: "handoff", Busy: true, Notice: "正在等待终端本轮工作结束；不会中断思考、输出或命令。审批仍在原终端处理，可取消等待。", Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}}
+	run := &ChatRun{session: session, cwd: cwd, handoff: true, cancel: cancel, notify: make(chan struct{}, 1), finished: make(chan struct{}), state: ChatState{ID: input.RequestID, Status: "handoff", Busy: true, Notice: "正在等待终端本轮工作结束；不会中断思考、输出或命令。审批仍在原终端处理，可取消等待。", Entries: []HistoryEntry{}, Approvals: []ChatApproval{}}}
 	a.chats[session] = run
 	a.chatMu.Unlock()
 	go a.DriveHandoff(ctx, run, b, pid)

@@ -26,7 +26,7 @@ try {
     return response.json();
   };
   assert.equal((await health()).pid, info.pid); // launcher already exited; backend survives.
-  assert.equal(info.read_only_sessions, true);
+  assert.equal(info.read_only_sessions, false);
   assert.equal(new URL(info.url).hostname, '127.0.0.1');
   assert.equal((await fetch(info.url + '/api/state')).status, 403);
   const headers = { 'X-CSRF-Token': credentials.token, 'Content-Type': 'application/json' };

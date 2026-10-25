@@ -61,7 +61,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
         requirements: result.requirements.map(q => ({ ...structuredClone(q), environment_id: 'local', environment_name: '本机', connected: true })),
         environments: [{ id: 'local', name: '本机', connected: true }], project_count: result.projects.length, status_refreshing: result.status_refreshing,
       }) };
-      if (url.endsWith('/sessions')) return { ok: true, json: async () => ({ sessions: [] }) };
+      if (url.endsWith('/sessions') || url.startsWith('/api/sessions?')) return { ok: true, json: async () => ({ sessions: [] }) };
       return { ok: true, json: async () => structuredClone(result) };
     }
   });
@@ -122,14 +122,14 @@ test('task creation reads only the chosen environment and previews its root', as
   h.context.api = async (url, options) => { requests.push(options.environment); return options.environment === 'local' ? local : remote; };
   h.element('#requirementEnvironment').value = 'wsl-ubuntu';
   await h.context.loadRequirementProjects();
-  assert.match(h.element('#primaryProject').innerHTML, /Remote project/);
-  assert.doesNotMatch(h.element('#primaryProject').innerHTML, /value="app"/);
-  assert.match(h.element('#workspacePreview').textContent, /^\/home\/user\/workspaces\/demo/);
+  assert.match(h.element('#projectPicker').innerHTML, /Remote project/);
+  assert.doesNotMatch(h.element('#projectPicker').innerHTML, /value="app"/);
+  assert.match(h.element('#workspacePreview').textContent, /选择参与项目/);
   h.element('#requirementEnvironment').value = 'local';
   await h.context.loadRequirementProjects();
-  assert.match(h.element('#primaryProject').innerHTML, /value="app"/);
-  assert.doesNotMatch(h.element('#primaryProject').innerHTML, /Remote project/);
-  assert.match(h.element('#workspacePreview').textContent, /^D:\\workspaces\\demo/);
+  assert.match(h.element('#projectPicker').innerHTML, /value="app"/);
+  assert.doesNotMatch(h.element('#projectPicker').innerHTML, /Remote project/);
+  assert.match(h.element('#workspacePreview').textContent, /选择参与项目/);
   assert.deepEqual(requests, ['wsl-ubuntu', 'local']);
 });
 
@@ -233,7 +233,7 @@ for (const readOnly of [true, false]) {
     assert.equal(vm.runInContext('sessionReadOnly', h.context), readOnly);
     assert.equal(h.element('#offlineBanner').hidden, true);
     assert(markup(h.element('#content').innerHTML).querySelector('[data-action="workspace-terminal"]'));
-    assert.match(h.element('#taskSessionsContainer').innerHTML, /关联已有会话/);
+    assert.match(h.element('#taskPageActions').innerHTML, /data-action="task-conversations"/);
     assert.equal(vm.runInContext('typeof openSessionChat', h.context), readOnly ? 'undefined' : 'function');
     // Navigation must still find both domain renderers after splitting the entry script.
     vm.runInContext("state.view = 'projects'; state.selectedProject = 'app'; render()", h.context);
@@ -276,8 +276,8 @@ test('reused task directories report branch changes while remaining usable on th
     assert.doesNotMatch(html, /缺少 master|无本地 master/);
     assert.match(html, /分支已变化/);
     assert.equal(markup(html).querySelector('[data-action="git-task-adopt"]').disabled, !!patch.detached);
-    assert.equal(markup(h.element('#taskPageActions').innerHTML).querySelector('[data-action="launch"]').disabled, false);
-    assert.match(html, /已有工作目录/);
+    assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="git-open"]').disabled, false);
+    assert.match(html, /已有 Worktree/);
   }
 });
 
@@ -289,6 +289,6 @@ test('new task directories use their individual expected branch and recorded sou
   await h.refresh(data);
   assert.doesNotMatch(h.element('#content').innerHTML, /分支已变化/);
   const document = markup(h.element('#content').innerHTML);
-  assert.equal(markup(h.element('#taskPageActions').innerHTML).querySelector('[data-action="launch"]').disabled, false);
+  assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-action="git-open"]').disabled, false);
   assert([...document.querySelectorAll('.task-project-details code')].some(node => node.textContent === 'release'));
 });

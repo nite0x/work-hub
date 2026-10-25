@@ -43,7 +43,7 @@ func (a *Service) TerminalOwner(id, cwd string) *terminalBridge {
 // This also covers manually launched CLI sessions outside Hub's launchers.
 func TerminalSessionConflict(id, cwd string) error { return terminalSessionConflict(id, cwd) }
 func terminalSessionConflict(id, cwd string) error {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		return nativeTerminalConflict(id, cwd)
 	}
 	return scanTerminalSessions("/proc", id, cwd)

@@ -38,7 +38,10 @@ type terminalBridge struct {
 	once                                   sync.Once
 	done                                   chan struct{}
 }
-type bridgeCall struct{ Method, Thread string }
+type bridgeCall struct {
+	Method, Thread string
+	ObservedAt     int64
+}
 type bridgePeerKey struct{}
 
 func (a *Service) NewTerminalBridge(requirement, cwd string) (*terminalBridge, error) {
@@ -269,7 +272,7 @@ func (b *terminalBridge) forward(raw []byte) error {
 				return err
 			}
 		}
-		b.pending[string(m.ID)] = bridgeCall{m.Method, m.Params.ThreadID}
+		b.pending[string(m.ID)] = bridgeCall{Method: m.Method, Thread: m.Params.ThreadID, ObservedAt: time.Now().UnixNano()}
 	}
 	// Replies to existing approvals have no method and remain usable while draining.
 	_ = b.upstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -353,6 +356,8 @@ func (b *terminalBridge) observe(raw []byte) {
 		return
 	}
 	var save *codex.Session
+	var titleObservedAt int64
+	var directories []string
 	b.mu.Lock()
 	if m.Method == "" {
 		call, ok := b.pending[string(m.ID)]
@@ -367,6 +372,8 @@ func (b *terminalBridge) observe(raw []byte) {
 					b.active = m.Result.Thread.Status.Type == "active"
 					b.waiting = slices.Contains(m.Result.Thread.Status.ActiveFlags, "waitingOnApproval") || slices.Contains(m.Result.Thread.Status.ActiveFlags, "waitingOnUserInput")
 					save = &s
+					titleObservedAt = call.ObservedAt
+					directories = append([]string{}, b.additionalDirectories...)
 				}
 			}
 			if call.Method == "turn/start" {
@@ -392,7 +399,9 @@ func (b *terminalBridge) observe(raw []byte) {
 	b.mu.Unlock()
 	if save != nil {
 		b.app.Workspace.Mu.Lock()
-		_ = b.app.SaveSession(b.requirement, *save, "workspace")
+		if err := b.app.SaveSession("", *save, "workspace", titleObservedAt); err == nil {
+			_ = b.app.Workspace.Store.SaveSessionDirectories(save.ID, directories)
+		}
 		b.app.Workspace.Mu.Unlock()
 	}
 }
