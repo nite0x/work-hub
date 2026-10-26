@@ -251,7 +251,11 @@ func (b *terminalBridge) forward(raw []byte) error {
 		if b.session != "" && (m.Method == "thread/start" || m.Method == "thread/fork" || (m.Params.ThreadID != "" && m.Params.ThreadID != b.session)) {
 			reason = "该终端已绑定当前会话，请在任务页创建或打开其他会话"
 		}
-		if b.app.BusyWorkspace(m.Params.ThreadID, b.cwd) {
+		thread := m.Params.ThreadID
+		if thread == "" {
+			thread = b.session
+		}
+		if b.app.ChatBusy(thread) {
 			reason = "会话正在侧栏运行或交接，终端暂不可接入"
 		}
 	}

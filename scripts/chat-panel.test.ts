@@ -184,7 +184,7 @@ test("official composer keeps drafts across reopening and sends through the exis
     h.type("继续完成任务"); await tick();
     assert.equal(h.input().value,"继续完成任务");
     h.input().dispatchEvent(new h.w.KeyboardEvent("keydown",{key:"Enter",bubbles:true,cancelable:true}));
-    await tick(); assert.equal(h.calls.length,0);
+    await tick(); assert(!h.calls.some(call=>call.body));
     h.bridge.close(); await tick(); h.bridge.open(h.options);
     await until(()=>h.input()?.value==="继续完成任务");
     h.input().dispatchEvent(new h.w.KeyboardEvent("keydown",{key:"Enter",ctrlKey:true,bubbles:true,cancelable:true}));
@@ -501,6 +501,8 @@ test("a running conversation exposes both send and stop and sends follow-up inpu
   assert(h.w.document.querySelector('.aui-composer-cancel'));
   h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
   await until(()=>h.calls.some(c=>c.path.endsWith('/chat/steer')));
+  await until(()=>[...h.w.document.querySelectorAll<HTMLElement>('[data-chat-message-id]')].some(node=>node.dataset.chatMessageId===JSON.stringify(['turn','u'])));
+  assert.equal(h.w.document.querySelectorAll('[data-slot="aui_user-message-root"]').length,1);
   assert.equal(h.calls.find(c=>c.path.endsWith('/chat/steer'))?.body.turn_id,'turn');
   assert(!h.calls.some(c=>c.path.endsWith('/chat/stop')));assert.deepEqual(h.errors,[]);
  }finally{h.dispose();}
@@ -510,23 +512,34 @@ test("context settings use the catalog and stay out of user text",async()=>{
  const h=mount(true,[],{request:async(path,init)=>{
   if(path.endsWith('/history'))return {session:{...session,model:'model',reasoningEffort:'medium'},entries:[]} as any;
   if(path.endsWith('/context'))return {model:'model',reasoningEffort:'medium',cwd:'/workspace/project',additional_directories:['/extra']} as any;
-  if(path.endsWith('/chat-options'))return {models:[{id:'model',model:'model',displayName:'Fixture',isDefault:true,supportedReasoningEfforts:[{reasoningEffort:'high'}]}],modes:['plan','default']} as any;
+  if(path.endsWith('/chat-options'))return {models:[{id:'model',model:'model',displayName:'Fixture',isDefault:false,supportedReasoningEfforts:[{reasoningEffort:'high'}]},{id:'other',model:'other',displayName:'Other',isDefault:true,defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'}]}],modes:['plan','default']} as any;
   if(init?.body){h.calls.push({path,body:JSON.parse(String(init.body))});return {...idleChat(),status:'completed',turn_id:'new'} as any;}
   return idleChat() as any;
  }});
  try{
   await until(()=>h.input());
   const settings=h.w.document.querySelector<HTMLButtonElement>('[aria-label="上下文与设置"]')!;
+  await until(()=>settings.textContent?.includes('Fixture'));
   assert(settings.closest('.aui-composer-root'));
   assert(settings.closest('.aui-composer-action-wrapper'));
   assert.equal(h.w.document.querySelector('.chat-panel-header [aria-label="上下文与设置"]'),null);
   settings.click();
   await until(()=>h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮工作模式"]')?.options.length===3);
+  const model=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮模型"]')!;
+  assert.equal(model.value,'model');assert.equal(model.selectedOptions[0].textContent,'Fixture');
+  const effort=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮思考强度"]')!;
+  assert.equal(effort.value,'medium');assert.equal(effort.selectedOptions[0].textContent,'中');
+  model.value='other';model.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+  await until(()=>effort.value==='low');assert.equal(effort.selectedOptions[0].textContent,'低');
+  model.value='model';model.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+  await until(()=>effort.value==='medium');
+  assert(!h.w.document.querySelector('.chat-settings-popover')!.textContent?.includes('沿用当前'));
   const mode=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮工作模式"]')!;mode.value='plan';mode.dispatchEvent(new h.w.Event('change',{bubbles:true}));
   h.type('先做计划');await tick();h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
   await until(()=>h.calls.some(c=>c.path.endsWith('/chat')&&c.body));
   const sent=h.calls.find(c=>c.path.endsWith('/chat')&&c.body)!.body;
   assert.equal(sent.settings.mode,'plan');assert.equal(sent.text,'先做计划');
+  assert.equal(sent.settings.model,undefined);assert.equal(sent.settings.effort,undefined);
   h.w.document.querySelector<HTMLButtonElement>('.chat-context-disclosure')!.click();
   await until(()=>h.w.document.body.textContent?.includes('/extra'));assert.deepEqual(h.errors,[]);
  }finally{h.dispose();}
@@ -614,12 +627,17 @@ test("session menu renames via its focused editor without losing the composer dr
   } finally {h.dispose();}
 });
 
-test("running state stays in the toolbar and disables archive and fork", async () => {
+test("running state appears above the composer and disables archive and fork", async () => {
   const h = mount(true, [{id: "active-user", turn_id: "turn", kind: "user", text: "正在处理的要求"}]);
   h.setChat({...idleChat(), id: 'active', turn_id: 'turn', status: 'running', busy: true}); h.bridge.open(h.options);
   try {
     await until(() => h.w.document.querySelector('.chat-status[data-state="running"]'));
     assert.match(h.w.document.querySelector('.chat-status')!.textContent || "", /运行中/);
+    const indicator = h.w.document.querySelector('.chat-run-indicator[data-state="running"]');
+    assert(indicator);
+    assert.match(indicator.textContent || '', /进行中/);
+    assert(indicator.closest('.aui-thread-viewport-footer'));
+    assert.equal(indicator.getAttribute('role'), 'status');
     assert.doesNotMatch(h.w.document.querySelector('footer')?.textContent || '', /运行中/);
     openSessionMenu(h); await until(() => h.w.document.querySelector('[role="menuitem"]'));
     const items = [...h.w.document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
@@ -628,6 +646,31 @@ test("running state stays in the toolbar and disables archive and fork", async (
     h.w.document.querySelector('[role="menu"]')!.dispatchEvent(new h.w.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
     await until(() => !h.w.document.querySelector('[role="menu"]'));
     assert(!h.calls.some(call => call.body)); assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
+});
+
+test("the composer indicator follows live run states after tool output and disappears when the turn ends", async () => {
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  const active = {...idleChat(), id: 'active', turn_id: 'turn', status: 'running', busy: true};
+  const h = mount(true, [
+    {id: 'user', turn_id: 'turn', kind: 'user', text: '检查项目'},
+    {id: 'command', turn_id: 'turn', kind: 'command', command: 'npm test', status: 'completed', output: 'passed'},
+  ], {stream: async () => new Response(new ReadableStream<Uint8Array>({start(controller) {stream = controller;}}))});
+  h.setChat(active); h.bridge.open(h.options);
+  const send = (chat: ChatState) => stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chat)}\n\n`));
+  try {
+    await until(() => stream && h.w.document.querySelector('.chat-run-indicator[data-state="running"]'));
+    assert(h.w.document.querySelector('.aui-tool-group-trigger'));
+    assert.equal(h.w.document.querySelector('.aui-tool-fallback-result'), null);
+    for (const [status, label] of [['starting', '正在连接'], ['waiting', '等待你的确认'], ['stopping', '正在停止'], ['running', '进行中']]) {
+      send({...active, status});
+      await until(() => h.w.document.querySelector(`.chat-run-indicator[data-state="${status}"]`));
+      assert.match(h.w.document.querySelector('.chat-run-indicator')!.textContent || '', new RegExp(label));
+    }
+    send({...active, status: 'completed', busy: false});
+    await until(() => h.w.document.querySelector('.chat-status[data-state="completed"]'));
+    assert.equal(h.w.document.querySelector('.chat-run-indicator'), null);
+    assert.deepEqual(h.errors, []);
   } finally {h.dispose();}
 });
 

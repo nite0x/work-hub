@@ -78,11 +78,18 @@ export class ChatController {
     const next = {...this.snapshot, ...patch};
     if (this.echoes.size && (patch.entries || patch.chat)) {
       const actual = mergeEntries(next.entries, next.chat.entries).filter(e => !e.id.startsWith("local:"));
+      const claimed = new Set<string>();
       for (const [request, echo] of this.echoes) {
         if (!echo.steering && next.chat.id === request && next.chat.turn_id) echo.turn = next.chat.turn_id;
-        const confirmed = actual.some(e => e.kind === "user" && (e.id === request || !echo.steering && !!echo.turn && e.turn_id === echo.turn && !echo.known.has(entryKey(e)) && (e.text || "").trim() === (echo.entry.text || "") && (e.images?.length || 0) === (echo.entry.images?.length || 0)));
-        if (confirmed) { next.entries = next.entries.filter(e => e.id !== echo.entry.id); this.echoes.delete(request); }
+        // Native steering items need not reuse clientUserMessageId. Match a
+        // newly observed item in the same turn, reserving explicit request IDs
+        // for their own echoes and consuming each item only once.
+        const confirmed = actual.find(e => e.kind === "user" && !claimed.has(entryKey(e)) && (e.id === request || !this.echoes.has(e.id) && !!echo.turn && e.turn_id === echo.turn && !echo.known.has(entryKey(e)) && (e.text || "").trim() === (echo.entry.text || "") && (e.images?.length || 0) === (echo.entry.images?.length || 0)));
+        if (confirmed) { claimed.add(entryKey(confirmed)); next.entries = next.entries.filter(e => e.id !== echo.entry.id); this.echoes.delete(request); }
       }
+      // A later snapshot of the same item cannot acknowledge another send
+      // whose text happens to be identical.
+      for (const echo of this.echoes.values()) for (const key of claimed) echo.known.add(key);
     }
     this.snapshot = next;
     for (const listener of this.listeners) listener();

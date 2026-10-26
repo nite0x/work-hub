@@ -20,15 +20,15 @@ func TestManagedLaunchFailureIsScopedToItsSessionService(t *testing.T) {
 	}
 	firstDir, secondDir := t.TempDir(), t.TempDir()
 	first := httptest.NewRecorder()
-	a.LaunchCodexPlan(first, model.LaunchPlan{Requirement: "first", Cwd: firstDir, Args: []string{"--cd", firstDir}})
+	a.LaunchCodexPlan(first, model.LaunchPlan{Requirement: "first", Cwd: firstDir, Session: "first-session", Args: []string{"--cd", firstDir}})
 	other := New(a.Workspace, a.Tasks)
 	defer other.Close()
 	second := httptest.NewRecorder()
-	other.LaunchCodexPlan(second, model.LaunchPlan{Requirement: "second", Cwd: secondDir, Args: []string{"--cd", secondDir}})
+	other.LaunchCodexPlan(second, model.LaunchPlan{Requirement: "second", Cwd: secondDir, Session: "second-session", Args: []string{"--cd", secondDir}})
 	if first.Code != 200 || second.Code != 200 || len(failures) != 2 || failures[0] == nil || failures[1] == nil {
 		t.Fatalf("launches: %d %d callbacks=%d", first.Code, second.Code, len(failures))
 	}
-	one, two := a.TerminalOwner("", firstDir), other.TerminalOwner("", secondDir)
+	one, two := a.TerminalOwner("first-session", firstDir), other.TerminalOwner("second-session", secondDir)
 	if one == nil || two == nil {
 		t.Fatal("missing terminal reservations")
 	}

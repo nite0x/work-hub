@@ -10,6 +10,9 @@ import (
 )
 
 func (a *Service) AppTerminalConflict(id, cwd string) error {
+	if id == "" {
+		return nil // A new conversation cannot be owned by an existing terminal.
+	}
 	if b := a.TerminalOwner(id, cwd); b != nil {
 		b.mu.Lock()
 		connected, revoked := b.connected, b.revoked
@@ -18,7 +21,7 @@ func (a *Service) AppTerminalConflict(id, cwd string) error {
 			if !connected {
 				return fmt.Errorf("终端正在启动，尚未连接；请稍候。启动失败后会自动释放占用（最多 30 秒）")
 			}
-			return fmt.Errorf("工作台终端保有此会话或目录的控制权，请使用“切换到侧栏”等待交接完成")
+			return fmt.Errorf("工作台终端保有此会话的控制权，请使用“切换到侧栏”等待交接完成")
 		}
 	}
 	return a.terminalConflict(id, cwd)
@@ -29,7 +32,7 @@ func (a *Service) TerminalOwner(id, cwd string) *terminalBridge {
 	defer a.bridgeMu.Unlock()
 	for _, b := range a.bridges {
 		b.mu.Lock()
-		owns := !b.revoked && ((id != "" && b.session == id) || b.cwd == cwd)
+		owns := !b.revoked && id != "" && b.session == id
 		b.mu.Unlock()
 		if owns {
 			return b
@@ -38,11 +41,13 @@ func (a *Service) TerminalOwner(id, cwd string) *terminalBridge {
 	return nil
 }
 
-// Conservatively treat any interactive Codex in the session's directory as
-// an owner, even if its initial command line doesn't contain its session ID.
-// This also covers manually launched CLI sessions outside Hub's launchers.
+// Only an identified conversation is exclusive. Independent conversations may
+// share a directory; shared-daemon activity checks also cover CLI-created turns.
 func TerminalSessionConflict(id, cwd string) error { return terminalSessionConflict(id, cwd) }
 func terminalSessionConflict(id, cwd string) error {
+	if id == "" {
+		return nil
+	}
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		return nativeTerminalConflict(id, cwd)
 	}
@@ -52,6 +57,9 @@ func scanTerminalSessions(proc, id, cwd string) error {
 	return scanTerminalSessionsExcept(proc, id, cwd, 0)
 }
 func scanTerminalSessionsExcept(proc, id, cwd string, except int) error {
+	if id == "" {
+		return nil
+	}
 	processes, err := os.ReadDir(proc)
 	if err != nil {
 		return fmt.Errorf("无法核实终端占用，暂不能发送：%w", err)
@@ -93,32 +101,10 @@ func scanTerminalSessionsExcept(proc, id, cwd string, except int) error {
 		if len(args) > 1 && isCodexServerCommand(args[1]) {
 			continue
 		}
-		match, dir := false, ""
-		for i, arg := range args[1:] {
-			if id != "" && arg == id {
-				match = true
+		for _, arg := range args[1:] {
+			if arg == id {
+				return fmt.Errorf("此会话仍有 Codex 终端打开；可对工作台管理的终端使用“切换到侧栏”。手动启动的同会话终端须先退出 Codex")
 			}
-			if (arg == "--cd" || arg == "-C") && i+2 < len(args) {
-				dir = args[i+2]
-			}
-			if strings.HasPrefix(arg, "--cd=") {
-				dir = strings.TrimPrefix(arg, "--cd=")
-			}
-		}
-		processCwd, err := os.Readlink(filepath.Join(base, "cwd"))
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("无法核实 Codex 终端的工作目录")
-		}
-		if dir == "" {
-			dir = processCwd
-		} else if !filepath.IsAbs(dir) {
-			dir = filepath.Join(processCwd, dir)
-		}
-		if canonical, err := filepath.EvalSymlinks(dir); err == nil {
-			dir = canonical
-		}
-		if match || (dir != "" && filepath.Clean(dir) == filepath.Clean(cwd)) {
-			return fmt.Errorf("此会话或工作目录仍有 Codex 终端打开；可对工作台管理的终端使用“切换到侧栏”。手动启动且无法核实归属的终端须先退出 Codex")
 		}
 	}
 	return nil

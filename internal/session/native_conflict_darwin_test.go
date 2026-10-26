@@ -75,12 +75,15 @@ func TestDarwinCodexTerminalConflict(t *testing.T) {
 	if err := os.WriteFile(binaryPath, data, 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, server := range []bool{false, true} {
+	for _, mode := range []string{"new", "same", "other", "server"} {
 		cmd := exec.Command(binaryPath)
-		if server {
+		if mode == "server" {
 			cmd = exec.Command(binaryPath, "app-server")
 			cmd.Env = append(os.Environ(), "WORK_HUB_CONFLICT_HELPER=server")
 		} else {
+			if mode != "new" {
+				cmd = exec.Command(binaryPath, "resume", mode)
+			}
 			cmd.Env = append(os.Environ(), "WORK_HUB_CONFLICT_HELPER=terminal")
 		}
 		cmd.Dir = base
@@ -101,9 +104,9 @@ func TestDarwinCodexTerminalConflict(t *testing.T) {
 			if _, err := stdout.Read(ready[:]); err != nil {
 				t.Fatal(err)
 			}
-			err := nativeTerminalConflict("", base)
-			if server && err != nil || !server && (err == nil || !strings.Contains(err.Error(), "此目录")) {
-				t.Fatalf("wrong terminal ownership result (server=%v): %v", server, err)
+			err := nativeTerminalConflict("same", base)
+			if mode == "same" && (err == nil || !strings.Contains(err.Error(), "此会话")) || mode != "same" && err != nil {
+				t.Fatalf("wrong terminal ownership result (mode=%s): %v", mode, err)
 			}
 		}()
 	}

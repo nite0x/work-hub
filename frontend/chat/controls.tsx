@@ -9,7 +9,7 @@ import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {convertEntries, mergeEntries, type ChatContext, type PermissionMode} from "./model";
 import {ChatController} from "./controller";
 
-const modeLabel = (mode?: string) => mode === "plan" ? "规划" : mode === "default" ? "执行" : "沿用 Codex";
+const modeLabel = (mode?: string) => mode === "plan" ? "规划" : mode === "default" ? "执行" : "未获取工作模式";
 const approvalLabel = (policy: unknown) => typeof policy === "string" ? ({"on-request": "按需审批", untrusted: "非受信任操作需审批", "on-failure": "失败后审批", never: "无需审批"}[policy] || policy) : "由 Codex 管理";
 type ControlsProps = {controller: ChatController; portal: RefObject<HTMLElement | null>};
 const overlayClass = "chat-control-overlay rounded-xl border bg-background p-4 text-sm text-foreground shadow-lg outline-none";
@@ -66,29 +66,36 @@ const effortLabel = (effort?: string) => effort ? ({none: "无", minimal: "最�
 export function ChatControls({controller, portal}: ControlsProps) {
   const s = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const title = useId();
+  useEffect(() => {if (!controller.options.readOnly) void controller.loadOptions();}, [controller]);
   const context = s.chat.context || s.context;
-  const model = context?.model || s.session?.model;
+  const model = context?.model || s.session?.model || (!s.session ? s.models.find(m => m.isDefault)?.model : undefined);
   const effort = context?.reasoningEffort || s.session?.reasoningEffort;
-  const selectedModel = s.models.find(m => m.model === (s.settings.model || model)) || s.models.find(m => m.isDefault);
+  const nextModel = s.settings.model || model;
+  const selectedModel = s.models.find(m => m.model === nextModel);
+  const modelName = selectedModel?.displayName || nextModel;
+  const inheritedEffort = (s.settings.model && s.settings.model !== model || !s.session) ? selectedModel?.defaultReasoningEffort : effort;
+  const nextEffort = s.settings.effort || inheritedEffort;
+  const nextMode = s.settings.mode || context?.mode;
+  const efforts = selectedModel?.supportedReasoningEfforts || [];
   const changed = !!(s.settings.model || s.settings.effort || s.settings.mode);
   return <Popover.Root onOpenChange={open => {if (open) void controller.loadOptions();}}>
     <Popover.Trigger asChild><Button type="button" variant="ghost" size="sm" className="chat-context-trigger" aria-label="上下文与设置">
-      <ZapIcon aria-hidden="true" /><span className="truncate">{s.models.find(m => m.model === (s.settings.model || model))?.displayName || s.settings.model || model || "Codex 设置"}{s.settings.effort || effort ? ` · ${effortLabel(s.settings.effort || effort)}` : ""}{s.settings.mode || context?.mode ? ` · ${modeLabel(s.settings.mode || context?.mode)}` : ""}</span>{changed && <span className="chat-next-turn">下轮</span>}<ChevronDownIcon aria-hidden="true" />
+      <ZapIcon aria-hidden="true" /><span className="truncate">{modelName || (s.optionsLoading ? "正在读取模型…" : "选择模型")}{nextEffort ? ` · ${effortLabel(nextEffort)}` : ""}{nextMode ? ` · ${modeLabel(nextMode)}` : ""}</span>{changed && <span className="chat-next-turn">下轮</span>}<ChevronDownIcon aria-hidden="true" />
     </Button></Popover.Trigger>
     <Popover.Portal container={portal.current}><Popover.Content className={`${overlayClass} chat-settings-popover space-y-3`} align="end" side={controller.options.readOnly ? "bottom" : "top"} sideOffset={8} collisionPadding={12} aria-labelledby={title}>
       <div className="flex items-center justify-between gap-4"><h3 id={title} className="text-sm font-semibold">上下文与设置</h3><Popover.Close asChild><Button variant="ghost" size="icon" className="size-6" aria-label="关闭设置"><XIcon className="size-4" /></Button></Popover.Close></div>
       {!controller.options.readOnly && <>
         <p className="text-xs text-muted-foreground">设置在下一轮发送时应用。运行中补充消息沿用本轮设置。</p>
-        <label className="grid gap-1.5 text-xs">模型<NativeSelect aria-label="下轮模型" value={s.settings.model || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, model: e.target.value || undefined, effort: undefined})}><NativeSelectOption value="">沿用当前模型</NativeSelectOption>{s.models.map(m => <NativeSelectOption key={m.id} value={m.model}>{m.displayName || m.model}</NativeSelectOption>)}</NativeSelect></label>
+        <label className="grid gap-1.5 text-xs">模型<NativeSelect aria-label="下轮模型" value={nextModel || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, model: e.target.value === model ? undefined : e.target.value || undefined, effort: undefined})}>{!nextModel && <NativeSelectOption value="" disabled>{s.optionsLoading ? "正在读取模型…" : "未获取模型"}</NativeSelectOption>}{nextModel && !s.models.some(m => m.model === nextModel) && <NativeSelectOption value={nextModel}>{nextModel}</NativeSelectOption>}{s.models.map(m => <NativeSelectOption key={m.id} value={m.model}>{m.displayName || m.model}</NativeSelectOption>)}</NativeSelect></label>
         <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1.5 text-xs">思考强度<NativeSelect aria-label="下轮思考强度" value={s.settings.effort || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, effort: e.target.value || undefined})}><NativeSelectOption value="">{s.settings.model && s.settings.model !== model ? "模型默认强度" : "沿用当前强度"}</NativeSelectOption>{selectedModel?.supportedReasoningEfforts?.map(e => <NativeSelectOption key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</NativeSelectOption>)}</NativeSelect></label>
-          <label className="grid gap-1.5 text-xs">工作模式<NativeSelect aria-label="下轮工作模式" value={s.settings.mode || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, mode: e.target.value || undefined})}><NativeSelectOption value="">沿用当前模式</NativeSelectOption>{s.modes.map(mode => <NativeSelectOption key={mode} value={mode}>{modeLabel(mode)}</NativeSelectOption>)}</NativeSelect></label>
+          <label className="grid gap-1.5 text-xs">思考强度<NativeSelect aria-label="下轮思考强度" value={nextEffort || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, effort: e.target.value === inheritedEffort ? undefined : e.target.value || undefined})}>{!nextEffort && <NativeSelectOption value="" disabled>未获取思考强度</NativeSelectOption>}{nextEffort && !efforts.some(e => e.reasoningEffort === nextEffort) && <NativeSelectOption value={nextEffort}>{effortLabel(nextEffort)}</NativeSelectOption>}{efforts.map(e => <NativeSelectOption key={e.reasoningEffort} value={e.reasoningEffort}>{effortLabel(e.reasoningEffort)}</NativeSelectOption>)}</NativeSelect></label>
+          <label className="grid gap-1.5 text-xs">工作模式<NativeSelect aria-label="下轮工作模式" value={nextMode || ""} disabled={s.optionsLoading || s.submitting} onChange={e => controller.setSettings({...s.settings, mode: e.target.value === context?.mode ? undefined : e.target.value || undefined})}>{!nextMode && <NativeSelectOption value="" disabled>未获取工作模式</NativeSelectOption>}{nextMode && !s.modes.includes(nextMode) && <NativeSelectOption value={nextMode}>{modeLabel(nextMode)}</NativeSelectOption>}{s.modes.map(mode => <NativeSelectOption key={mode} value={mode}>{modeLabel(mode)}</NativeSelectOption>)}</NativeSelect></label>
         </div>
         {s.optionsLoading && <p role="status" className="text-xs text-muted-foreground">正在读取 Codex 设置…</p>}
-        {changed && <div className="flex items-center justify-between gap-2 text-xs"><span>已设置下一轮参数</span><Button size="sm" variant="ghost" onClick={() => controller.setSettings(s.settings.permission ? {permission: s.settings.permission} : {})}>恢复沿用</Button></div>}
+        {changed && <div className="flex items-center justify-between gap-2 text-xs"><span>已设置下一轮参数</span><Button size="sm" variant="ghost" onClick={() => controller.setSettings(s.settings.permission ? {permission: s.settings.permission} : {})}>恢复当前设置</Button></div>}
       </>}
       <Collapsible.Root className="border-t pt-3"><Collapsible.Trigger className="chat-context-disclosure flex w-full items-center justify-between text-xs">当前上下文与权限<ChevronDownIcon className="size-3" aria-hidden="true" /></Collapsible.Trigger><Collapsible.Content>
-        <dl className="chat-context-facts mt-3 grid gap-2 text-xs"><dt>主工作目录</dt><dd>{context?.cwd || s.session?.cwd || controller.options.target?.cwd || "所选项目目录"}</dd><dt>额外工作目录</dt><dd>{context?.additional_directories?.join("、") || "未报告额外目录"}</dd><dt>当前模型 / 思考强度</dt><dd>{model || "Codex 未报告"} / {effort || "沿用 Codex"}</dd><dt>当前工作模式</dt><dd>{modeLabel(context?.mode)}</dd><dt>审批策略</dt><dd>{approvalLabel(context?.approvalPolicy)}</dd><dt>批准方式</dt><dd>{context?.approvalsReviewer === "auto_review" || context?.approvalsReviewer === "guardian_subagent" ? "帮我批准" : context?.approvalsReviewer === "user" ? "手动批准" : "Codex 未报告"}</dd><dt>沙箱</dt><dd>{context?.sandbox?.type || "Codex 未报告"}</dd></dl>
+        <dl className="chat-context-facts mt-3 grid gap-2 text-xs"><dt>主工作目录</dt><dd>{context?.cwd || s.session?.cwd || controller.options.target?.cwd || "所选项目目录"}</dd><dt>额外工作目录</dt><dd>{context?.additional_directories?.join("、") || "未报告额外目录"}</dd><dt>当前模型 / 思考强度</dt><dd>{model || "Codex 未报告"} / {effort ? effortLabel(effort) : "未获取思考强度"}</dd><dt>当前工作模式</dt><dd>{modeLabel(context?.mode)}</dd><dt>审批策略</dt><dd>{approvalLabel(context?.approvalPolicy)}</dd><dt>批准方式</dt><dd>{context?.approvalsReviewer === "auto_review" || context?.approvalsReviewer === "guardian_subagent" ? "帮我批准" : context?.approvalsReviewer === "user" ? "手动批准" : "Codex 未报告"}</dd><dt>沙箱</dt><dd>{context?.sandbox?.type || "Codex 未报告"}</dd></dl>
       </Collapsible.Content></Collapsible.Root>
     </Popover.Content></Popover.Portal>
   </Popover.Root>;

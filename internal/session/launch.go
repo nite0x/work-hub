@@ -27,10 +27,6 @@ func (a *Service) LaunchHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, err.Error())
 		return
 	}
-	if !a.Workspace.ReadOnlySessions && a.BusyWorkspace("", p.Cwd) {
-		httpx.WriteError(w, 409, "此目录正在侧栏运行，请等待完成或停止后再打开终端")
-		return
-	}
 	if err := a.LaunchConflict("", p.Cwd); err != nil {
 		httpx.WriteError(w, 409, err.Error())
 		return

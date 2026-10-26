@@ -13,6 +13,9 @@ import (
 )
 
 func nativeTerminalConflict(id, cwd string) error {
+	if id == "" {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	// Fixed command; no project names, paths or user input enter PowerShell code.
@@ -41,12 +44,9 @@ func nativeTerminalConflict(id, cwd string) error {
 		if len(args) > 1 && isCodexServerCommand(args[1]) {
 			continue
 		}
-		for i, arg := range args {
-			if id != "" && arg == id {
+		for _, arg := range args {
+			if arg == id {
 				return fmt.Errorf("此会话仍有 Codex 终端打开，请先退出终端中的 Codex")
-			}
-			if (arg == "--cd" || arg == "-C") && i+1 < len(args) && platform.SameWorkspacePath(args[i+1], cwd) || strings.HasPrefix(arg, "--cd=") && platform.SameWorkspacePath(strings.TrimPrefix(arg, "--cd="), cwd) {
-				return fmt.Errorf("此目录仍有 Codex 终端打开，请先退出终端中的 Codex")
 			}
 		}
 	}

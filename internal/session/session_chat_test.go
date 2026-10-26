@@ -273,8 +273,8 @@ func TestManualTerminalDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	add("2", "codex\x00--cd\x00"+cwd+"\x00prompt\x00", t.TempDir())
-	if err := scanTerminalSessions(proc, id, cwd); err == nil {
-		t.Fatal("initial CLI not detected")
+	if err := scanTerminalSessions(proc, id, cwd); err != nil {
+		t.Fatal("independent CLI blocks conversation:", err)
 	}
 	other := t.TempDir()
 	add("3", "codex\x00resume\x00"+id+"\x00", other)

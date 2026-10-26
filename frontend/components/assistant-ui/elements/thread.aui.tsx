@@ -141,6 +141,7 @@ const taskAwareGroupBy = (
 
 export type ThreadProps = {
   composer?: ReactNode;
+  composerStatus?: ReactNode;
   composerControls?: ReactNode;
   composerLeadingControls?: ReactNode;
   components?: ThreadComponents | undefined;
@@ -191,6 +192,7 @@ const ThreadHistorySkeleton: FC = () => (
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   composer,
+  composerStatus,
   composerControls,
   composerLeadingControls,
   autoFocus = true,
@@ -201,13 +203,14 @@ export const Thread: FC<ThreadProps> = ({
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot composer={composer} composerControls={composerControls} composerLeadingControls={composerLeadingControls} isEmpty={isEmpty} autoFocus={autoFocus} managedScroll={managedScroll} readOnly={readOnly} />
+      <ThreadRoot composer={composer} composerStatus={composerStatus} composerControls={composerControls} composerLeadingControls={composerLeadingControls} isEmpty={isEmpty} autoFocus={autoFocus} managedScroll={managedScroll} readOnly={readOnly} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: boolean; readOnly: boolean; composer?: ReactNode; composerControls?: ReactNode; composerLeadingControls?: ReactNode }> = ({
+const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: boolean; readOnly: boolean; composer?: ReactNode; composerStatus?: ReactNode; composerControls?: ReactNode; composerLeadingControls?: ReactNode }> = ({
   composer,
+  composerStatus,
   composerControls,
   composerLeadingControls,
   isEmpty,
@@ -266,6 +269,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean; managedScroll: bool
             )}
           >
             <ThreadScrollToBottom />
+            {composerStatus}
             {!readOnly && !composer && <ThreadFollowupSuggestions />}
             {!readOnly && (composer ?? <Composer autoFocus={autoFocus} controls={composerControls} leadingControls={composerLeadingControls} />)}
             <AuiIf condition={(s) => !readOnly && !composer && isNewChatView(s) && s.composer.isEmpty}>

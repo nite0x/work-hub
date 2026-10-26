@@ -100,14 +100,6 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan := execution.plan
-	if a.BusyWorkspace("", plan.Cwd) {
-		httpx.WriteError(w, 409, "此工作目录已有对话正在运行，请等待完成或停止后再发送")
-		return
-	}
-	if err := a.AppTerminalConflict("", plan.Cwd); err != nil {
-		httpx.WriteError(w, 409, "所选目录仍有终端工作，为避免同时修改，请先关闭终端 Codex 或切换其关联会话到侧栏")
-		return
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c, err := a.openLive(ctx)
 	if err != nil {

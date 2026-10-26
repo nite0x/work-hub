@@ -171,9 +171,9 @@ func executeWorkspaceRequest(ctx context.Context, r Request) (any, error) {
 		return nil, a.StartTerminal(r.Settings, p, nil)
 	case "session":
 		switch r.Method {
-		case "thread/list", "thread/read", "thread/items/list", "thread/turns/list":
+		case "thread/list", "thread/read", "thread/items/list", "thread/turns/list", "model/list", "collaborationMode/list":
 		default:
-			return nil, fmt.Errorf("辅助程序只支持读取会话")
+			return nil, fmt.Errorf("辅助程序只支持读取会话、可用模型和工作模式")
 		}
 		c, err := codex.OpenSessionClient(ctx)
 		if err != nil {

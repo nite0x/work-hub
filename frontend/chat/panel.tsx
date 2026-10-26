@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from "react";
 import {AssistantRuntimeProvider, MessageNotSentError, useExternalStoreRuntime, type ThreadMessageLike} from "@assistant-ui/react";
-import {PlusIcon, RefreshCwIcon, SearchIcon, GitBranchIcon, FolderIcon, TerminalIcon} from "lucide-react";
+import {PlusIcon, RefreshCwIcon, SearchIcon, GitBranchIcon, FolderIcon, TerminalIcon, LoaderCircleIcon, HandIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
 import {TooltipIconButton} from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {Alert, AlertDescription} from "@/components/ui/alert";
@@ -22,6 +22,20 @@ import {QuestionComposer} from "./questions";
 
 const chatComponents = {Text: ChatMessageText, UserImage: ChatUserImage};
 const toThreadMessage = (message: ThreadMessageLike) => message;
+
+function ChatRunIndicator({controller}: {controller: ChatController}) {
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  if (controller.options.readOnly || (!state.chat.busy && !state.submitting && !state.stopping)) return null;
+  const status = state.stopping || state.chat.status === "stopping" ? "stopping"
+    : state.chat.status === "waiting" ? "waiting"
+    : state.chat.status === "starting" ? "starting"
+    : state.chat.busy ? "running" : "sending";
+  const labels = {stopping: "正在停止…", waiting: "等待你的确认", starting: "正在连接…", running: state.chat.external ? "Codex 正在运行…" : "进行中…", sending: "正在发送…"};
+  return <div className="chat-run-indicator" role="status" aria-live="polite" data-state={status}>
+    {status === "waiting" ? <HandIcon aria-hidden="true" /> : <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+    <span>{labels[status]}</span>
+  </div>;
+}
 
 function ApprovalCard({approval, controller}: {approval: Approval; controller: ChatController}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -151,7 +165,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
       {state.historyError && <Alert variant="destructive" className="shrink-0 rounded-none"><AlertDescription>{state.historyError}</AlertDescription></Alert>}
       <div ref={reading.container} className="relative min-h-0 flex-1" onChange={event => {
         if (event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) controller.setDraft(event.target.value);
-      }}><Thread components={chatComponents} managedScroll autoFocus={false} readOnly={readOnly} composer={question ? <QuestionComposer key={JSON.stringify([state.chat.id, question.id])} approval={question} controller={controller} /> : undefined} composerLeadingControls={<ChatPermissions controller={controller} portal={panel} />} composerControls={<ChatControls controller={controller} portal={panel} />} />{reading.hasNew && !question && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
+      }}><Thread composerStatus={<ChatRunIndicator controller={controller} />} components={chatComponents} managedScroll autoFocus={false} readOnly={readOnly} composer={question ? <QuestionComposer key={JSON.stringify([state.chat.id, question.id])} approval={question} controller={controller} /> : undefined} composerLeadingControls={<ChatPermissions controller={controller} portal={panel} />} composerControls={<ChatControls controller={controller} portal={panel} />} />{reading.hasNew && !question && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
       {readOnly && (terminal?.waiting || !!terminal?.confirmations?.length) && <Alert className="max-h-[40%] shrink-0 overflow-y-auto rounded-none" role="alert"><AlertDescription>
         <p>终端有待确认事项，请在原终端处理。{!terminal.connected && "连接已断开，以下提示尚未核实。"}</p>
         {terminal.confirmations?.map(item => <div key={item.id} className="space-y-2"><strong>{cleanText(item.title)}</strong>{item.details && <pre className="whitespace-pre-wrap wrap-anywhere">{cleanText(item.details)}</pre>}{item.questions?.map(q => <p key={q.id}>{cleanText(q.header)} · {cleanText(q.question)}{q.options?.map(o => <span key={o.label} className="block">{cleanText(o.label)} · {cleanText(o.description)}</span>)}</p>)}</div>)}

@@ -69,11 +69,13 @@ func TestTerminalDetectionDistinguishesSandboxFromInteractiveCLI(t *testing.T) {
 		{"sandbox absolute path", "session", cwd, []string{"/usr/bin/codex-linux-sandbox", "--", "/bin/bash"}, false},
 		{"app server", "session", cwd, []string{"codex", "app-server", "--listen", "unix://"}, false},
 		{"exec server", "session", cwd, []string{"codex", "exec-server"}, false},
-		{"plain CLI same cwd", "session", cwd, []string{"codex"}, true},
+		{"plain CLI same cwd", "session", cwd, []string{"codex"}, false},
 		{"plain CLI unrelated cwd", "", other, []string{"codex"}, false},
-		{"plain CLI new session same cwd", "", cwd, []string{"codex"}, true},
+		{"plain CLI new session same cwd", "", cwd, []string{"codex"}, false},
+		{"other session same cwd", "session", cwd, []string{"codex", "resume", "other-session"}, false},
+		{"resumed session same cwd", "session", cwd, []string{"codex", "resume", "session"}, true},
 		{"resumed session other cwd", "session", other, []string{"codex", "resume", "session"}, true},
-		{"CLI explicit cwd", "session", other, []string{"codex", "--cd", cwd}, true},
+		{"CLI explicit cwd", "session", other, []string{"codex", "--cd", cwd}, false},
 		{"exited process", "session", cwd, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

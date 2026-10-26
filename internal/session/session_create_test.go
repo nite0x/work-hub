@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"worktree-hub/internal/codex"
+	"worktree-hub/internal/model"
 )
 
 func TestNewSessionStartsFirstTurnOnCreatingConnectionAndIsIdempotent(t *testing.T) {
@@ -40,8 +41,9 @@ func TestNewSessionStartsFirstTurnOnCreatingConnectionAndIsIdempotent(t *testing
 	if params["cwd"] != q.Members[0].Path {
 		t.Fatal(params)
 	}
-	if code, _ := call(t, a, "POST", "/api/requirements/"+q.ID+"/launch", nil); code != 409 {
-		t.Fatal("terminal launched during first sidebar turn")
+	a.Workspace.Launch = func(model.LaunchPlan, func()) error { return nil }
+	if code, raw := call(t, a, "POST", "/api/requirements/"+q.ID+"/launch", nil); code != 200 {
+		t.Fatalf("independent terminal blocked during first sidebar turn: %d %s", code, raw)
 	}
 	c.event("turn/completed", map[string]any{"turn": map[string]any{"id": "turn", "status": "completed"}})
 	awaitChat(t, a, func(s ChatState) bool { return !s.Busy })

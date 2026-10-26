@@ -99,19 +99,6 @@ func (a *Service) ChatBusy(session string) bool {
 	run := a.ChatFor(session)
 	return run != nil && run.snapshot().Busy
 }
-func (a *Service) BusyWorkspace(session, cwd string) bool {
-	a.chatMu.Lock()
-	defer a.chatMu.Unlock()
-	for _, run := range a.chats {
-		run.mu.Lock()
-		busy := run.state.Busy && (run.session == session || platform.SameWorkspacePath(run.cwd, cwd))
-		run.mu.Unlock()
-		if busy {
-			return true
-		}
-	}
-	return false
-}
 func (a *Service) CloseChats() {
 	a.chatMu.Lock()
 	runs := []*ChatRun{}
@@ -220,10 +207,6 @@ func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, err.Error())
 		return
 	}
-	if a.BusyWorkspace("", cwd) && !a.ChatBusy(r.PathValue("session")) {
-		httpx.WriteError(w, 409, "此工作目录已有其他对话运行，请等待完成或停止后再发送")
-		return
-	}
 	a.chatMu.Lock()
 	if previous := a.chats[r.PathValue("session")]; previous != nil {
 		s := previous.snapshot()
@@ -329,26 +312,9 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			return
 		}
 	}
-	a.chatMu.Lock()
-	occupied := false
-	for _, other := range a.chats {
-		if other == run {
-			continue
-		}
-		other.mu.Lock()
-		occupied = occupied || (other.state.Busy && platform.SameWorkspacePath(other.cwd, s.Cwd))
-		other.mu.Unlock()
-	}
-	if !occupied {
-		run.mu.Lock()
-		run.cwd = s.Cwd
-		run.mu.Unlock()
-	}
-	a.chatMu.Unlock()
-	if occupied {
-		fail("会话原工作目录已有其他对话运行")
-		return
-	}
+	run.mu.Lock()
+	run.cwd = s.Cwd
+	run.mu.Unlock()
 	plan.Cwd = s.Cwd
 	checkOwner := func() error {
 		if err := a.AppTerminalConflict(run.session, s.Cwd); err != nil {

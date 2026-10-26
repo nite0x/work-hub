@@ -284,6 +284,49 @@ test("active-turn input uses steer and recovers a lost acknowledgement without a
  assert.equal(c.getSnapshot().draft,'');assert.equal(c.getSnapshot().chat.busy,true);
 });
 
+for (const identity of ["generated", "correlated"]) test(`steering reconciles ${identity} message IDs without collapsing repeated user input`, async () => {
+  Object.assign(globalThis, {document: {hidden: false}});
+  const text = "再检查一次";
+  const original = {id: "original", turn_id: "turn", kind: "user", text};
+  let native = [original];
+  const requests: string[] = [];
+  const state = () => ({...running("active"), entries: [...native], accepted_inputs: [...requests]});
+  const c = setup(async (path, init) => {
+    if (init?.method === "POST") {
+      assert(path.endsWith("/chat/steer"));
+      requests.push(JSON.parse(String(init.body)).request_id);
+      return {accepted: requests.at(-1), chat: state()} as any;
+    }
+    return (path.endsWith("/history") ? {session, entries: [...native]} : state()) as any;
+  });
+  const users = () => mergeEntries(c.getSnapshot().entries, c.getSnapshot().chat.entries).filter(e => e.kind === "user");
+  c.connect();
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    await c.send(text);
+    await c.send(text);
+    assert.equal(users().length, 3);
+    // The native item ID can be unrelated to the request ID, or explicitly
+    // identify the second message before the first one is observed.
+    const first = {...original, id: identity === "generated" ? "native-first" : requests[1]};
+    native = [original, first];
+    await c.poll();
+    assert.equal(users().length, 3);
+    const remaining = "local:" + requests[identity === "generated" ? 1 : 0];
+    assert.deepEqual(users().filter(e => e.id.startsWith("local:")).map(e => e.id), [remaining]);
+    // Repeated snapshots must not use the same native message to confirm two sends.
+    await c.poll();
+    assert.equal(users().length, 3);
+    assert(users().some(e => e.id === remaining));
+    native = [original, first, {...original, id: "native-last"}];
+    await c.poll();
+    await c.history();
+    assert.equal(users().length, 3);
+    assert(users().every(e => !e.id.startsWith("local:")));
+    assert(users().every(e => e.text === text));
+  } finally { c.disconnect(); }
+});
+
 test("failed steering preserves the same retry identity and never silently starts a new turn",async()=>{
  const posts:any[]=[];
  const c=setup(async(path,init)=>{

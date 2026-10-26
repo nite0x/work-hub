@@ -57,7 +57,7 @@ func TestManagedMultiProjectLaunchMovesAdditionalRootsToBridge(t *testing.T) {
 	if strings.Contains(plan.Command, "--add-dir") || !strings.Contains(plan.Command, "--remote") {
 		t.Fatalf("incompatible managed arguments: %s", plan.Command)
 	}
-	b := a.TerminalOwner("", plan.Cwd)
+	b := a.bridges[strings.TrimPrefix(plan.Args[len(plan.Args)-1], "unix://")]
 	if b == nil || len(plan.AdditionalDirectories) != 1 || !reflect.DeepEqual(b.additionalDirectories, plan.AdditionalDirectories) {
 		t.Fatalf("missing managed roots: %+v", plan)
 	}
@@ -269,6 +269,7 @@ func TestLaunchWatchKeepsConnectedTerminal(t *testing.T) {
 	}
 	b.mu.Lock()
 	b.connected = true
+	b.session = "session"
 	b.mu.Unlock()
 	b.watchLaunch(20 * time.Millisecond)
 	if err := a.AppTerminalConflict("session", b.cwd); err == nil || !strings.Contains(err.Error(), "保有") {

@@ -10,14 +10,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
-	"worktree-hub/internal/platform"
 )
 
 func nativeTerminalConflict(id, cwd string) error {
+	if id == "" {
+		return nil
+	}
 	processes, err := unix.SysctlKinfoProcSlice("kern.proc.uid", os.Getuid())
 	if err != nil {
 		return fmt.Errorf("无法核实 Codex 终端占用：%w", err)
@@ -41,35 +42,10 @@ func nativeTerminalConflict(id, cwd string) error {
 		if len(args) > 1 && isCodexServerCommand(args[1]) {
 			continue
 		}
-		var dir string
-		for i, arg := range args[1:] {
-			if id != "" && arg == id {
+		for _, arg := range args[1:] {
+			if arg == id {
 				return fmt.Errorf("此会话仍有 Codex 终端打开，请先退出终端中的 Codex")
 			}
-			if (arg == "--cd" || arg == "-C") && i+2 < len(args) {
-				dir = args[i+2]
-			} else if strings.HasPrefix(arg, "--cd=") {
-				dir = strings.TrimPrefix(arg, "--cd=")
-			}
-		}
-		if !filepath.IsAbs(dir) {
-			base, err := darwinProcessCwd(pid)
-			if err != nil {
-				if errors.Is(unix.Kill(pid, 0), unix.ESRCH) {
-					continue
-				}
-				return err
-			}
-			dir = filepath.Join(base, dir)
-		}
-		if canonical, err := filepath.EvalSymlinks(dir); err == nil {
-			dir = canonical
-		}
-		if canonical, err := filepath.EvalSymlinks(cwd); err == nil {
-			cwd = canonical
-		}
-		if platform.SameWorkspacePath(dir, cwd) {
-			return fmt.Errorf("此目录仍有 Codex 终端打开，请先退出终端中的 Codex")
 		}
 	}
 	return nil

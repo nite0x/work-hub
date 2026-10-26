@@ -373,10 +373,6 @@ func (a *Service) ResumeSessionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	p.Cwd = s.Cwd
 	p.Session = id
-	if a.BusyWorkspace(id, p.Cwd) {
-		httpx.WriteError(w, 409, "此会话或工作目录正在侧栏运行，请先等待完成")
-		return
-	}
 	if err := a.LaunchConflict(id, p.Cwd); err != nil {
 		httpx.WriteError(w, 409, err.Error())
 		return
