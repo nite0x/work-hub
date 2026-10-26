@@ -294,16 +294,8 @@ func (a *Service) resolveCreation(ctx context.Context, target SessionTarget) (ex
 				if evalErr != nil || !platform.SameWorkspacePath(resolved, p.CommonDir) {
 					return out, fmt.Errorf("工作目录的仓库归属已变化")
 				}
-				if m.Mode != "project" && m.Mode != "worktree" {
-					branch, branchErr := workspace.Git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
-					expected := m.Branch
-					if expected == "" {
-						expected = q.Branch
-					}
-					if branchErr != nil || strings.TrimSpace(branch) != expected {
-						return out, fmt.Errorf("实际分支与任务记录不一致，请先核对 %s", m.ProjectName)
-					}
-				}
+				// Sessions use the directory's current checkout. The task's recorded
+				// branch is creation metadata, not a restriction on later checkouts.
 			}
 			if !platform.SameWorkspacePath(dir, selected) {
 				out.plan.AdditionalDirectories = append(out.plan.AdditionalDirectories, dir)
