@@ -18,7 +18,7 @@ try {
   const start = () => JSON.parse(run('/usr/bin/work-hub', ['--backend-info', '--data', data, '--root', path.join(directory, 'workspaces')]));
   const info = start();
   const descriptor = JSON.parse(readFileSync(path.join(data, 'service.json')));
-  let response = await fetch(info.url + '/api/settings/master-sync', { method: 'PUT', headers: { 'X-CSRF-Token': descriptor.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false, time: '09:25' }) });
+  let response = await fetch(info.url + '/api/settings/terminal', { method: 'PUT', headers: { 'X-CSRF-Token': descriptor.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'auto' }) });
   assert.equal(response.status, 200);
   assert.throws(() => run('sudo', ['dpkg', '-i', installer])); // Do not replace a live user's package.
   run(backend, ['--prepare-upgrade', '--data', data]);
@@ -26,7 +26,7 @@ try {
   const upgraded = start();
   const credentials = JSON.parse(readFileSync(path.join(data, 'service.json')));
   response = await fetch(upgraded.url + '/api/state', { headers: { 'X-CSRF-Token': credentials.token } });
-  assert.equal((await response.json()).master_sync.settings.time, '09:25');
+  assert.equal((await response.json()).terminal.settings.kind, 'auto');
   run(backend, ['--prepare-upgrade', '--data', data]);
   run('sudo', ['dpkg', '--remove', name]);
   assert(existsSync(path.join(data, 'worktree-hub.db')));

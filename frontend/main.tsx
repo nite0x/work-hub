@@ -13,6 +13,7 @@ import { SettingsPage, EnvironmentForm } from "./workspace/settings"
 import { SessionPickerDialog, CommandOutputDialog } from "./workspace/sessions"
 import { SessionBrowser, ConversationDialogHeader } from "./workspace/session-browser"
 import "./styles.css"
+import { TaskReviewDialog, ChangesDialog } from "./workspace/task-review"
 
 function SearchField() {
   return (
@@ -65,6 +66,7 @@ mount("newTaskButton", <Button type="button" id="newButton">＋ 创建任务</Bu
 mount("projectAddButton", <Button type="button" size="sm" data-action="new-project">＋ 添加项目</Button>)
 mount("refreshControl", <Button type="button" id="refreshButton" variant="ghost" size="icon-sm" title="刷新 Git 状态" aria-label="刷新 Git 状态"><RotateCw aria-hidden="true" /></Button>)
 mount("archiveFilterWrap", <Check id="archiveFilter" label="显示归档" />)
+mount("taskStatusFilterWrap", <label className="flex items-center gap-2 text-sm"><span className="sr-only">筛选任务状态</span><NativeSelect id="taskStatusFilter" aria-label="筛选任务状态"><Option value="all">全部状态</Option><Option value="issues">目录异常</Option><Option value="dirty">有修改</Option><Option value="push">待推送</Option><Option value="conflicts">Git 操作待处理</Option></NativeSelect></label>)
 mount("projectEnvironmentWrap", <label className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground"><span className="shrink-0 whitespace-nowrap">项目环境</span><NativeSelect id="projectEnvironment" aria-label="项目环境"><Option value="local">本机</Option></NativeSelect></label>)
 mount("offlineFeedback", <Feedback id="offlineBanner" variant="destructive" className="mb-4" hidden />)
 mount("projectDialog", <ProjectForm />)
@@ -80,3 +82,5 @@ mount("sessionDialog", <SessionPickerDialog />)
 mount("sessionCommandOutputDialog", <CommandOutputDialog />)
 mount("sessionBrowserHome", <SessionBrowser />)
 mount("conversationDialogHeader", <ConversationDialogHeader />)
+mount("taskReviewDialog", <TaskReviewDialog />)
+mount("changesDialog", <ChangesDialog />)

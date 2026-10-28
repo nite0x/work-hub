@@ -9,6 +9,7 @@ import { Action, Feedback, Field, ModalHeader, NativeSelect, StatusBadge } from 
 import type { Task } from "./types"
 
 export interface Session {
+  browser_key?: string; environment_id?: string; environment_name?: string;
   context?: ReturnType<typeof import("./conversation-context").conversationContext>;
   id: string; name: string; cwd: string; updated_at?: number; updatedAt?: number;
   source?: string; error?: string; available?: boolean;

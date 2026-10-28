@@ -47,14 +47,13 @@ try {
   assert(concurrent.every(candidate => candidate.pid === info.pid));
   assert.notEqual(info.pid, credentials.pid);
   const beforeUpgrade = JSON.parse(await readFile(path.join(data, 'service.json'), 'utf8'));
-  assert.equal((await fetch(info.url + '/api/settings/master-sync', { method: 'PUT', headers: { 'X-CSRF-Token': beforeUpgrade.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false, time: '09:25' }) })).status, 200);
+  assert.equal((await fetch(info.url + '/api/settings/terminal', { method: 'PUT', headers: { 'X-CSRF-Token': beforeUpgrade.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'auto' }) })).status, 200);
   await run(binary, ['--prepare-upgrade', '--data', data]);
   await run(binary, ['--prepare-upgrade', '--data', data]); // installer retries are idempotent.
   info = await start(['--root', root]);
   const afterUpgrade = JSON.parse(await readFile(path.join(data, 'service.json'), 'utf8'));
   const state = await (await fetch(info.url + '/api/state', { headers: { 'X-CSRF-Token': afterUpgrade.token } })).json();
-  assert.equal(state.master_sync.settings.time, '09:25');
-  assert.equal(state.master_sync.settings.enabled, false);
+  assert.equal(state.terminal.settings.kind, 'auto');
   await run(binary, ['--prepare-upgrade', '--data', data]);
   info = null;
   console.log('Desktop lifecycle passed: detached survival, authenticated API, reuse, root conflict, safe stop, stale recovery, concurrent startup, idempotent upgrade preparation and retained database.');

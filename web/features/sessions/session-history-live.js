@@ -50,7 +50,7 @@ async function startHistoryPush(current) {
   current.pushRunning = true;
   const controller = new AbortController();
   current.pushAbort = controller;
-  const environment = activeEnvironment;
+  const environment = current.environment;
   try {
     const response = await fetch(`/api/sessions/${encodeURIComponent(current.session)}/history/events`, {
       headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal: controller.signal
@@ -60,9 +60,9 @@ async function startHistoryPush(current) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    while (sessionHistoryState === current && environment === activeEnvironment && !controller.signal.aborted) {
+    while (sessionHistoryState === current && !controller.signal.aborted) {
       const chunk = await reader.read();
-      if (sessionHistoryState !== current || environment !== activeEnvironment || controller.signal.aborted) break;
+      if (sessionHistoryState !== current || controller.signal.aborted) break;
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
       let boundary;

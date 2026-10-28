@@ -544,6 +544,13 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeGitActionError(w, in.Action, err)
 		return
 	}
+	if in.RequirementID != "" && (in.Action == "switch" || in.Action == "adopt_branch") && a.TaskContextUpdated != nil {
+		if q, e := a.Workspace.Store.Requirement(in.RequirementID); e == nil {
+			if e := a.TaskContextUpdated(r.Context(), q); e != nil {
+				message += "；自动任务上下文更新失败：" + e.Error()
+			}
+		}
+	}
 	httpx.WriteJSON(w, 200, map[string]string{"message": message, "output": RedactGitOutput(output)})
 }
 

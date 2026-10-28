@@ -1,13 +1,16 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"worktree-hub/internal/codex"
 	"worktree-hub/internal/model"
 	"worktree-hub/internal/project"
 	"worktree-hub/internal/task"
@@ -39,6 +42,9 @@ func testApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	a.Projects.CredentialHelper = ""
+	a.openTitleLive = func(context.Context) (codex.LiveClient, error) {
+		return nil, fmt.Errorf("title generation is mocked in tests")
+	}
 	t.Cleanup(func() { a.CloseChats(); a.CloseBridges(); a.Projects.Close(); a.Workspace.Close() })
 	return a
 }

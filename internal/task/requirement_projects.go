@@ -95,8 +95,8 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 	preview.Members = append(append([]model.Member{}, q.Members...), added...)
 	needsWorkspace := false
 	for _, m := range added {
-		needsWorkspace = needsWorkspace || m.Mode == "new"
-		q.HasWorkspace = q.HasWorkspace || m.Mode == "new"
+		needsWorkspace = needsWorkspace || createsWorktree(m.Mode)
+		q.HasWorkspace = q.HasWorkspace || createsWorktree(m.Mode)
 	}
 	if needsWorkspace {
 		err = ensureTaskWorkspace(r.Context(), preview)
@@ -117,7 +117,10 @@ func (a *Service) AddRequirementProjectsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 	}
-	if _, err := tx.Exec(`UPDATE requirements SET state='creating',has_workspace=? WHERE id=?`, q.HasWorkspace, q.ID); err != nil {
+	if q.PrimaryProjectID == "" && len(added) > 0 {
+		q.PrimaryProjectID = added[0].ProjectID
+	}
+	if _, err := tx.Exec(`UPDATE requirements SET state='creating',has_workspace=?,primary_project_id=NULLIF(?,'') WHERE id=?`, q.HasWorkspace, q.PrimaryProjectID, q.ID); err != nil {
 		httpx.DbError(w, err)
 		return
 	}

@@ -34,7 +34,11 @@ func openAppForWorkspace(dataDir, root string, remote *workspace.Client) (*App, 
 		return nil, err
 	}
 	tasks := task.New(env)
-	return &App{Workspace: env, Tasks: tasks, Projects: project.New(env), Sessions: session.New(env, tasks), token: model.NewID() + model.NewID(), pickDirectory: platform.PickDirectory}, nil
+	sessions := session.New(env, tasks)
+	projects := project.New(env)
+	projects.ReserveWorktree = sessions.ReserveWorktree
+	projects.TaskContextUpdated = task.WriteBriefContext
+	return &App{Workspace: env, Tasks: tasks, Projects: projects, Sessions: sessions, token: model.NewID() + model.NewID(), pickDirectory: platform.PickDirectory}, nil
 }
 
 // Close releases the resources owned by this application, including partially

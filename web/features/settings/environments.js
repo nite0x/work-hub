@@ -7,11 +7,13 @@ function environmentOptions() {
 async function loadEnvironments() {
   const data = await api('/api/environments', { environment: 'local' });
   environmentInventory = data.environments;
-  for (const id of ['environmentSelect', 'projectEnvironment', 'sessionsEnvironment']) {
+  for (const id of ['environmentSelect', 'projectEnvironment']) {
     $('#' + id).innerHTML = environmentOptions();
     $('#' + id).value = activeEnvironment;
   }
-  $('#sessionEnvironmentField').hidden = data.environments.length < 2;
+  $('#sessionsEnvironment').innerHTML = '<option value="">全部环境</option>' + environmentOptions();
+  $('#sessionsEnvironment').value = typeof conversationView !== 'undefined' ? conversationView?.environmentFilter || '' : '';
+  $('#sessionEnvironmentField').hidden = data.environments.length < 2 || (typeof conversationView !== 'undefined' && !!conversationView && conversationView.scope.kind !== 'all');
   $('#reconnectEnvironment').hidden = activeEnvironment === 'local';
   $('#environmentDistro').innerHTML = data.distributions.map(name => `<option>${esc(name)}</option>`).join('');
   $('#addEnvironment').disabled = !data.distributions.length;
@@ -24,7 +26,7 @@ async function loadEnvironments() {
   renderSettings();
 }
 async function selectEnvironment(id, route = '/requirements', updateHistory = true) {
-  if (state.busy) { $('#environmentSelect').value = activeEnvironment; $('#projectEnvironment').value = activeEnvironment; $('#sessionsEnvironment').value = activeEnvironment; toast('请等待当前操作完成后切换环境'); return; }
+  if (state.busy || blockingMutationDialog()) { $('#environmentSelect').value = activeEnvironment; $('#projectEnvironment').value = activeEnvironment; toast('请等待当前操作完成后切换环境'); return; }
   route = route.replace(/^#/, '');
   const changed = activeEnvironment !== id;
   if (changed && typeof suspendSessionWorkspace === 'function') suspendSessionWorkspace();
@@ -38,24 +40,22 @@ async function selectEnvironment(id, route = '/requirements', updateHistory = tr
   if (id === 'local') url.searchParams.delete('environment'); else url.searchParams.set('environment', id);
   url.hash = route;
   if (updateHistory && url.href !== location.href) history.pushState(null, '', url);
-  if (changed) Object.assign(state, { projects: [], requirements: [], selectedProject: null, selectedRequirement: null, view: 'requirements', root: '', terminal: {}, master_sync: null, loaded: false, refreshing: false });
+  if (changed) Object.assign(state, { projects: [], requirements: [], selectedProject: null, selectedRequirement: null, view: 'requirements', root: '', terminal: {}, loaded: false, refreshing: false });
   readRoute();
   $('#search').value = '';
   if (changed) $('#content').textContent = '正在连接任务所属环境…';
   $('#reconnectEnvironment').hidden = id === 'local';
   $('#environmentSelect').value = id;
   $('#projectEnvironment').value = id;
-  $('#sessionsEnvironment').value = id;
   $('#environmentStatus').textContent = environmentName(id);
   render();
   await refresh();
 }
 $('#environmentSelect').addEventListener('change', event => selectEnvironment(event.target.value, '/settings'));
 $('#projectEnvironment').addEventListener('change', event => selectEnvironment(event.target.value, '/projects'));
-$('#sessionsEnvironment').addEventListener('change', event => selectEnvironment(event.target.value, '/sessions'));
 window.addEventListener('popstate', () => {
   const id = new URLSearchParams(location.search).get('environment') || 'local';
-  if (state.busy) {
+  if (state.busy || blockingMutationDialog()) {
     const url = new URL(location.href);
     if (activeEnvironment === 'local') url.searchParams.delete('environment'); else url.searchParams.set('environment', activeEnvironment);
     history.replaceState(null, '', url);

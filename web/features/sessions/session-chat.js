@@ -83,7 +83,7 @@ function applyChatState(current, chat) {
   const scroll = $('#sessionHistoryScroll');
   const follow = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 100;
   current.chat = chat;
-  updateSessionChatActivity(current.requirement, current.session, chat);
+  updateSessionChatActivity(current.requirement, current.session, chat, current.environment);
   renderChatControls(current);
   renderChatApprovals(current);
   if (JSON.stringify(previous?.entries) !== JSON.stringify(chat.entries)) {
@@ -97,7 +97,7 @@ async function pollChat(current) {
   if (sessionHistoryState !== current || !current.session || current.polling) return;
   current.polling = true;
   try {
-    const chat = await api(chatPath(current), { signal: current.chatAbort.signal });
+    const chat = await api(chatPath(current), { environment: current.environment, signal: current.chatAbort.signal });
     applyChatState(current, chat);
     if (chat.busy && !current.streaming) streamChat(current, chat.id);
   } catch (error) {
@@ -108,7 +108,7 @@ async function streamChat(current, id) {
   if (current.streaming || sessionHistoryState !== current) return;
   current.streaming = true;
   try {
-    const response = await fetch(chatPath(current) + '/events?run=' + encodeURIComponent(id), { headers: { 'X-CSRF-Token': token }, signal: current.chatAbort.signal });
+    const response = await fetch(chatPath(current) + '/events?run=' + encodeURIComponent(id), { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': current.environment }, signal: current.chatAbort.signal });
     if (!response.ok) { const body = await response.json(); throw new Error(body.error || '实时连接失败'); }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -162,7 +162,7 @@ $('#sessionChatForm').addEventListener('submit', async event => {
   current.pendingMessage = pending;
   current.submitting = true; current.chatError = ''; renderChatControls(current);
   try {
-    const chat = await api(chatPath(current), { method: 'POST', body: JSON.stringify({ text, request_id: pending.id }) });
+    const chat = await api(chatPath(current), { environment: current.environment, method: 'POST', body: JSON.stringify({ text, request_id: pending.id }) });
     if (sessionHistoryState !== current) return;
     applyChatState(current, chat); streamChat(current, chat.id);
   } catch (error) {
@@ -174,7 +174,7 @@ $('#stopSessionChat').addEventListener('click', async () => {
   if (!current?.chat?.busy || current.stopping) return;
   current.cancelingHandoff = current.chat.status === 'handoff';
   current.stopping = true; renderChatControls(current);
-  try { applyChatState(current, await api(chatPath(current) + '/stop', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id }) })); }
+  try { applyChatState(current, await api(chatPath(current) + '/stop', { environment: current.environment, method: 'POST', body: JSON.stringify({ run_id: current.chat.id }) })); }
   catch (error) { if (sessionHistoryState === current) current.chatError = error.message; }
   finally { current.stopping = false; current.cancelingHandoff = false; if (sessionHistoryState === current) renderChatControls(current); }
 });
@@ -184,7 +184,7 @@ $('#handoffSessionChat').addEventListener('click', async () => {
   current.handingOff = true; current.chatError = ''; renderChatControls(current);
   current.handoffRequest ||= crypto.randomUUID();
   try {
-    const chat = await api(chatPath(current) + '/handoff', { method: 'POST', body: JSON.stringify({ request_id: current.handoffRequest }) });
+    const chat = await api(chatPath(current) + '/handoff', { environment: current.environment, method: 'POST', body: JSON.stringify({ request_id: current.handoffRequest }) });
     applyChatState(current, chat); streamChat(current, chat.id);
   } catch (error) { if (sessionHistoryState === current) { current.chatError = error.message; await pollChat(current); } }
   finally { current.handingOff = false; if (sessionHistoryState === current) renderChatControls(current); }
@@ -206,7 +206,7 @@ async function answerChatApproval(form, decision) {
     const content = accepts ? window.WorkHubUI.readElicitation(form, approval.elicitation) : undefined;
     form.dataset.sending = '1'; disabled.forEach(([node]) => { node.disabled = true; });
     current.chatError = ''; renderChatControls(current);
-    applyChatState(current, await api(chatPath(current) + '/approval', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval, decision, answers: accepts ? answers : {}, ...(content === undefined ? {} : { content }) }) }));
+    applyChatState(current, await api(chatPath(current) + '/approval', { environment: current.environment, method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval, decision, answers: accepts ? answers : {}, ...(content === undefined ? {} : { content }) }) }));
   }
   catch (error) { if (sessionHistoryState === current) { current.chatError = error.message; renderChatControls(current); } }
   finally { delete form.dataset.sending; disabled.forEach(([node, value]) => { node.disabled = value; }); }
@@ -220,7 +220,7 @@ $('#sessionChatApprovals').addEventListener('click', async event => {
     const form = link.closest('[data-chat-approval]');
     if (!current?.chat?.busy || current.stopping || current.chat.status === 'stopping' || form.dataset.sending || link.dataset.opening) return;
     link.dataset.opening = '1';
-    try { await api(chatPath(current) + '/approval/open', { method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval }) }); }
+    try { await api(chatPath(current) + '/approval/open', { environment: current.environment, method: 'POST', body: JSON.stringify({ run_id: current.chat.id, approval_id: form.dataset.chatApproval }) }); }
     catch (error) { if (sessionHistoryState === current) { current.chatError = error.message; renderChatControls(current); } }
     finally { delete link.dataset.opening; }
     return;

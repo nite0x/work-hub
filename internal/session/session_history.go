@@ -30,24 +30,29 @@ type HistoryEntry struct {
 	CompletedAtMs   *int64            `json:"completed_at_ms"`
 	Tool            string            `json:"tool,omitempty"`
 	Images          []string          `json:"images,omitempty"`
+	Delivery        string            `json:"delivery,omitempty"`
+	Questions       []ChatQuestion    `json:"questions,omitempty"`
+	QuestionStatus  string            `json:"question_status,omitempty"`
 }
 
 type codexHistoryItem struct {
-	ID               string          `json:"id"`
-	Type             string          `json:"type"`
-	Content          json.RawMessage `json:"content"`
-	Text             string          `json:"text"`
-	Command          string          `json:"command"`
-	Cwd              string          `json:"cwd"`
-	Status           string          `json:"status"`
-	AggregatedOutput *string         `json:"aggregatedOutput"`
-	ExitCode         *int            `json:"exitCode"`
-	DurationMs       *int64          `json:"durationMs"`
-	Server           string          `json:"server"`
-	Tool             string          `json:"tool"`
-	Query            string          `json:"query"`
-	Path             string          `json:"path"`
-	Review           string          `json:"review"`
+	ID               string                   `json:"id"`
+	Type             string                   `json:"type"`
+	Content          json.RawMessage          `json:"content"`
+	Text             string                   `json:"text"`
+	Delivery         string                   `json:"delivery"`
+	Questions        []asyncUserInputQuestion `json:"questions"`
+	Command          string                   `json:"command"`
+	Cwd              string                   `json:"cwd"`
+	Status           string                   `json:"status"`
+	AggregatedOutput *string                  `json:"aggregatedOutput"`
+	ExitCode         *int                     `json:"exitCode"`
+	DurationMs       *int64                   `json:"durationMs"`
+	Server           string                   `json:"server"`
+	Tool             string                   `json:"tool"`
+	Query            string                   `json:"query"`
+	Path             string                   `json:"path"`
+	Review           string                   `json:"review"`
 	Changes          []struct {
 		Path string `json:"path"`
 		Diff string `json:"diff"`
@@ -62,9 +67,10 @@ type codexHistoryEntry struct {
 }
 
 type SessionHistory struct {
-	Session    codex.Session  `json:"session"`
-	Entries    []HistoryEntry `json:"entries"`
-	NextCursor *string        `json:"next_cursor"`
+	Session        codex.Session  `json:"session"`
+	Entries        []HistoryEntry `json:"entries"`
+	NextCursor     *string        `json:"next_cursor"`
+	HasUserMessage bool           `json:"has_user_message"`
 }
 
 func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
@@ -113,6 +119,9 @@ func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
 		e.Text = strings.Join(parts, "\n\n")
 	case "agentMessage":
 		e.Kind, e.Text = "assistant", i.Text
+		if i.Delivery == "async" && len(i.Questions) > 0 {
+			e.Delivery, e.Questions = "async", asyncChatQuestions(i.Questions)
+		}
 	case "commandExecution":
 		e.Kind, e.Command, e.Cwd, e.Status = "command", i.Command, i.Cwd, i.Status
 		e.Output, e.ExitCode, e.DurationMs = i.AggregatedOutput, i.ExitCode, i.DurationMs
@@ -200,6 +209,12 @@ func readSessionHistory(c codex.SessionClient, s codex.Session, cursor string) (
 		}
 		history.NextCursor = page.NextCursor
 	}
+	for _, entry := range history.Entries {
+		if entry.Kind == "user" {
+			history.HasUserMessage = true
+			break
+		}
+	}
 	return history, nil
 }
 
@@ -236,5 +251,9 @@ func (a *Service) SessionHistoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	a.prepareHistoryMedia(s.ID, history.Entries)
+	if err := a.decorateAsyncQuestions(s.ID, history.Entries); err != nil {
+		httpx.DbError(w, err)
+		return
+	}
 	httpx.WriteJSON(w, 200, history)
 }

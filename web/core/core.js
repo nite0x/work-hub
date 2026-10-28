@@ -59,15 +59,59 @@ function workspaceDisplayPath(root, ...parts) {
   return root.replace(/[\\/]+$/, '') + separator + parts.join(separator);
 }
 
-async function mutation(title, fn, errorElement) {
-  if (state.busy) return;
-  state.busy = true; document.body.classList.add('busy'); $('#busyTitle').textContent = title; $('#busyPanel').hidden = false;
+const operations = window.WorkHubUI.createOperations();
+function syncMutationControls() {
+  const pending = operations.snapshot();
+  const active = new Set(pending.map(item => String(item.id)));
+  document.querySelectorAll('[data-operation-disabled]').forEach(control => {
+    if (!active.has(control.dataset.operationDisabled)) {
+      control.disabled = control.dataset.operationWasDisabled === 'true';
+      delete control.dataset.operationDisabled; delete control.dataset.operationWasDisabled;
+    }
+  });
+  for (const operation of pending) {
+    if (operation.environment !== activeEnvironment) continue;
+    const roots = operation.project ? [...document.querySelectorAll('[data-project-id]')].filter(node => node.dataset.projectId === operation.project) : [];
+    const controls = roots.flatMap(root => [...root.querySelectorAll('button[data-action]:not([data-action="copy-path"]):not([data-action="changes-open"])')]);
+    if (operation.task) controls.push(...[...document.querySelectorAll('button[data-id]')].filter(button => button.dataset.id === operation.task && !['task-review','task-conversations','task-project-filter','copy-path'].includes(button.dataset.action)));
+    for (const control of controls) {
+      if (!control.dataset.operationDisabled) control.dataset.operationWasDisabled = String(control.disabled);
+      control.dataset.operationDisabled = String(operation.id); control.disabled = true;
+    }
+  }
+  $('#busyPanel').hidden = !pending.length;
+  if (pending.length) $('#busyTitle').textContent = pending[pending.length - 1].title + (pending.length > 1 ? `（共 ${pending.length} 项操作）` : '');
+}
+function blockingMutationDialog() { return document.querySelector('dialog[open][data-block-close]'); }
+async function mutation(title, fn, errorElement, options = {}) {
+  const scope = errorElement?.closest?.('dialog') || options.scope || null;
+  const environment = options.environment || activeEnvironment;
+  const task = options.task || (!options.project && state.selectedRequirement && scope?.id !== 'requirementDialog' ? state.selectedRequirement : undefined);
+  const key = options.key || (options.project ? 'project:' + options.project : task ? 'task:' + task : scope?.id || title);
+  const operation = operations.begin({key, environment, title, project: options.project, task});
+  if (!operation) { toast('同一工作现场的操作仍在进行，请稍候'); return; }
+  if (scope) {
+    scope.dataset.mutation = String(operation.id);
+    if (!options.background) scope.dataset.blockClose = '';
+    for (const control of scope.querySelectorAll('button,input,select,textarea')) {
+      if (options.background && control.classList.contains('close-dialog')) continue;
+      control.dataset.operationWasDisabled = String(control.disabled);
+      control.dataset.operationDisabled = String(operation.id); control.disabled = true;
+    }
+  }
+  syncMutationControls();
   if (errorElement) errorElement.hidden = true;
+  const isCurrent = options.isCurrent || (() => environment === activeEnvironment && (!scope || scope.dataset.mutation === String(operation.id)));
   try { await fn(); }
   catch (error) {
-    if (errorElement) { errorElement.textContent = error.message; errorElement.hidden = false; } else toast(error.message, true);
-    if (error.command) showCommand(error.command);
-  } finally { state.busy = false; document.body.classList.remove('busy'); $('#busyPanel').hidden = true; await refresh(); }
+    if (errorElement && isCurrent()) { errorElement.textContent = error.message; errorElement.hidden = false; } else toast(title + '：' + error.message, true);
+    if (error.command && isCurrent()) showCommand(error.command);
+  } finally {
+    operations.end(operation);
+    if (scope?.dataset.mutation === String(operation.id)) { delete scope.dataset.mutation; delete scope.dataset.blockClose; }
+    syncMutationControls();
+    await refresh();
+  }
 }
 
 function showCommand(command) {

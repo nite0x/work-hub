@@ -56,6 +56,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
     fetch: async (url, options) => {
       requests.push({ url, options });
       if (failure) throw failure;
+      if (url.startsWith('/api/shortcut-pins?')) return { ok: true, json: async () => ({tasks:[], directories:[], initialized:true}) };
       if (url === '/api/environments') return { ok: true, json: async () => ({ environments: [{ id: 'local', name: '本机' }], distributions: [], platform: result?.terminal?.platform, wsl_supported: result?.terminal?.platform === 'darwin' ? false : undefined }) };
       if (url.startsWith('/api/task-inventory')) return { ok: true, json: async () => ({
         requirements: result.requirements.map(q => ({ ...structuredClone(q), environment_id: 'local', environment_name: '本机', connected: true })),

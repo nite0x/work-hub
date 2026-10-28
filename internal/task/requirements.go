@@ -134,7 +134,7 @@ func (a *Service) CreateRequirementHandler(w http.ResponseWriter, r *http.Reques
 	}
 	hasNew := false
 	for _, m := range q.Members {
-		hasNew = hasNew || m.Mode == "new"
+		hasNew = hasNew || createsWorktree(m.Mode)
 	}
 	q.HasWorkspace = hasNew
 	if !hasNew {
@@ -246,6 +246,14 @@ func (a *Service) PrepareMembers(ctx context.Context, q *model.Requirement, ps m
 		if m.State == "ready" || (selected != nil && !selected[m.ProjectID]) {
 			continue
 		}
+		restoreRemoved := m.State == "removed"
+		verify := func() error {
+			observed := *m
+			if restoreRemoved {
+				observed.State = "ready"
+			}
+			return VerifyMember(ctx, ps[m.ProjectID], observed, q.Branch)
+		}
 		m.State = "creating"
 		m.Error = ""
 		if _, err := a.Workspace.Store.DB.Exec(`UPDATE members SET state='creating',error='' WHERE requirement_id=? AND project_id=?`, q.ID, m.ProjectID); err != nil {
@@ -255,21 +263,29 @@ func (a *Service) PrepareMembers(ctx context.Context, q *model.Requirement, ps m
 		var createErr error
 		if briefErr != nil {
 			createErr = briefErr
-		} else if m.Mode == "project" || m.Mode == "worktree" {
+		} else if (m.Mode == "project" || m.Mode == "worktree") && !restoreRemoved {
 			createErr = VerifyMember(ctx, p, *m, "")
 		} else if !platform.Within(q.Path, m.Path) {
 			createErr = fmt.Errorf("worktree 路径越过工作区目录")
 		} else if _, err := workspace.Stat(ctx, m.Path, false); err == nil {
 			// Recover only the exact persisted repository/path/branch combination, never overwrite it.
-			createErr = VerifyMember(ctx, p, *m, q.Branch)
+			createErr = verify()
 		} else if !errors.Is(err, os.ErrNotExist) {
 			createErr = err
+		} else if m.Mode == "existing" || restoreRemoved {
+			createErr = availableLocalBranch(ctx, p, m.Branch)
+			if createErr == nil {
+				_, createErr = workspace.Git(ctx, p.Path, "worktree", "add", "--", m.Path, m.Branch)
+			}
+			if createErr == nil {
+				createErr = verify()
+			}
 		} else if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+memberBranch(*m, q.Branch)); err == nil {
 			createErr = fmt.Errorf("分支 %s 已存在但 worktree 不存在，请先检查残留分支", memberBranch(*m, q.Branch))
 		} else {
 			_, createErr = workspace.Git(ctx, p.Path, "worktree", "add", "--no-track", "-b", memberBranch(*m, q.Branch), "--", m.Path, m.BaseCommit)
 			if createErr == nil {
-				createErr = VerifyMember(ctx, p, *m, q.Branch)
+				createErr = verify()
 			}
 		}
 		if createErr != nil {
@@ -312,8 +328,12 @@ func WriteBriefContext(ctx context.Context, q model.Requirement) error {
 		fmt.Fprintf(&b, "- %s（%s）：%s\n  %s\n", m.ProjectName, role, m.Path, memberDescription(m))
 	}
 	b.WriteString("\n请分别遵循每个项目内适用的 AGENTS.md。Git、构建和测试命令需在对应项目目录执行。\n")
+	const marker = "<!-- work-hub:task-context v1 -->\n"
+	if err := workspace.WriteGenerated(ctx, platform.JoinWorkspacePath(q.Path, "WORK_HUB_CONTEXT.md"), []byte(marker+"\n"+b.String()), marker); err != nil {
+		return fmt.Errorf("无法更新自动任务上下文：%w", err)
+	}
 	path := platform.JoinWorkspacePath(q.Path, "BRIEF.md")
-	err := workspace.Write(ctx, path, []byte(b.String()), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	err := workspace.Write(ctx, path, []byte("> 最新任务目标与目录清单见 WORK_HUB_CONTEXT.md（自动更新）；此文件保留为任务笔记。\n\n"+b.String()), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if errors.Is(err, os.ErrExist) {
 		st, statErr := workspace.Stat(ctx, path, false)
 		if statErr != nil || !st.Mode().IsRegular() {
@@ -362,7 +382,7 @@ func (a *Service) RetryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	needsWorkspace := false
 	for _, m := range q.Members {
-		if (selected == nil || selected[m.ProjectID]) && m.Mode != "project" && m.Mode != "worktree" {
+		if (selected == nil || selected[m.ProjectID]) && ((m.Mode != "project" && m.Mode != "worktree") || m.State == "removed") {
 			needsWorkspace = true
 		}
 	}

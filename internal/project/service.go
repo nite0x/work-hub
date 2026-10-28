@@ -2,6 +2,7 @@
 package project
 
 import (
+	"context"
 	"sync"
 
 	"worktree-hub/internal/model"
@@ -10,13 +11,14 @@ import (
 )
 
 type Service struct {
-	Workspace        *workspace.Service
-	cache            *stateCache
-	CredentialHelper string
-	masterSyncMu     sync.Mutex
-	gitLocks         sync.Map // common Git directory -> *sync.Mutex
-	OpenEditor       func(tool, path, distro string) error
-	OpenExternal     func(string) error
+	Workspace          *workspace.Service
+	cache              *stateCache
+	CredentialHelper   string
+	gitLocks           sync.Map // common Git directory -> *sync.Mutex
+	OpenEditor         func(tool, path, distro string) error
+	OpenExternal       func(string) error
+	ReserveWorktree    func(context.Context, string) (func(), error)
+	TaskContextUpdated func(context.Context, model.Requirement) error
 }
 
 func New(environment *workspace.Service) *Service {

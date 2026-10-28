@@ -16,6 +16,7 @@ import (
 )
 
 func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
+	defer a.invalidateSessionCatalog()
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	var input struct {
@@ -77,6 +78,7 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.DbError(w, err)
 		return
 	}
+	input.Settings = newConversationSettings(input.Settings)
 	var execution executionContext
 	if input.Purpose == "merge_conflict" {
 		if taskID == "" {
@@ -125,6 +127,10 @@ func (a *Service) NewSessionHandler(w http.ResponseWriter, r *http.Request) {
 		Thread codex.Session `json:"thread"`
 	}
 	params := map[string]any{"cwd": plan.Cwd, "sandbox": "workspace-write", "approvalPolicy": "on-request", "config": chatQuestionConfig()}
+	params["model"] = input.Settings.Model
+	if input.Settings.Effort != "" {
+		params["config"].(map[string]any)["model_reasoning_effort"] = input.Settings.Effort
+	}
 	setThreadPermissions(params, input.Settings.Permission)
 	if execution.instructions != "" {
 		params["developerInstructions"] = execution.instructions + "\n" + chatQuestionInstructions

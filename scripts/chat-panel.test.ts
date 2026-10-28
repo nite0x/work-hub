@@ -2,7 +2,7 @@ import {before, test} from "node:test";
 import assert from "node:assert/strict";
 import {build} from "esbuild";
 import {JSDOM, VirtualConsole} from "jsdom";
-import {idleChat, type Approval, type ChatState, type Entry} from "../frontend/chat/model";
+import {idleChat, latestEntryFingerprint, type Approval, type ChatState, type Entry} from "../frontend/chat/model";
 import type {ChatOptions} from "../frontend/chat/controller";
 
 let bundle = "";
@@ -14,7 +14,7 @@ before(async () => {
 const task = {id:"task",name:"测试任务",state:"ready",primary_project_id:"p",members:[{project_id:"p",project_name:"项目",path:"/workspace/project"}]};
 const session = {id:"session",name:"测试会话",cwd:"/workspace/project"};
 const tick = () => new Promise(resolve=>setTimeout(resolve,20));
-async function until(check:()=>unknown) { for(let i=0;i<100;i++){if(check()) return; await tick();} assert.ok(check(),"chat did not reach expected state"); }
+async function until(check:()=>unknown) { const deadline=Date.now()+5000; while(Date.now()<deadline){if(check()) return; await tick();} assert.ok(check(),"chat did not reach expected state"); }
 
 function mount(existing = false, entries: Entry[] = [], extra: Partial<ChatOptions> = {}) {
   const errors: unknown[] = [];
@@ -54,6 +54,85 @@ function mount(existing = false, entries: Entry[] = [], extra: Partial<ChatOptio
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII=";
 
+test("new chat shows full access and GPT-6.1-Sol high while an explicit medium effort is sent", async () => {
+  const h=mount(false,[],{request:async(path,init)=>{
+    if(path.endsWith('/chat-options'))return {models:[{id:'gpt-6.1-sol',model:'gpt-6.1-sol',displayName:'GPT-6.1-Sol',isDefault:false,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium'},{reasoningEffort:'high'}]},{id:'other',model:'other',displayName:'Other',isDefault:true,defaultReasoningEffort:'low',supportedReasoningEfforts:[{reasoningEffort:'low'}]}],modes:['default']} as any;
+    if(path.endsWith('/sessions/new')){h.calls.push({path,body:JSON.parse(String(init?.body))});return {session,chat:idleChat()} as any;}
+    return idleChat() as any;
+  }});
+  try{
+    await until(()=>h.w.document.querySelector('[aria-label="上下文与设置"]')?.textContent?.includes('GPT-6.1-Sol · 高'));
+    assert.equal(h.w.document.querySelector('[aria-label="权限设置"]')?.getAttribute('data-permission'),'full');
+    h.w.document.querySelector<HTMLButtonElement>('[aria-label="上下文与设置"]')!.click();
+    await until(()=>h.w.document.querySelector('[aria-label="下轮模型"]'));
+    const model=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮模型"]')!;
+    model.value='other';model.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+    await tick();
+    assert.equal(model.value,'other');
+    model.value='gpt-6.1-sol';model.dispatchEvent(new h.w.Event('change',{bubbles:true}));await tick();
+    const effort=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮思考强度"]')!;
+    effort.value='high';effort.dispatchEvent(new h.w.Event('change',{bubbles:true}));await tick();
+    effort.value='medium';effort.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+    h.type('手动调整强度');await tick();h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+    await until(()=>h.calls.some(c=>c.path.endsWith('/sessions/new')));
+    assert.deepEqual(h.calls.find(c=>c.path.endsWith('/sessions/new'))!.body.settings,{model:'gpt-6.1-sol',effort:'medium',permission:'full'});
+    assert.deepEqual(h.errors,[]);
+  }finally{h.dispose();}
+});
+
+test("file citations preview inside the chat dialog, highlight lines and never navigate the app", async () => {
+  const entries: Entry[] = [{id:"links", turn_id:"turn", kind:"assistant", text:"[配置](/workspace/project/config.go:12) · [相对路径](src/auth.go#L9) · [Windows](<file:///C:/repo/config.go#L5>) · [网页](https://example.com/docs) · [无效](javascript:alert)"}];
+  const h = mount(true, entries, {readOnly:true, request:async(path, init) => {
+    if (path.includes("/history")) return {session, entries} as any;
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    h.calls.push({path, body});
+    if (path.includes("/file?")) return {path:"/workspace/project/config.go", start_line:10, total_lines:50, line:12, requested_line:12, lines:["line 10", "line 11", "<script>alert(1)</script>"]} as any;
+    return {} as any;
+  }});
+  try {
+    await until(() => h.w.document.querySelector('.aui-md a'));
+    const native = h.w.document.createElement('dialog'); native.open = true;
+    h.w.document.body.append(native); native.append(h.w.document.querySelector('.session-history-panel')!);
+    const link = [...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "配置")!;
+    assert.equal([...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "Windows")?.title, 'C:/repo/config.go:5');
+    assert.equal(link.getAttribute('href'), '#file-preview');
+    assert.equal(link.dispatchEvent(new h.w.MouseEvent('click', {bubbles:true, cancelable:true})), false);
+    await until(() => h.w.document.querySelector('.chat-file-line[data-selected]'));
+    assert.equal(h.w.document.querySelector('.chat-file-dialog')!.closest('dialog'), native);
+    assert.match(h.w.document.querySelector('.chat-file-line[data-selected]')!.textContent || '', /^12<script>/);
+    assert.equal(h.w.document.querySelector('.chat-file-source script'), null);
+    assert(h.calls.some(c => c.path === '/api/sessions/session/file?path=%2Fworkspace%2Fproject%2Fconfig.go&line=12'));
+    assert.equal(h.w.location.pathname, '/'); assert.equal(h.w.location.hash, '');
+    h.w.document.querySelector<HTMLButtonElement>('[aria-label="关闭文件预览"]')!.click();
+    await until(() => !h.w.document.querySelector('.chat-file-dialog'));
+    await until(() => h.w.document.activeElement === link);
+    const web = [...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "网页")!;
+    assert.equal(web.dispatchEvent(new h.w.MouseEvent('click', {bubbles:true, cancelable:true})), false);
+    await until(() => h.calls.some(c => c.path.endsWith('/open-link')));
+    assert.deepEqual(h.calls.find(c => c.path.endsWith('/open-link'))?.body, {url:'https://example.com/docs'});
+    assert.equal(h.w.document.querySelector('a[href^="javascript:"]'), null);
+    assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
+});
+
+test("a missing file displays an error in the preview and leaves the conversation open", async () => {
+  const entries: Entry[] = [{id:"missing-file", turn_id:"turn", kind:"assistant", text:"[旧文件](src/missing.go#L8)"}];
+  const h = mount(true, entries, {readOnly:true, request:async(path) => {
+    if (path.includes('/history')) return {session,entries} as any;
+    if (path.includes('/file?')) throw new Error('文件不存在、已移动或不可读取');
+    return idleChat() as any;
+  }});
+  try {
+    await until(() => h.w.document.querySelector('.aui-md a'));
+    h.w.document.querySelector<HTMLAnchorElement>('.aui-md a')!.click();
+    await until(() => h.w.document.querySelector('.chat-file-dialog [role="alert"]'));
+    assert.match(h.w.document.querySelector('.chat-file-dialog')!.textContent || '', /文件不存在、已移动/);
+    assert(h.w.document.querySelector('#assistantChatTitle'));
+    assert.equal(h.w.location.href, 'http://localhost/');
+    assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
+});
+
 test("read-only sessions use official Markdown and tools without a composer or chat API", async () => {
   const h = mount(true, [{id:"a",turn_id:"turn",kind:"assistant",text:"**已完成**\n\n| 方案 | 结论 |\n| --- | --- |\n| 组件库 | 复用 |"}, {id:"c",turn_id:"turn",kind:"command",command:"git status",status:"completed",output:"clean"}], {readOnly:true});
   try {
@@ -88,6 +167,67 @@ function pasteImage(h: ReturnType<typeof mount>, file = new h.w.File([Uint8Array
   h.input().dispatchEvent(event);
   assert.equal(event.defaultPrevented, true);
 }
+
+test("arbitrary files upload into the environment, survive reopen and retry without duplicating attachment text", async () => {
+  for (const existing of [false,true]) {
+    const h = mount(existing);
+    const request = h.options.request;
+    h.options.request = async (path, init) => {
+      if (path === "/api/chat-attachments") {
+        const body=JSON.parse(String(init?.body)); h.calls.push({path,body});
+        return {path:`/environment/data/attachments/${body.name}`} as any;
+      }
+      return request(path,init);
+    };
+    h.bridge.open(h.options);
+    try {
+      await until(()=>h.input());
+      for (const [name,type,bytes] of [["页面.html","text/html","<h1>test</h1>"],["archive.zip","application/zip","PK\x00\xff"],["unknown","","opaque"],["empty.txt","text/plain",""]]) {
+        pasteImage(h,new h.w.File([bytes],name,{type}));
+      }
+      await until(()=>h.calls.filter(c=>c.path==="/api/chat-attachments").length===4);
+      await until(()=>!h.w.document.querySelector('.aui-attachment-tile-uploading'));
+      h.bridge.close(); await tick(); h.bridge.open(h.options);
+      await until(()=>h.w.document.querySelectorAll('.aui-attachment-tile-remove').length===4);
+      h.type('检查附件'); await tick();
+      h.failSends(1);
+      h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+      await until(()=>h.w.document.body.textContent?.includes('发送失败，请重试'));
+      assert.equal(h.input().value,'检查附件');
+      h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+      await until(()=>h.calls.filter(c=>c.path.endsWith(existing?'/chat':'/sessions/new') && c.body).length===2);
+      const sends=h.calls.filter(c=>c.path.endsWith(existing?'/chat':'/sessions/new') && c.body);
+      assert.equal(sends[0].body.request_id,sends[1].body.request_id);
+      assert.equal(sends[0].body.text,sends[1].body.text);
+      assert.equal((sends[1].body.text.match(/附件：/g)||[]).length,4);
+      assert.match(sends[1].body.text,/\/environment\/data\/attachments\/页面.html/);
+      assert.equal(h.calls.find(c=>c.body?.name==='页面.html')!.body.data,h.w.btoa('<h1>test</h1>'));
+      assert.equal(h.calls.find(c=>c.body?.name==='empty.txt')!.body.data,'');
+      assert.deepEqual(h.errors,[]);
+    } finally {h.dispose();}
+  }
+});
+
+test("removing a file excludes its path and oversized files fail before upload", async () => {
+  const h=mount();
+  const request=h.options.request;
+  h.options.request=async(path,init)=>path==='/api/chat-attachments'?{path:'/data/removed.html'} as any:request(path,init);
+  h.bridge.open(h.options);
+  try {
+    await until(()=>h.input());
+    pasteImage(h,new h.w.File(['html'],'removed.html',{type:'text/html'}));
+    await until(()=>h.w.document.querySelector('.aui-attachment-tile-remove'));
+    await tick();
+    h.w.document.querySelector<HTMLButtonElement>('.aui-attachment-tile-remove')!.click();
+    await until(()=>!h.w.document.querySelector('.aui-attachment-tile-remove'));
+    pasteImage(h,new h.w.File([new Uint8Array(8*1024*1024+1)],'large.zip'));
+    await until(()=>h.w.document.body.textContent?.includes('每个文件不能超过 8 MiB'));
+    h.type('只发文字'); await tick(); h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+    await until(()=>h.calls.some(c=>c.path.endsWith('/sessions/new')));
+    assert.equal(h.calls.find(c=>c.path.endsWith('/sessions/new'))!.body.text,'只发文字');
+    assert.deepEqual(h.errors,[]);
+  } finally {h.dispose();}
+});
 
 test("pasted screenshots retain their preview across reopening and send without text in new and existing chats", async () => {
   for (const existing of [false,true]) {
@@ -216,7 +356,8 @@ test("chat chrome identifies task and project with expandable working directory 
     await until(() => h.input());
     assert.equal(h.w.document.querySelector("footer"), null);
     assert.doesNotMatch(h.w.document.body.textContent || "", /可以在这里继续对话|可粘贴或拖入图片|Ctrl\+Enter 发送/);
-    assert.match(h.w.document.querySelector(".chat-panel-header")?.textContent || "", /任务 · 测试任务/);
+    assert.match(h.w.document.querySelector(".chat-context-facts")?.textContent || "", /关联任务测试任务/);
+    assert.doesNotMatch(h.w.document.querySelector(".chat-workspace-context > summary")?.textContent || "", /测试任务/);
     const context = h.w.document.querySelector<HTMLElement>(".chat-workspace-context")!;
     assert.match(context.textContent || "", /执行环境本机/);
     assert.match(context.textContent || "", /\/workspace\/project/);
@@ -246,10 +387,12 @@ for (const existing of [false, true]) test(`a slow ${existing ? "send" : "creati
   } finally {h.dispose();}
 });
 
-test("session drafts and reading positions are shared across tasks and isolated from other sessions", async () => {
+test("without unread messages, switching and reopening restores the reading position and session draft", async () => {
   const h = mount(true, [{id: "reply", turn_id: "turn", kind: "assistant", text: "一段需要保留阅读位置的历史记录"}]);
   try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {scrollHeight: {get: () => 2400}, clientHeight: {get: () => 400}});
     await until(() => h.input());
+    await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 2400);
     h.type("第一个会话的草稿"); await tick();
     const viewport = h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
     Object.defineProperties(viewport, {scrollHeight: {value: 2400}, clientHeight: {value: 400}});
@@ -257,14 +400,21 @@ test("session drafts and reading positions are shared across tasks and isolated 
     viewport.dispatchEvent(new h.w.Event("scroll"));
     const second = {...h.options, session: {...session, id: "second"}};
     h.bridge.open(second); await until(() => h.input()?.value === "");
+    await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 2400);
     h.type("第二个会话的草稿"); await tick();
     h.bridge.open({...h.options, task: {...task, id: "other-task"}});
     await until(() => h.input()?.value === "第一个会话的草稿");
     await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 360);
     const restoredViewport = h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
     Object.defineProperties(restoredViewport, {scrollHeight: {value: 2400}, clientHeight: {value: 400}});
+    restoredViewport.scrollTop = 360;
     restoredViewport.dispatchEvent(new h.w.Event("scroll"));
     h.type("共享会话的新草稿"); await tick();
+    assert.equal(restoredViewport.scrollTop, 360, "reading older messages stays put within the open conversation");
+    h.bridge.open(h.options);
+    await until(() => h.input()?.value === "共享会话的新草稿");
+    await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 360);
+    h.bridge.close(); await tick();
     h.bridge.open(h.options);
     await until(() => h.input()?.value === "共享会话的新草稿");
     await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === 360);
@@ -272,6 +422,58 @@ test("session drafts and reading positions are shared across tasks and isolated 
     await until(() => h.input()?.value === "第二个会话的草稿");
     assert.deepEqual(h.errors, []);
     assert(!h.calls.some(call => call.body));
+  } finally { h.dispose(); }
+});
+
+for (const unread of [false, true]) test(`delayed history and draft loading ${unread ? "shows unread messages" : "restores the last position without unread messages"}`, async () => {
+  let loadHistory!: (value: unknown) => void;
+  let loadDraft!: (value: unknown) => void;
+  const entries: Entry[] = [{id: "late-reply", turn_id: "turn", kind: "assistant", text: "延迟加载的最新消息"}];
+  const h = mount(true, [], {persistDraft: true, request: async (path, init) => {
+    if (path.includes("/history")) return new Promise(resolve => {loadHistory = resolve;}) as any;
+    if (path.startsWith("/api/conversation-drafts") && !init?.method) return new Promise(resolve => {loadDraft = resolve;}) as any;
+    return idleChat() as any;
+  }});
+  try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {
+      scrollHeight: {get() {return this.querySelector('[data-chat-message-id]') ? 3200 : 400;}},
+      clientHeight: {get: () => 400},
+    });
+    await until(() => loadHistory && loadDraft);
+    const latest = unread ? "previous-message" : latestEntryFingerprint(entries);
+    loadDraft({text: "已保存草稿", images: [], settings: {}, project: "p", reading: {top: 360, bottom: false, anchor: "", offset: 0, latest}, updated: Date.now()});
+    await until(() => h.input()?.value === "已保存草稿");
+    loadHistory({session, entries});
+    await until(() => h.w.document.body.textContent?.includes("延迟加载的最新消息"));
+    await until(() => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')?.scrollTop === (unread ? 3200 : 360));
+    assert.match(h.w.document.body.textContent || "", /延迟加载的最新消息/);
+    assert(!h.w.document.body.textContent?.includes("有新消息 · 查看最新"));
+    assert.deepEqual(h.errors, []);
+  } finally { h.dispose(); }
+});
+
+for (const change of ["new-message", "streaming", "already-unread"]) test(`reopening scrolls to the bottom for ${change}`, async () => {
+  const entries: Entry[] = [{id: "reply", turn_id: "turn", kind: "assistant", text: "原来的消息"}];
+  const h = mount(true, entries);
+  try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {scrollHeight: {get: () => 2400}, clientHeight: {get: () => 400}});
+    const viewport = () => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
+    await until(() => viewport()?.scrollTop === 2400);
+    viewport().scrollTop = 360; viewport().dispatchEvent(new h.w.Event("scroll"));
+    if (change === "already-unread") {
+      entries.push({id: "unread", turn_id: "next", kind: "assistant", text: "尚未阅读的新消息"});
+      h.w.document.querySelector<HTMLButtonElement>('[aria-label="刷新历史"]')!.click();
+      await until(() => h.w.document.body.textContent?.includes("有新消息 · 查看最新"));
+      assert.equal(viewport().scrollTop, 360);
+    }
+    h.bridge.open({...h.options, session: {...session, id: "other"}});
+    await until(() => h.w.document.querySelector("#assistantChatTitle")); await tick();
+    if (change === "streaming") entries[0] = {...entries[0], text: "原来的消息，现在有了新增内容"};
+    if (change === "new-message") entries.push({id: "unread", turn_id: "next", kind: "assistant", text: "离开后收到的新消息"});
+    h.bridge.open(h.options);
+    await until(() => viewport()?.scrollTop === 2400);
+    assert(!h.w.document.body.textContent?.includes("有新消息 · 查看最新"));
+    assert.deepEqual(h.errors, []);
   } finally { h.dispose(); }
 });
 
@@ -306,6 +508,46 @@ function questionType(h: ReturnType<typeof mount>, id: string, text: string) {
   Object.getOwnPropertyDescriptor(prototype,"value")!.set!.call(field,text);
   field.dispatchEvent(new h.w.Event("input",{bubbles:true}));
 }
+
+for (const busy of [true, false]) test(`async questions render and submit in the dialog while ${busy ? "running" : "completed"}, restoring choices after reopening`, async () => {
+  const entries: Entry[] = [{id:"u",turn_id:"turn",kind:"user",text:"执行迁移"},{id:"async",turn_id:"turn",kind:"assistant",text:"选择范围",delivery:"async",questions:[{id:"0",header:"问题 1",question:"迁移范围？",isOther:true,options:[{label:"保留兼容（推荐）",description:""},{label:"移除兼容",description:""}]}]}];
+  const records=new Map<string,any>();const posts:any[]=[];let answered=false;let fail=true;
+  const request:ChatOptions['request']=async(path,init)=>{
+    if(path.startsWith('/api/conversation-drafts')){
+      if(init?.method==='POST'){records.set(path,JSON.parse(String(init.body)));return {saved:true} as any;}
+      return records.get(path)||null;
+    }
+    if(path.includes('/history'))return {session,entries:entries.map(e=>e.id==='async'&&answered?{...e,question_status:'accepted'}:e)} as any;
+    if(path.endsWith('/chat/question')){
+      posts.push(JSON.parse(String(init?.body)));
+      if(fail){fail=false;throw new Error('回答暂未送达');}
+      answered=true;
+    }
+    return {...idleChat(),id:'run',turn_id:'turn',status:busy?'running':'completed',busy} as any;
+  };
+  const extra={persistDraft:true,request};
+  let h=mount(true,entries,extra);
+  try{
+    await until(()=>h.w.document.querySelector('.chat-question-composer'));
+    assert.equal(h.w.document.querySelector<HTMLFieldSetElement>('.chat-question-fields')!.disabled,false);
+    h.w.document.querySelector<HTMLInputElement>('input[value="保留兼容（推荐）"]')!.click();
+    await tick();questionType(h,'0','保留历史数据');await tick();
+    h.bridge.close();await tick();h.bridge.open(h.options);
+    await until(()=>h.w.document.querySelector<HTMLTextAreaElement>('[name="text:0"]')?.value==='保留历史数据');
+    h.dispose();await tick();h=mount(true,entries,extra);
+    await until(()=>h.w.document.querySelector<HTMLTextAreaElement>('[name="text:0"]')?.value==='保留历史数据');
+    assert.equal(h.w.document.querySelector<HTMLInputElement>('input[value="保留兼容（推荐）"]')!.checked,true);
+    h.w.document.querySelector<HTMLFormElement>('.chat-question-composer')!.requestSubmit();
+    await until(()=>h.w.document.body.textContent?.includes('回答暂未送达'));
+    assert.equal(h.w.document.querySelector<HTMLTextAreaElement>('[name="text:0"]')!.value,'保留历史数据');
+    h.w.document.querySelector<HTMLFormElement>('.chat-question-composer')!.requestSubmit();
+    await until(()=>!h.w.document.querySelector('.chat-question-composer'));
+    assert.deepEqual(posts[0],{item_id:'async',turn_id:'turn',decision:'accept',answers:{'0':['保留兼容（推荐）\n\n保留历史数据']}});
+    assert.deepEqual(posts[0],posts[1]);assert(h.input());assert.deepEqual(h.errors,[]);
+    h.bridge.close();await tick();h.bridge.open(h.options);
+    await until(()=>h.input());assert.equal(h.w.document.querySelector('.chat-question-composer'),null);
+  }finally{h.dispose();}
+});
 
 test("structured questions occupy the composer, retain all answers across navigation and submit exactly once", async () => {
   const h = mount(true); h.setChat(waiting(questionApproval([
@@ -503,8 +745,62 @@ test("a running conversation exposes both send and stop and sends follow-up inpu
   await until(()=>h.calls.some(c=>c.path.endsWith('/chat/steer')));
   await until(()=>[...h.w.document.querySelectorAll<HTMLElement>('[data-chat-message-id]')].some(node=>node.dataset.chatMessageId===JSON.stringify(['turn','u'])));
   assert.equal(h.w.document.querySelectorAll('[data-slot="aui_user-message-root"]').length,1);
+  assert.ok(!h.w.document.querySelector('.aui-branch-picker-root'), 'steering must not retain an echo branch');
   assert.equal(h.calls.find(c=>c.path.endsWith('/chat/steer'))?.body.turn_id,'turn');
   assert(!h.calls.some(c=>c.path.endsWith('/chat/stop')));assert.deepEqual(h.errors,[]);
+ }finally{h.dispose();}
+});
+
+test("a normal send replaces its optimistic echo without creating message branches", async () => {
+ const h=mount(true);
+ const original=h.options.request;
+ let release: (()=>void) | undefined;
+ const response=new Promise<void>(resolve=>{release=resolve;});
+ h.options.request=async(path,init)=>{
+  if(path.endsWith('/chat') && init?.body){
+   const body=JSON.parse(String(init.body));h.calls.push({path,body});
+   await response;
+   return {...idleChat(),id:body.request_id,turn_id:'new',status:'running',busy:true,entries:[{id:'native-user',turn_id:'new',kind:'user',text:body.text}]} as any;
+  }
+  return original(path,init);
+ };
+ h.bridge.open(h.options);
+ try{
+  await until(()=>h.input());h.type('检查回显');await tick();
+  h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+  await until(()=>h.w.document.querySelector('[data-chat-message-id*="local:"]'));
+  release!();
+  await until(()=>[...h.w.document.querySelectorAll<HTMLElement>('[data-chat-message-id]')].some(node=>node.dataset.chatMessageId===JSON.stringify(['new','native-user'])));
+  assert.equal(h.w.document.querySelectorAll('[data-slot="aui_user-message-root"]').length,1);
+  assert.ok(!h.w.document.querySelector('.aui-branch-picker-root'), 'sending must not retain an echo branch');
+  assert.deepEqual(h.errors,[]);
+ }finally{release!();h.dispose();}
+});
+
+test("next-turn badges only mark settings that differ from an active turn", async () => {
+ const context={model:'gpt-6.1-sol',reasoningEffort:'high',mode:'default',sandbox:{type:'dangerFullAccess'},approvalPolicy:'never'};
+ let current:ChatState=idleChat();
+ const h=mount(false,[],{request:async(path,init)=>{
+  if(path.endsWith('/chat-options'))return {models:[{id:context.model,model:context.model,displayName:'GPT-6.1-Sol',defaultReasoningEffort:'high',supportedReasoningEfforts:[{reasoningEffort:'high'},{reasoningEffort:'medium'}]}],modes:['default']} as any;
+  if(path.endsWith('/context'))return context as any;
+  if(path.includes('/history'))return {session,entries:[]} as any;
+  if(path.endsWith('/sessions/new')){const body=JSON.parse(String(init?.body));current={...idleChat(),id:body.request_id,turn_id:'active',status:'running',busy:true,context};return {session,chat:current} as any;}
+  return current as any;
+ }});
+ try{
+  await until(()=>h.w.document.querySelector('[aria-label="上下文与设置"]')?.textContent?.includes('GPT-6.1-Sol'));
+  assert.ok(!h.w.document.querySelector('.chat-next-turn'), 'new conversation defaults are not pending changes');
+  h.type('开始');await tick();h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')!.click();
+  await until(()=>h.w.document.querySelector('.aui-composer-cancel'));
+  assert.ok(!h.w.document.querySelector('.chat-next-turn'), 'applied settings are not pending changes');
+  h.w.document.querySelector<HTMLButtonElement>('[aria-label="上下文与设置"]')!.click();
+  await until(()=>h.w.document.querySelector('[aria-label="下轮思考强度"]'));
+  const effort=h.w.document.querySelector<HTMLSelectElement>('[aria-label="下轮思考强度"]')!;
+  effort.value='medium';effort.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+  await until(()=>h.w.document.querySelector('[aria-label="上下文与设置"] .chat-next-turn'));
+  effort.value='high';effort.dispatchEvent(new h.w.Event('change',{bubbles:true}));
+  await until(()=>!h.w.document.querySelector('.chat-next-turn'));
+  assert.deepEqual(h.errors,[]);
  }finally{h.dispose();}
 });
 
@@ -686,6 +982,7 @@ test("settings and session editors stay inside the native conversation dialog", 
     assert.equal(h.w.document.querySelector('.chat-settings-popover')!.closest('dialog'), dialog);
     h.w.document.querySelector<HTMLButtonElement>('[aria-label="关闭设置"]')!.click();
     await until(() => !h.w.document.querySelector('.chat-settings-popover'));
+    await until(() => h.w.document.activeElement === h.w.document.querySelector('[aria-label="上下文与设置"]'));
     openSessionMenu(h); await until(() => h.w.document.querySelector('[role="menuitem"]'));
     assert.equal(h.w.document.querySelector('[role="menu"]')!.closest('dialog'), dialog);
     [...h.w.document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === "从历史分叉")!.click();

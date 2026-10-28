@@ -12,16 +12,8 @@
 .settings-card fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .settings-card fieldset:disabled { opacity: .6; }
 .settings-card .field { max-width: 640px; }
-.settings-card .settings-time { max-width: 360px; margin-top: 20px; }
 .settings-actions { display: flex; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 18px; margin-top: 22px; }
 .settings-card .banner { white-space: pre-wrap; overflow-wrap: anywhere; }
-.settings-details { font-size: 14px; color: var(--muted-foreground, #64748b); margin-top: 16px; line-height: 1.8; }
-.settings-details summary { cursor: pointer; color: var(--primary, #5964cf); }
-.settings-details p { margin: 8px 0 0; }
-.settings-results { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 20px; }
-.settings-results h3 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
-.settings-results p { font-size: 14px; }
-.settings-results td:last-child { overflow-wrap: anywhere; min-width: 180px; }
 @media (max-width: 760px) {
   .settings-card { padding: 18px; }
   .settings-card-heading { flex-direction: column; gap: 12px; margin-bottom: 18px; }

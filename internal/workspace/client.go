@@ -18,6 +18,9 @@ import (
 
 const Protocol = 1
 
+// ErrBusy means the helper rejected a request before executing it.
+var ErrBusy = errors.New("辅助程序繁忙，请稍后重试")
+
 type Request struct {
 	ID       uint64                 `json:"id"`
 	Op       string                 `json:"op"`
@@ -41,6 +44,25 @@ type Response struct {
 	Error string          `json:"error,omitempty"`
 	Code  string          `json:"code,omitempty"`
 }
+
+func (r Response) err() error {
+	if r.Error == "" {
+		return nil
+	}
+	// Recognize older helpers that did not include a machine-readable code.
+	if r.Code == "busy" || r.Error == ErrBusy.Error() {
+		return ErrBusy
+	}
+	switch r.Code {
+	case "not_exist":
+		return fmt.Errorf("%s: %w", r.Error, os.ErrNotExist)
+	case "exist":
+		return fmt.Errorf("%s: %w", r.Error, os.ErrExist)
+	default:
+		return errors.New(r.Error)
+	}
+}
+
 type Identity struct {
 	Protocol         int    `json:"protocol"`
 	Home             string `json:"home"`
@@ -145,6 +167,33 @@ func (c *Client) Done() <-chan struct{} { return c.done }
 func (c *Client) Call(ctx context.Context, request Request, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Second)
 	defer cancel()
+	// Only retry admission failures: the helper guarantees a busy request has
+	// not executed. Accepted writes and ambiguous connection failures must never
+	// be replayed. Keep the original deadline across attempts.
+	retryCtx, stopRetry := context.WithTimeout(ctx, 5*time.Second)
+	defer stopRetry()
+	for delay := 50 * time.Millisecond; ; delay = min(delay*2, 500*time.Millisecond) {
+		err := c.callOnce(ctx, request, result)
+		if !errors.Is(err, ErrBusy) {
+			return err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-retryCtx.Done():
+			timer.Stop()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		case <-c.done:
+			timer.Stop()
+			return fmt.Errorf("WSL 辅助程序未连接，请重新连接")
+		case <-timer.C:
+		}
+	}
+}
+
+func (c *Client) callOnce(ctx context.Context, request Request, result any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -173,14 +222,8 @@ func (c *Client) Call(ctx context.Context, request Request, result any) error {
 	defer func() { c.mu.Lock(); delete(c.pending, request.ID); c.mu.Unlock() }()
 	select {
 	case response := <-ch:
-		if response.Error != "" {
-			switch response.Code {
-			case "not_exist":
-				return fmt.Errorf("%s: %w", response.Error, os.ErrNotExist)
-			case "exist":
-				return fmt.Errorf("%s: %w", response.Error, os.ErrExist)
-			}
-			return errors.New(response.Error)
+		if err := response.err(); err != nil {
+			return err
 		}
 		if result != nil {
 			return json.Unmarshal(response.Data, result)

@@ -25,6 +25,7 @@ type Requirement struct {
 	CreatedAt        string   `json:"created_at"`
 	Members          []Member `json:"members"`
 	HasWorkspace     bool     `json:"has_workspace"`
+	ContextWarning   string   `json:"context_warning,omitempty"`
 }
 type Member struct {
 	ProjectID   string    `json:"project_id"`

@@ -11,6 +11,7 @@ import (
 )
 
 func (a *Service) ManageSessionHandler(w http.ResponseWriter, r *http.Request) {
+	defer a.invalidateSessionCatalog()
 	a.controlMu.Lock()
 	defer a.controlMu.Unlock()
 	var input struct {

@@ -30,7 +30,6 @@
   <script src="/features/projects/git.js" defer></script>
   <script src="/features/projects/worktrees.js" defer></script>
   <script src="/features/settings/terminal.js" defer></script>
-  <script src="/features/settings/master-sync.js" defer></script>
   <script src="/features/settings/settings.js" defer></script>
   <script src="/features/sessions/sessions.js" defer></script>
   <script src="/features/sessions/session-history.js" defer></script>
@@ -38,6 +37,7 @@
   <script src="/features/sessions/session-chat.js" defer></script>
   <script src="/features/sessions/session-create.js" defer></script>
   <script src="/features/tasks/task-layout.js" defer></script>
+  <script src="/features/tasks/task-review.js" defer></script>
   <script src="/features/sessions/session-workspace.js" defer></script>
 </head>
 <body>
@@ -66,7 +66,7 @@
       <section id="stats" class="stats" aria-label="工作台统计"></section>
       <section id="settingsPage" class="settings-page shadcn-scope" aria-label="设置" hidden></section>
       <section class="content-panel" id="workContent">
-        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle" tabindex="-1">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><div class="shadcn-scope" id="archiveFilterWrap"></div><span id="projectAddButton" class="shadcn-scope" hidden></span></div></div>
+        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle" tabindex="-1">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><div class="shadcn-scope" id="archiveFilterWrap"></div><div class="shadcn-scope" id="taskStatusFilterWrap"></div><span id="projectAddButton" class="shadcn-scope" hidden></span></div></div>
         <section id="taskProjectsView" class="task-projects-view" aria-label="项目工作区"><div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div></section>
       </section>
       <section id="sessionsPage" class="sessions-page" aria-label="会话" hidden><div id="sessionPageMount"></div></section>
@@ -76,6 +76,8 @@
   <dialog id="projectDialog" class="shadcn-scope" aria-labelledby="projectDialogTitle"></dialog>
   <dialog id="requirementDialog" class="wide-dialog shadcn-scope" aria-labelledby="requirementDialogTitle"></dialog>
   <dialog id="requirementProjectsDialog" class="wide-dialog shadcn-scope" aria-labelledby="requirementProjectsTitle"></dialog>
+  <dialog id="taskReviewDialog" class="wide-dialog shadcn-scope" aria-labelledby="taskReviewTitle"></dialog>
+  <dialog id="changesDialog" class="changes-dialog shadcn-scope" aria-labelledby="changesTitle"></dialog>
   <dialog id="taskEditDialog" aria-labelledby="taskEditTitle" class="shadcn-scope"></dialog>
   <dialog id="taskDirectoryDialog" aria-labelledby="taskDirectoryTitle" class="shadcn-scope"></dialog>
   <dialog id="worktreeDialog" class="wide-dialog shadcn-scope" aria-labelledby="worktreeTitle"></dialog>

@@ -42,9 +42,9 @@ func selectedMember(ctx context.Context, p model.Project, directory, branch stri
 		return m, err
 	}
 	switch m.Mode {
-	case "new":
+	case "new", "existing":
 		m.Branch = strings.TrimSpace(selection.Branch)
-		if m.Branch == "" {
+		if m.Branch == "" && m.Mode == "new" {
 			m.Branch = branch
 		}
 		if m.Branch == "" || len(m.Branch) > 160 || strings.HasPrefix(m.Branch, "-") || strings.Contains(m.Branch, "@{") {
@@ -53,8 +53,12 @@ func selectedMember(ctx context.Context, p model.Project, directory, branch stri
 		if _, err := workspace.Git(ctx, p.Path, "check-ref-format", "--branch", m.Branch); err != nil {
 			return m, fmt.Errorf("分支名无效")
 		}
-		if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+m.Branch); err == nil {
-			return m, fmt.Errorf("分支 %s 已存在，请使用新分支名或选择已有工作目录", m.Branch)
+		if m.Mode == "new" {
+			if _, err := workspace.Git(ctx, p.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+m.Branch); err == nil {
+				return m, fmt.Errorf("分支 %s 已存在，请选择使用已有分支创建 Worktree 或换一个新分支名", m.Branch)
+			}
+		} else if err := availableLocalBranch(ctx, p, m.Branch); err != nil {
+			return m, err
 		}
 		m.Path = platform.JoinWorkspacePath(directory, p.Folder)
 		if !platform.Within(directory, m.Path) {
@@ -64,6 +68,9 @@ func selectedMember(ctx context.Context, p model.Project, directory, branch stri
 			return m, fmt.Errorf("工作目录已存在或无法检查，不能覆盖：%s", m.Path)
 		}
 		m.BaseRef = strings.TrimSpace(selection.Source)
+		if m.Mode == "existing" {
+			m.BaseRef = "refs/heads/" + m.Branch
+		}
 		if m.BaseRef == "" {
 			m.BaseRef = workspace.DefaultBranchSource(ctx, p.Path)
 		}
@@ -101,6 +108,26 @@ func selectedMember(ctx context.Context, p model.Project, directory, branch stri
 	return m, nil
 }
 
+func availableLocalBranch(ctx context.Context, p model.Project, branch string) error {
+	if _, err := workspace.Git(ctx, p.Path, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("本地分支 %s 不存在，请重新选择", branch)
+	}
+	raw, err := workspace.Git(ctx, p.Path, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return err
+	}
+	for _, field := range strings.Split(raw, "\x00") {
+		if field == "branch refs/heads/"+branch {
+			return fmt.Errorf("分支 %s 已被 worktree 占用，请选择使用已有 Worktree 或其他分支", branch)
+		}
+	}
+	return nil
+}
+
+func createsWorktree(mode string) bool {
+	return mode == "new" || mode == "existing"
+}
+
 func verifyRepository(ctx context.Context, p model.Project) error {
 	common, err := workspace.Git(ctx, p.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -123,6 +150,9 @@ func memberBranch(m model.Member, fallback string) string {
 func memberDescription(m model.Member) string {
 	if m.Mode == "project" || m.Mode == "worktree" {
 		return "使用已有工作目录"
+	}
+	if m.Mode == "existing" {
+		return "使用已有分支 " + m.Branch + " 新建 Worktree；提交 " + m.BaseCommit
 	}
 	return "新建分支 " + m.Branch + "；来源 " + m.BaseRef + "；提交 " + m.BaseCommit
 }

@@ -303,7 +303,7 @@ func (a *Service) resolveCreation(ctx context.Context, target SessionTarget) (ex
 		}
 		out.instructions = "当前工作属于任务 " + q.Name + "。任务说明：\n" + q.Description + "\n请遵循各工作目录适用的 AGENTS.md；各项目的 Git、构建及测试在对应仓库执行。"
 		if allowed[platform.CleanWorkspacePath(q.Path)] {
-			out.instructions += " 可参考任务目录中的 " + platform.JoinWorkspacePath(q.Path, "BRIEF.md") + "。任务目标以本次提供的说明为准。"
+			out.instructions += " 最新目录清单见 " + platform.JoinWorkspacePath(q.Path, "WORK_HUB_CONTEXT.md") + "（自动维护）；BRIEF.md 保留为用户笔记，可能包含旧目录。任务目标以本次提供的说明为准。"
 		}
 	} else {
 		if target.ProjectID == "" {

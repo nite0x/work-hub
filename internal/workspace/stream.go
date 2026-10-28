@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
@@ -43,8 +42,8 @@ func (c *Client) Stream(ctx context.Context, request Request, emit func(json.Raw
 		case <-c.done:
 			return fmt.Errorf("WSL 实时连接已断开")
 		case response := <-ch:
-			if response.Error != "" {
-				return errors.New(response.Error)
+			if err := response.err(); err != nil {
+				return err
 			}
 			if !response.More {
 				return nil

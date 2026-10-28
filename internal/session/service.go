@@ -27,14 +27,19 @@ type Service struct {
 	plans            LaunchPlanner
 	openSessions     func(context.Context) (codex.SessionClient, error)
 	openLive         func(context.Context) (codex.LiveClient, error)
+	openTitleLive    func(context.Context) (codex.LiveClient, error)
 	watchHistory     func(context.Context, string, func(HistoryPush) error) error
 	terminalConflict func(string, string) error
 	openExternal     func(string) error
 	chatMu           sync.Mutex
 	chats            map[string]*ChatRun
+	titleRuns        map[*ChatRun]*titleRun
+	chatsClosing     bool
 	createChatMu     sync.Mutex
 	bridgeMu         sync.Mutex
 	controlMu        sync.Mutex
+	catalogMu        sync.Mutex
+	catalogs         map[string]*catalogEntry
 	bridges          map[string]*terminalBridge
 	mediaOnce        sync.Once
 	mediaKey         [32]byte
@@ -56,6 +61,7 @@ func New(environment *workspace.Service, plans LaunchPlanner) *Service {
 			return watchRemoteHistory(ctx, environment.Remote, id, emit)
 		}
 	}
+	s.openTitleLive = s.openLive
 	return s
 }
 

@@ -40,7 +40,6 @@ try {
     assert.equal(response.status, expected, `${method} ${endpoint}: ${JSON.stringify(result)}`);
     return result;
   };
-  await request('/api/settings/master-sync', 'PUT', { enabled: false, time: '09:00' });
   const environment = await request('/api/environments');
   assert.equal(environment.platform, process.platform === 'darwin' ? 'darwin' : process.platform);
   if (process.platform === 'darwin') assert.equal(environment.wsl_supported, false);
@@ -123,6 +122,40 @@ try {
   await request(`/api/requirements/${task.id}/archive`, 'POST', { archived: true });
   for (const member of task.members) assert.equal(await git(member.path, 'branch', '--show-current'), task.branch);
   await request(`/api/requirements/${task.id}/archive`, 'POST', { archived: false });
+  // Exercise task edits, read-only changes, review/removal and branch recovery
+  // against the real embedded application, using only this temporary workspace.
+  const finish = await request('/api/requirements', 'POST', {name:'任务收尾验收', slug:'finish-verification', project_ids:projects.map(p=>p.id)}, 201);
+  const finishMember = finish.members[0];
+  const changedFile = path.join(finishMember.path, '改动预览.txt');
+  await writeFile(changedFile, 'staged content\n');
+  await git(finishMember.path, 'add', '改动预览.txt');
+  await writeFile(changedFile, 'working content\n');
+  const changeQuery = new URLSearchParams({path:finishMember.path, file:'改动预览.txt'});
+  const workingPreview = await request(`/api/projects/${finishMember.project_id}/changes?${changeQuery}&mode=working`);
+  assert(workingPreview.text.includes('+working content'));
+  const indexPreview = await request(`/api/projects/${finishMember.project_id}/changes?${changeQuery}&mode=index`);
+  assert(indexPreview.text.includes('+staged content'));
+  await git(finishMember.path, 'reset', '--', '改动预览.txt');
+  await rm(changedFile);
+  const notesPath = path.join(finish.path,'BRIEF.md');
+  await writeFile(notesPath,'User notes survive task edits\n');
+  await request(`/api/requirements/${finish.id}`, 'PATCH', {name:'任务收尾与恢复验收', description:'检查修改、清理与恢复的完整流程'});
+  assert((await readFile(path.join(finish.path,'WORK_HUB_CONTEXT.md'),'utf8')).includes('检查修改、清理与恢复的完整流程'));
+  assert.equal(await readFile(notesPath,'utf8'),'User notes survive task edits\n');
+  const activeReview = await request(`/api/requirements/${finish.id}/review`);
+  assert(activeReview.items.every(item=>!item.cleanable));
+  await request(`/api/requirements/${finish.id}/archive`, 'POST', {archived:true});
+  const finishReview = await request(`/api/requirements/${finish.id}/review`);
+  const candidate = finishReview.items.find(item=>item.path===finishMember.path);
+  assert(candidate?.cleanable, JSON.stringify(finishReview));
+  await request(`/api/requirements/${finish.id}/cleanup/${finishMember.project_id}`, 'POST', {path:candidate.path,fingerprint:candidate.fingerprint});
+  await assert.rejects(readFile(path.join(finishMember.path,'.git')));
+  await git(projects.find(p=>p.id===finishMember.project_id).repository,'show-ref','--verify','refs/heads/'+finishMember.branch);
+  await request(`/api/requirements/${finish.id}/archive`, 'POST', {archived:false});
+  const restored = await request(`/api/requirements/${finish.id}/retry`, 'POST', {project_id:finishMember.project_id});
+  assert.equal(restored.state,'ready');
+  assert.equal(await git(finishMember.path,'branch','--show-current'),finishMember.branch);
+  console.log('Task review passed: staged/working diff, current context, preserved notes, explicit archive, checked cleanup and branch recovery.');
   const saved = { directory, data, workspace, projects, task, session, primary, url: host.url, pid: host.pid, log };
   await writeFile(path.join(directory, 'test-state.json'), JSON.stringify(saved, null, 2));
   console.log('Workflow passed: two projects, multi-project task, fetch, fast-forward pull, branch switch, dirty guard, worktree status, saved session history, archive/restore.');

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
 import { ChevronDown, CodeXml, Terminal, FolderGit2 } from "lucide-react"
 import type { GitOverview, Member, Task, Worktree } from "./types"
 
-export const statusLabels: Record<string, string> = { ready: "已就绪", partial: "部分就绪", archived: "已归档", creating: "创建中", pending: "待创建", failed: "创建失败" }
+export const statusLabels: Record<string, string> = { ready: "已就绪", partial: "部分就绪", archived: "已归档", creating: "创建中", pending: "待创建", failed: "创建失败", removed: "目录已清理" }
 const tones: Record<string, string> = {
   ready: "border-emerald-200 bg-emerald-50 text-emerald-800",
   partial: "border-amber-200 bg-amber-50 text-amber-800", warning: "border-amber-200 bg-amber-50 text-amber-800",

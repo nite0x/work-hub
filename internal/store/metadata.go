@@ -17,7 +17,6 @@ import (
 var metadataTables = []struct{ Name, Columns string }{
 	{"projects", "id,name,path,common_dir,folder,created_at"},
 	{"settings", "key,value"},
-	{"master_sync_runs", "date,started_at,finished_at,status,results"},
 	{"requirements", "id,name,slug,description,branch,path,primary_project_id,state,created_at,has_workspace"},
 	{"members", "requirement_id,project_id,path,base_commit,state,error,mode,base_ref,branch"},
 	{"requirement_sessions", "requirement_id,session_id,name,cwd,created_at,updated_at,source"},
@@ -26,6 +25,7 @@ var metadataTables = []struct{ Name, Columns string }{
 	{"task_session_pins", "requirement_id,session_id"},
 	{"session_organization", "session_id,pinned,archived,updated_at"},
 	{"conversation_input_requests", "session_id,request_id,fingerprint,status"},
+	{"conversation_async_answers", "session_id,item_id,turn_id,fingerprint,status,request_id"},
 	{"conversation_drafts", "key,payload,updated_at"},
 	{"conversation_create_requests", "request_id,fingerprint,session_id"},
 }
@@ -166,12 +166,19 @@ func (s *Store) ImportMetadata(snapshot MetadataSnapshot) error {
 			if len(row) != count {
 				return fmt.Errorf("导入数据结构不匹配：%s", table.Name)
 			}
+			if table.Name == "requirements" && row[6] == "" {
+				row = append([]any{}, row...)
+				row[6] = nil
+			}
 			if _, err := tx.Exec("INSERT INTO "+table.Name+"("+table.Columns+") VALUES("+placeholders+")", row...); err != nil {
 				return fmt.Errorf("导入 %s 失败：%w", table.Name, err)
 			}
 		}
 	}
-	if _, err := tx.Exec(`UPDATE requirements SET state='partial' WHERE state='creating'; UPDATE members SET state='failed',error='导入时操作尚未完成，请检查后重试' WHERE state='creating'; UPDATE master_sync_runs SET status='interrupted' WHERE status='running'`); err != nil {
+	if _, err := tx.Exec(`UPDATE requirements SET state='partial' WHERE state='creating'; UPDATE members SET state='failed',error='导入时操作尚未完成，请检查后重试' WHERE state IN ('creating','pending')`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(repairTaskPrimary); err != nil {
 		return err
 	}
 	if err := backfillSessions(tx); err != nil {

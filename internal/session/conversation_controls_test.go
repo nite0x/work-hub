@@ -34,6 +34,7 @@ func (c *controlsLive) Call(ctx context.Context, method string, params any, out 
 		result = map[string]any{"turnId": "turn"}
 	case "model/list":
 		result = map[string]any{"data": []any{map[string]any{"id": "model", "model": "model", "displayName": "Fixture model", "isDefault": true, "defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "high"}}}}}
+		result.(map[string]any)["data"] = append(result.(map[string]any)["data"].([]any), map[string]any{"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}})
 	case "collaborationMode/list":
 		result = map[string]any{"data": []any{map[string]any{"mode": "default"}, map[string]any{"mode": "plan"}}}
 	default:
@@ -170,6 +171,8 @@ func TestDraftStoragePreservesImagesAndRejectsOlderWrites(t *testing.T) {
 	a, _, _, _ := chatFixture(t)
 	path := "/api/conversation-drafts?key=environment-session"
 	draft := map[string]any{"text": "尚未发送", "updated": 20, "settings": map[string]any{"model": "model", "mode": "plan"}, "reading": map[string]any{"top": 230, "bottom": false, "anchor": "message", "offset": 3}, "images": []any{map[string]any{"id": "png", "name": "screen.png", "contentType": "image/png", "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII="}}}
+	draft["reading"].(map[string]any)["latest"] = "last-read-message:1234"
+	draft["questions"] = map[string]any{`["async","turn","question"]`: map[string]any{"0": map[string]string{"choice": "保留兼容", "text": "保留历史数据"}}}
 	if code, raw := call(t, a, "POST", path, draft); code != 200 {
 		t.Fatalf("%d %s", code, raw)
 	}
@@ -179,7 +182,7 @@ func TestDraftStoragePreservesImagesAndRejectsOlderWrites(t *testing.T) {
 		t.Fatal(code)
 	}
 	code, raw := call(t, a, "GET", path, nil)
-	if code != 200 || !strings.Contains(string(raw), "尚未发送") || !strings.Contains(string(raw), "image/png;base64") {
+	if code != 200 || !strings.Contains(string(raw), "尚未发送") || !strings.Contains(string(raw), "image/png;base64") || !strings.Contains(string(raw), "last-read-message:1234") || !strings.Contains(string(raw), "保留历史数据") {
 		t.Fatalf("%d %s", code, raw)
 	}
 	if code, raw := call(t, a, "GET", "/api/conversation-drafts?key=other-session", nil); code != 200 || strings.TrimSpace(string(raw)) != "null" {

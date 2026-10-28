@@ -31,7 +31,7 @@ export interface GitOverview {
   credentials?: { available?: boolean; message?: string };
 }
 export interface Choice {
-  mode: string; path: string; source: string; branch: string; error?: string;
+  mode: string; path: string; source: string; branch: string; existingBranch?: string; error?: string;
 }
 export interface PickerRow {
   project: Project; checked: boolean; choice: Choice; overview?: GitOverview;

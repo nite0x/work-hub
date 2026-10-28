@@ -3,7 +3,6 @@ package overview
 
 import (
 	"net/http"
-	"time"
 
 	"worktree-hub/internal/httpx"
 	"worktree-hub/internal/model"
@@ -12,7 +11,6 @@ import (
 
 type ProjectStatus interface {
 	Snapshot([]model.Project, bool) (bool, string)
-	MasterSyncState(time.Time) (model.MasterSyncState, error)
 }
 type Service struct {
 	workspace *workspace.Service
@@ -42,19 +40,16 @@ func (a *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	refreshing, updatedAt := a.projects.Snapshot(projects, force)
 	terminal, terminalRefreshing := a.workspace.TerminalSnapshot(settings, force)
 	refreshing = refreshing || terminalRefreshing
-	masterSync, err := a.projects.MasterSyncState(time.Now())
-	if err != nil {
-		httpx.DbError(w, err)
-		return
-	}
 	LinkWorktrees(projects, reqs)
-	httpx.WriteJSON(w, 200, map[string]any{"projects": projects, "requirements": reqs, "root": a.workspace.Root, "refreshed_at": updatedAt, "status_refreshing": refreshing, "terminal": terminal, "master_sync": masterSync, "read_only_sessions": a.workspace.ReadOnlySessions})
+	httpx.WriteJSON(w, 200, map[string]any{"projects": projects, "requirements": reqs, "root": a.workspace.Root, "refreshed_at": updatedAt, "status_refreshing": refreshing, "terminal": terminal, "read_only_sessions": a.workspace.ReadOnlySessions})
 }
 
 // LinkWorktrees attaches the current environment's cached Git state to its tasks.
 func LinkWorktrees(projects []model.Project, reqs []model.Requirement) {
 	index := map[string]*model.Worktree{}
+	projectStatus := map[string]model.Project{}
 	for i := range projects {
+		projectStatus[projects[i].ID] = projects[i]
 		for j := range projects[i].Worktrees {
 			t := &projects[i].Worktrees[j]
 			index[t.Path] = t
@@ -76,6 +71,8 @@ func LinkWorktrees(projects []model.Project, reqs []model.Requirement) {
 					observed.ExpectedBranch = reqs[i].Branch
 				}
 				m.Worktree = &observed
+			} else if p, ok := projectStatus[m.ProjectID]; ok && (p.Error != "" || (p.StatusUpdatedAt != "" && !p.Refreshing)) {
+				m.Worktree = &model.Worktree{Path: m.Path, Missing: p.Error == "", Error: p.Error, StatusUpdatedAt: p.StatusUpdatedAt}
 			}
 		}
 	}

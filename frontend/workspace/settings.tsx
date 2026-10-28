@@ -2,8 +2,7 @@ import type { ReactNode } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { TableCell, TableRow } from "@/components/ui/table"
-import { Check, DataTable, Feedback, Field, ModalFooter, ModalHeader, NativeSelect, Option, StatusBadge } from "./shared"
+import { Check, Feedback, Field, ModalFooter, ModalHeader, NativeSelect, Option } from "./shared"
 
 function Heading({ id, title, children, actions }: { id: string; title: string; children: ReactNode; actions?: ReactNode }) {
   return <div className="settings-card-heading"><div><h2 id={id} className="m-0 text-lg font-semibold">{title}</h2><p className="text-sm leading-relaxed text-muted-foreground">{children}</p></div>{actions}</div>
@@ -30,17 +29,16 @@ export function SettingsPage() {
         <div className="settings-actions"><Button type="submit">保存终端设置</Button></div>
       </fieldset>
     </form></Card>
-    <Card className="settings-card gap-0 p-6 shadow-none" aria-labelledby="masterSyncTitle"><form id="masterSyncForm">
-      <Heading id="masterSyncTitle" title="每日拉取 master">更新当前执行环境中已登记项目的本地 master，为新任务准备基线。</Heading>
-      <fieldset id="masterSyncSettingsFields" disabled>
-        <Check id="masterSyncEnabled" label="启用每日自动拉取" />
-        <Field id="masterSyncTime" label="执行时间（北京时间 · Asia/Shanghai）" className="settings-time"><Input type="time" id="masterSyncTime" required defaultValue="09:00" /></Field>
-        <Help>服务需保持运行，关闭浏览器不影响执行；错过时间后启动会补跑当天一次。关闭定时拉取不取消已开始的执行。</Help>
-        <details className="settings-details"><summary className="text-primary">更新规则与异常处理</summary><p>仅快进更新 master。未提交修改、分支分歧、缺少 master 或远端配置不明确时跳过；认证或网络失败会记录原因，其他项目继续处理。当天执行过后不重复运行，需重试时可使用项目的 Git 操作。</p></details>
-        <Feedback id="masterSyncError" variant="destructive" className="mt-4" hidden />
-        <div className="settings-actions"><Button type="submit">保存每日拉取设置</Button></div>
+    <Card className="settings-card gap-0 p-6 shadow-none" aria-labelledby="sessionTitleHeading"><form id="sessionTitleForm">
+      <Heading id="sessionTitleHeading" title="对话标题">发送首条消息后，根据首次输入在后台生成一次主题标题。手动名称优先保留。</Heading>
+      <fieldset id="sessionTitleFields" disabled>
+        <Field id="sessionTitleModel" label="标题模型"><NativeSelect id="sessionTitleModel"><Option value="">跟随正文模型</Option></NativeSelect></Field>
+        <Help>仅影响当前执行环境中新对话的标题，正文模型保持原来的选择。沿用 Codex 登录，额外消耗一次模型请求；生成失败时保留初始短标题。</Help>
+        <div className="settings-actions"><Button type="submit">保存标题设置</Button></div>
       </fieldset>
-    </form><div className="settings-results"><h3>最近执行结果</h3><div id="masterSyncResults" aria-live="polite" /></div></Card>
+      <Feedback id="sessionTitleError" variant="destructive" className="mt-4" hidden />
+      <Button type="button" id="sessionTitleReload" variant="outline" size="sm" className="mt-3">刷新可用模型</Button>
+    </form></Card>
   </>
 }
 export function EnvironmentForm() {
@@ -52,13 +50,4 @@ export function EnvironmentForm() {
     <p className="dialog-description">导入会复制一份当前记录到 Windows；项目和 worktree 保留原路径。之后请通过桌面端维护这些任务。</p><Feedback id="environmentError" variant="destructive" hidden />
     <ModalFooter><Button type="submit" id="connectEnvironment">连接并准备环境</Button></ModalFooter>
   </form>
-}
-export interface SyncRun {
-  date: string; status: string; results: { project_name: string; status: string; message: string }[];
-}
-export function SyncResults({ run }: { run?: SyncRun | null }) {
-  if (!run) return <p className="text-sm text-muted-foreground">尚未执行每日拉取。</p>
-  const labels: Record<string, string> = { pending: "等待执行", updated: "已更新", current: "已是最新", skipped: "已跳过", failed: "失败" }
-  const status = { running: "执行中", completed: "执行完成", interrupted: "执行被中断，未完成项目请手动检查" }[run.status] || run.status
-  return <><p>{run.date} · {status}</p><DataTable label="每日拉取执行结果" headers={["项目", "结果", "说明"]}>{run.results.map((result, index) => <TableRow key={index}><TableCell className="align-top whitespace-normal">{result.project_name}</TableCell><TableCell className="align-top"><StatusBadge kind={result.status === "failed" ? "failed" : result.status === "updated" || result.status === "current" ? "ready" : "neutral"}>{labels[result.status] || result.status}</StatusBadge></TableCell><TableCell className="align-top whitespace-normal">{result.message}</TableCell></TableRow>)}</DataTable></>
 }

@@ -7,7 +7,6 @@ import (
 	"worktree-hub/internal/httpx"
 	"worktree-hub/internal/model"
 	"worktree-hub/internal/platform"
-	"worktree-hub/internal/store"
 	"worktree-hub/internal/workspace"
 )
 
@@ -88,8 +87,16 @@ func (a *Service) RemoveProjectHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, "项目仍有关联任务，请保留登记以便追溯")
 		return
 	}
-	if err := store.MustAffected(a.Workspace.Store.DB.Exec(`DELETE FROM projects WHERE id=?`, r.PathValue("id"))); err != nil {
-		httpx.WriteError(w, 404, err.Error())
+	result, err := a.Workspace.Store.DB.Exec(`DELETE FROM projects WHERE id=?`, r.PathValue("id"))
+	if err != nil {
+		httpx.DbError(w, err)
+		return
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		httpx.DbError(w, err)
+		return
+	} else if n == 0 {
+		httpx.WriteError(w, 404, "项目不存在")
 		return
 	}
 	httpx.WriteJSON(w, 200, map[string]string{"message": "已移除项目登记；仓库和 worktree 文件未删除"})

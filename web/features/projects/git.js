@@ -1,5 +1,6 @@
 'use strict';
 let gitState = null;
+let gitViewRevision = 0;
 let gitSelectedPath = '';
 let gitRequirementID = '';
 let gitMergePreviewData = null;
@@ -7,6 +8,8 @@ const mergeAIRequests = new Map();
 let gitAILaunching = false;
 async function openGit(id, path = '', requirement = '') {
   if (state.busy || gitAILaunching) return;
+  const revision = ++gitViewRevision;
+  const environment = activeEnvironment;
   gitState = null;
   gitSelectedPath = path;
   gitRequirementID = requirement;
@@ -17,14 +20,15 @@ async function openGit(id, path = '', requirement = '') {
   $('#gitContent').innerHTML = '<div class="loading">正在读取分支与远端…</div>';
   $('#gitDialog').showModal();
   try {
-    const overview = await api(`/api/projects/${id}/git`);
+    const overview = await api(`/api/projects/${id}/git`, {environment});
+    if (revision !== gitViewRevision || environment !== activeEnvironment || !$('#gitDialog').open) return;
     if (path && !overview.project.worktrees.some(t => t.path === path && !t.bare && !t.missing && !t.prunable && !t.error)) {
       throw new Error('该任务的工作目录已不可用，请关闭面板并刷新任务状态。');
     }
     gitState = overview;
     gitSelectedPath = path || gitState.project.path;
     renderGit();
-  } catch (error) { $('#gitContent').textContent = ''; $('#gitError').textContent = error.message; $('#gitError').hidden = false; }
+  } catch (error) { if (revision !== gitViewRevision || environment !== activeEnvironment || !$('#gitDialog').open) return; $('#gitContent').textContent = ''; $('#gitError').textContent = error.message; $('#gitError').hidden = false; }
 }
 function defaultBranchSource(v) {
   return ['refs/heads/master', 'refs/heads/main', 'refs/remotes/origin/master', 'refs/remotes/origin/main'].find(ref => v.branches.some(b => b.ref === ref)) || 'HEAD';
@@ -156,7 +160,11 @@ async function launchGitMergeAI() {
 }
 async function gitOperation(body, title) {
   if (!gitState || state.busy) return;
-  const id = gitState.project.id;
+  const original = gitState;
+  const id = original.project.id;
+  const environment = activeEnvironment, revision = gitViewRevision;
+  const current = () => revision === gitViewRevision && environment === activeEnvironment && $('#gitDialog').open;
+  const request = (path, options = {}) => api(path, {...options, environment});
   const scopedActions = ['switch', 'adopt_branch', 'pull', 'push', 'merge_preview', 'merge', 'merge_abort'];
   if (scopedActions.includes(body.action)) {
     body.path ||= gitSelectedPath;
@@ -168,7 +176,7 @@ async function gitOperation(body, title) {
   $('#gitAuthHelp').hidden = true;
   $('#gitProgress').textContent = title + '，请稍候…';
   $('#gitProgress').hidden = false;
-  const buttons = [...$('#gitDialog').querySelectorAll('button')].map(button => [button, button.disabled]);
+  const buttons = [...$('#gitDialog').querySelectorAll('button:not(.close-dialog)')].map(button => [button, button.disabled]);
   buttons.forEach(([button]) => { button.disabled = true; });
   $('#gitResultTitle').textContent = title + '，请稍候…';
   $('#gitOutput').textContent = '';
@@ -176,16 +184,18 @@ async function gitOperation(body, title) {
   $('#gitProgress').scrollIntoView({ block: 'nearest' });
   const started = Date.now();
   const timer = setInterval(() => {
+    if (!current()) return;
     $('#gitProgress').textContent = title + `，已等待 ${Math.floor((Date.now() - started) / 1000)} 秒。后台操作最长等待 90 秒；需要登录时请使用终端获取。`;
   }, 1000);
   try { await mutation(title, async () => {
     try {
-      result = await api(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify(body) });
+      result = await request(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify(body) });
     } catch (error) {
-      $('#gitAuthHelp').hidden = error.code !== 'authentication_required';
-      try { gitState = await api(`/api/projects/${id}/git`); renderGit(); } catch { /* Keep the last readable state and original action error. */ }
+      if (current()) $('#gitAuthHelp').hidden = error.code !== 'authentication_required';
+      try { const updated = await request(`/api/projects/${id}/git`); if (current()) { gitState = updated; renderGit(); } } catch { /* Keep the last readable state and original action error. */ }
       throw error;
     }
+    if (!current()) { toast(result.message || 'Git 操作已完成'); return; }
     if (result.conflict) {
       const tree = gitState.project.worktrees.find(t => t.path === gitSelectedPath);
       if (tree) Object.assign(tree, { operation: 'merge', merge_head: result.merge_head, conflicts: result.conflicts });
@@ -193,16 +203,18 @@ async function gitOperation(body, title) {
     $('#gitResultTitle').textContent = result.message;
     $('#gitOutput').textContent = result.output || '';
     $('#gitResult').hidden = false;
-    try { gitState = await api(`/api/projects/${id}/git`); renderGit(); }
-    catch (error) { renderGit(); throw new Error('操作已执行，但状态刷新失败，请刷新检查后再操作：' + error.message); }
-  }, $('#gitError')); } finally {
+    try { const updated = await request(`/api/projects/${id}/git`); if (current()) { gitState = updated; renderGit(); } }
+    catch (error) { if (current()) renderGit(); throw new Error('操作已执行，但状态刷新失败，请刷新检查后再操作：' + error.message); }
+  }, $('#gitError'), {project:id, environment, background:true, isCurrent:current}); } finally {
     clearInterval(timer);
+    if (current()) {
     $('#gitProgress').hidden = true;
     if (!$('#gitError').hidden) { $('#gitResult').hidden = true; $('#gitError').scrollIntoView({ block: 'nearest' }); }
     else $('#gitResult').scrollIntoView({ block: 'nearest' });
-    buttons.forEach(([button, disabled]) => { if (button.isConnected) button.disabled = disabled; });
+    }
+    buttons.forEach(([button, disabled]) => { if (button.isConnected && current()) button.disabled = disabled; });
   }
-  if (result?.conflict) {
+  if (result?.conflict && current()) {
     toast(`合并出现冲突（${result.conflicts.length} 个文件），正在打开 AI…`, true);
     try { await launchGitMergeAI(); }
     catch (error) {

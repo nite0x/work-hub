@@ -8,6 +8,15 @@ const session = {id:"thread", name:"会话", cwd:task.members[0].path};
 function setup(request: ChatOptions["request"], isNew = false) {
   return new ChatController({task, session: isNew ? null : session, environment:"wsl-ubuntu", request, stream: async () => {throw new Error("offline");}, created() {}, close() {}});
 }
+
+test("new conversations default to GPT-6.1-Sol high with full access and existing conversations inherit", async () => {
+  let body: any;
+  const fresh = setup(async (_path, init) => {body = JSON.parse(String(init?.body)); return {session, chat: idleChat()} as any;}, true);
+  assert.deepEqual(fresh.getSnapshot().settings, {model:"gpt-6.1-sol",effort:"high",permission:"full"});
+  await fresh.send("检查默认设置");
+  assert.deepEqual(body.settings, {model:"gpt-6.1-sol",effort:"high",permission:"full"});
+  assert.deepEqual(setup(async () => idleChat() as any).getSnapshot().settings, {});
+});
 const running = (id = "request"): ChatState => ({...idleChat(), id, turn_id:"turn", status:"running", busy:true});
 
 test("read-only history streams retain newer parts, poll on disconnect and never call control APIs", async t => {
@@ -341,7 +350,7 @@ test("failed steering preserves the same retry identity and never silently start
  assert(posts.slice(1).every(p=>p.path.endsWith('/steer')));assert.equal(c.getSnapshot().draft,'补充');
 });
 
-test("drafts, images, reading and settings restore through the database on a fresh controller",async()=>{
+test("drafts, images, files, reading and settings restore through the database on a fresh controller",async()=>{
  Object.assign(globalThis,{document:{hidden:false}});
  const records=new Map<string,any>();
  const make=()=>{
@@ -356,11 +365,13 @@ test("drafts, images, reading and settings restore through the database on a fre
  const first=make();first.setDraft('下次继续写');first.setSettings({model:'model',effort:'high',mode:'plan'});
  first.reading={top:250,bottom:false,anchor:'message',offset:4};
  first.draftAttachments=[{id:'image',type:'image',name:'screen.png',contentType:'image/png',status:{type:'complete'},content:[{type:'image',image:'data:image/png;base64,aGVsbG8='}]}];
+ first.draftAttachments=[...first.draftAttachments,{id:'file',type:'file',name:'页面.html',contentType:'text/html',status:{type:'complete'},content:[{type:'text',text:'文件路径：/environment/attachments/页面.html'}]}];
  first.persist();await new Promise(r=>setImmediate(r));
  const next=make();next.connect();await new Promise(r=>setImmediate(r));
  try{
   assert.equal(next.getSnapshot().draft,'下次继续写');assert.equal(next.getSnapshot().settings.mode,'plan');
-  assert.equal(next.draftAttachments.length,1);assert.equal(next.reading.anchor,'message');
+  assert.equal(next.draftAttachments.length,2);assert.equal(next.reading.anchor,'message');
+  assert.deepEqual(next.draftAttachments[1].content,[{type:'text',text:'文件路径：/environment/attachments/页面.html'}]);
  }finally{next.disconnect();}
 });
 
@@ -446,6 +457,25 @@ test("failed local messages restore the draft and attachments and retry only onc
   assert.equal(c.getSnapshot().entries.length, 1);
   assert.equal(bodies[0].request_id, bodies[1].request_id);
   reject(new Error("offline")); await assert.rejects(retry);
+});
+
+test("a generated title arriving after reply completion updates the session and list callback", async () => {
+  Object.assign(globalThis, {document: {hidden: false}});
+  let chat: ChatState = {...running(), status: "completed", busy: false};
+  const titles: string[] = [];
+  const c = setup(async path => path.endsWith("/history") ? {session, entries: []} as any : chat);
+  c.options.managed = (updated, action) => { if (action === "title") titles.push(updated.name!); };
+  c.connect();
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(c.getSnapshot().chat.busy, false);
+    chat = {...chat, revision: 2, session_name: "修复对话标题生成"};
+    await c.poll();
+    assert.equal(c.getSnapshot().session?.name, "修复对话标题生成");
+    assert.deepEqual(titles, ["修复对话标题生成"]);
+    await c.poll();
+    assert.deepEqual(titles, ["修复对话标题生成"]);
+  } finally { c.disconnect(); }
 });
 
 test("a delayed history page cannot overwrite a newer Codex title", async () => {

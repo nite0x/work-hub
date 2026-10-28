@@ -89,6 +89,9 @@ func (a *Service) UpdateRequirementHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	q.Name, q.Description = in.Name, in.Description
+	if err := WriteBriefContext(r.Context(), q); err != nil {
+		q.ContextWarning = err.Error()
+	}
 	httpx.WriteJSON(w, 200, q)
 }
 
@@ -118,8 +121,11 @@ func (a *Service) RemoveRequirementProjectHandler(w http.ResponseWriter, r *http
 		return
 	}
 	q.Members = members
-	if q.PrimaryProjectID == id && len(members) > 0 {
-		q.PrimaryProjectID = members[0].ProjectID
+	if q.PrimaryProjectID == id {
+		q.PrimaryProjectID = ""
+		if len(members) > 0 {
+			q.PrimaryProjectID = members[0].ProjectID
+		}
 	}
 	q.State = "ready"
 	for _, m := range members {
@@ -134,7 +140,7 @@ func (a *Service) RemoveRequirementProjectHandler(w http.ResponseWriter, r *http
 	}
 	defer tx.Rollback()
 	if _, err = tx.Exec(`DELETE FROM members WHERE requirement_id=? AND project_id=?`, q.ID, id); err == nil {
-		_, err = tx.Exec(`UPDATE requirements SET primary_project_id=?,state=? WHERE id=?`, q.PrimaryProjectID, q.State, q.ID)
+		_, err = tx.Exec(`UPDATE requirements SET primary_project_id=NULLIF(?,''),state=? WHERE id=?`, q.PrimaryProjectID, q.State, q.ID)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -142,6 +148,9 @@ func (a *Service) RemoveRequirementProjectHandler(w http.ResponseWriter, r *http
 	if err != nil {
 		httpx.DbError(w, err)
 		return
+	}
+	if err := WriteBriefContext(r.Context(), q); err != nil {
+		q.ContextWarning = err.Error()
 	}
 	httpx.WriteJSON(w, 200, q)
 }
@@ -183,7 +192,7 @@ func (a *Service) ReplaceRequirementProjectHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	// Replacing a managed checkout never reuses or removes the old path.
-	if in.Mode == "new" {
+	if createsWorktree(in.Mode) {
 		p.Folder = p.Folder[:min(48, len(p.Folder))]
 		if in.Path != "" {
 			folder := platform.BaseWorkspacePath(in.Path)
@@ -202,14 +211,14 @@ func (a *Service) ReplaceRequirementProjectHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	q.Members[index] = m
-	if m.Mode == "new" {
+	if createsWorktree(m.Mode) {
 		err = ensureTaskWorkspace(r.Context(), q)
 	}
 	if err != nil {
 		httpx.WriteError(w, 422, err.Error())
 		return
 	}
-	q.HasWorkspace = q.HasWorkspace || m.Mode == "new"
+	q.HasWorkspace = q.HasWorkspace || createsWorktree(m.Mode)
 	tx, err := a.Workspace.Store.DB.Begin()
 	if err != nil {
 		httpx.DbError(w, err)

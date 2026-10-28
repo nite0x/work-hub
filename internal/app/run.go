@@ -151,8 +151,6 @@ func Run() {
 	defer stop()
 	a.shutdown = stop
 	srv.Handler = a.handler()
-	stopMasterSync := a.Projects.StartMasterSync(ctx)
-	defer stopMasterSync()
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
 		log.Fatal(err)

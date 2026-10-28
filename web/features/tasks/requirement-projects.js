@@ -32,7 +32,7 @@ function updateRequirementProjectsPreview() {
   const members = taskPickerSelection('#requirementProjectPicker');
   $('#requirementProjectsPreview').textContent = members.length ? members.map(m => {
     const p = state.projects.find(p => p.id === m.project_id);
-    return m.mode === 'new' ? workspaceDisplayPath(q.path, p.folder) + '（新建）' : m.mode === 'project' ? p.path + '（项目原目录）' : m.path || '请选择已有 Worktree';
+    return taskCreatesWorktree(m.mode) ? workspaceDisplayPath(q.path, p.folder) + '（新建 · ' + (m.branch || '请选择分支') + '）' : m.mode === 'project' ? p.path + '（项目原目录）' : m.path || '请选择已有 Worktree';
   }).join('\n') : '请选择要添加的项目';
   $('#requirementProjectsSubmit').disabled = !selected.length || q.members.length + selected.length > 30 || q.state === 'archived' || q.state === 'creating' || !taskProjectPickerReady('#requirementProjectPicker');
 }

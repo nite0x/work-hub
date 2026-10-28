@@ -126,7 +126,7 @@ async function loadSessionHistory(older = false, background = false) {
   const query = older ? '?cursor=' + encodeURIComponent(current.cursor) : '';
   try {
     const path = `/api/sessions/${encodeURIComponent(current.session)}/history`;
-    let page = await api(path + query, { signal: current.abort.signal });
+    let page = await api(path + query, { environment: current.environment, signal: current.abort.signal });
     if (sessionHistoryState !== current) return;
     let fresh = page.entries;
     const known = new Set(current.entries.map(historyEntryKey));
@@ -136,7 +136,7 @@ async function loadSessionHistory(older = false, background = false) {
     while (background && known.size && page.next_cursor && !fresh.some(entry => known.has(historyEntryKey(entry)))) {
       if (cursors.has(page.next_cursor)) throw new Error('历史分页游标重复');
       cursors.add(page.next_cursor);
-      page = await api(path + '?cursor=' + encodeURIComponent(page.next_cursor), { signal: current.abort.signal });
+      page = await api(path + '?cursor=' + encodeURIComponent(page.next_cursor), { environment: current.environment, signal: current.abort.signal });
       if (sessionHistoryState !== current) return;
       fresh = [...page.entries, ...fresh];
     }
@@ -169,8 +169,10 @@ function openSessionHistory(requirement, session = null) {
 }
 
 function openSessionHistoryPanel(requirement, session = null, context = {}) {
-  if (session) markSessionRead(requirement, session);
-  if (typeof taskConversationOpened === 'function' && sessionHistoryState?.requirement === requirement && sessionHistoryState.session === session && (!sessionHistoryState.environment || sessionHistoryState.environment === activeEnvironment)) {
+  const environment = context.environment || (typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment);
+  const workspace = context.workspace || state;
+  if (session && environment === (typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment)) markSessionRead(requirement, session);
+  if (typeof taskConversationOpened === 'function' && sessionHistoryState?.requirement === requirement && sessionHistoryState.session === session && (!sessionHistoryState.environment || sessionHistoryState.environment === environment)) {
     taskConversationOpened(requirement, session);
     return;
   }
@@ -178,8 +180,7 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
   if (readonly && !session) return;
   if (window.WorkHubAssistant) {
     closeSessionHistory(false);
-    const environment = activeEnvironment;
-    const task = state.requirements.find(q => q.id === requirement);
+    const task = workspace.requirements.find(q => q.id === requirement);
     const cached = context.session || requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
     sessionHistoryState = { requirement, session, environment, entries: [], assistant: true, browserTarget: context.browserTarget };
     const currentPanel = sessionHistoryState;
@@ -188,23 +189,23 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
     panel.setAttribute('data-assistant-ui', '');
     panel.setAttribute('aria-labelledby', 'assistantChatTitle');
     window.WorkHubAssistant.open({
-      workspace: {tasks: state.requirements, projects: state.projects},
+      workspace: {tasks: workspace.requirements, projects: workspace.projects},
       task: context.target ? undefined : task, target: context.target, session: session ? cached || { id: session, name: '会话详情', cwd: '' } : null, environment, environmentName: environmentName(environment), readOnly: readonly, persistDraft: true,
       managed: (session, action) => window.dispatchEvent(new CustomEvent("workhub:session-managed", {detail:{session,action,environment}})),
       request: (path, options) => api(path, { ...options, environment }),
       stream: (path, signal) => fetch(path, { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal }),
       close: () => closeSessionHistory(),
       activity: (id, chat) => {
-        if (activeEnvironment === environment) updateSessionChatActivity(requirement, id, chat);
+        updateSessionChatActivity(requirement, id, chat, environment);
       },
       created: created => {
         if (typeof taskConversationCreated === 'function') taskConversationCreated(environment, requirement, created.id);
+        if (sessionHistoryState === currentPanel) sessionHistoryState.session = created.id;
+        context.created?.(created);
         if (activeEnvironment !== environment) return;
         const data = requirementSessions.get(requirement) || { sessions: [] };
         data.sessions = [created, ...data.sessions.filter(s => s.id !== created.id)];
         requirementSessions.set(requirement, data);
-        if (sessionHistoryState === currentPanel) sessionHistoryState.session = created.id;
-        context.created?.(created);
         updateRequirementSessionsView(requirement);
       }
     });
@@ -215,8 +216,8 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
   closeCommandOutput();
   if (typeof closeSessionChat === 'function') closeSessionChat(sessionHistoryState);
   stopHistoryRefresh(sessionHistoryState);
-  const cachedView = sessionHistoryViews.get(sessionHistoryViewKey(requirement, session));
-  sessionHistoryState = { requirement, session, environment: typeof activeEnvironment === 'undefined' ? 'local' : activeEnvironment, entries: cachedView?.entries || [], cursor: cachedView?.cursor || null, loading: false, restoreScroll: cachedView, target: context.target, browserTarget: context.browserTarget, browserContext: context };
+  const cachedView = sessionHistoryViews.get(sessionHistoryViewKey(requirement, session, environment));
+  sessionHistoryState = { requirement, session, environment, entries: cachedView?.entries || [], cursor: cachedView?.cursor || null, loading: false, restoreScroll: cachedView, target: context.target, browserTarget: context.browserTarget, browserContext: context };
   $('#sessionHistoryAttention').hidden = true;
   $('#sessionHistoryAttention').textContent = '';
   $('#sessionHistoryEyebrow').textContent = session ? 'SESSION HISTORY' : 'NEW CONVERSATION';

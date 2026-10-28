@@ -8,9 +8,9 @@ let sessionPickerGeneration = 0;
 let sessionPickerSearch = '';
 let sessionPickerItems = [];
 const sessionReadMemory = new Map();
-function sessionReadKey(session) { return 'workhub:session-read:' + JSON.stringify([activeEnvironment, session]); }
+function sessionReadKey(session, environment = activeEnvironment) { return 'workhub:session-read:' + JSON.stringify([environment, session]); }
 function sessionReadProgress(session) {
-  const key = sessionReadKey(session.id);
+  const key = sessionReadKey(session.id, session.environment_id || activeEnvironment);
   if (sessionReadMemory.has(key)) return sessionReadMemory.get(key);
   try {
     const saved = JSON.parse(localStorage.getItem(key));
@@ -19,7 +19,7 @@ function sessionReadProgress(session) {
   return saveSessionRead(session);
 }
 function saveSessionRead(session) {
-  const key = sessionReadKey(session.id);
+  const key = sessionReadKey(session.id, session.environment_id || activeEnvironment);
   const saved = { time: Math.max(Date.now() / 1000, session.updated_at || 0), run: session.completed_run || '' };
   sessionReadMemory.set(key, saved);
   try { localStorage.setItem(key, JSON.stringify(saved)); } catch { /* Keep an in-memory fallback. */ }
@@ -27,7 +27,7 @@ function saveSessionRead(session) {
 }
 function sessionWithUnread(session) {
   const seen = sessionReadProgress(session);
-  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && (!sessionHistoryState.environment || sessionHistoryState.environment === activeEnvironment) && !document.hidden && (typeof conversationReadingSession === 'function' ? conversationReadingSession(session.id) : !document.getElementById('taskConversation')?.hidden);
+  const open = typeof sessionHistoryState !== 'undefined' && sessionHistoryState?.session === session.id && (!sessionHistoryState.environment || sessionHistoryState.environment === (session.environment_id || activeEnvironment)) && !document.hidden && (typeof conversationReadingSession === 'function' ? conversationReadingSession(session.id, session.environment_id || activeEnvironment) : !document.getElementById('taskConversation')?.hidden);
   if (open) saveSessionRead(session);
   return { ...session, unread: !open && ((session.updated_at || 0) > seen.time || !!session.completed_run && session.completed_run !== seen.run) };
 }
@@ -35,8 +35,9 @@ function markSessionRead(requirement, session) {
   const item = requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
   if (item) { saveSessionRead(item); updateRequirementSessionsView(requirement); }
 }
-function updateSessionChatActivity(requirement, session, chat) {
-  if (typeof browserSessionActivity === 'function') browserSessionActivity(session, chat);
+function updateSessionChatActivity(requirement, session, chat, environment = activeEnvironment) {
+  if (typeof browserSessionActivity === 'function') browserSessionActivity(session, chat, environment);
+  if (environment !== activeEnvironment) return;
   // Every task sharing this directory observes the same session activity.
   for (const [id, data] of requirementSessions) {
     const item = data.sessions.find(s => s.id === session);
@@ -98,7 +99,8 @@ async function refreshRequirementSessions(id, force = true) {
 }
 
 function renderSessionPicker() {
-  const linked = new Set((requirementSessions.get(sessionPickerRequirement)?.sessions || []).map(s => s.id));
+  const items = sessionPickerEnvironment === activeEnvironment ? requirementSessions.get(sessionPickerRequirement)?.sessions : typeof conversationView !== 'undefined' && conversationView?.scope.kind === 'task' && conversationView.scope.id === sessionPickerRequirement && conversationScopeEnvironment(conversationView.scope) === sessionPickerEnvironment ? conversationView.sessions : [];
+  const linked = new Set((items || []).map(s => s.id));
   $('#sessionPickerResults').innerHTML = window.WorkHubUI.sessionPicker(sessionPickerItems, [...linked]);
   $('#sessionPickerMore').hidden = !sessionPickerCursor;
 }
@@ -121,7 +123,7 @@ async function loadSessionPicker(more = false) {
     if (generation !== sessionPickerGeneration) return;
     const byID = new Map((more ? sessionPickerItems : []).map(s => [s.id, s]));
     [...nearby.sessions, ...page.data].forEach(s => byID.set(s.id, s));
-    const task = state.requirements.find(q => q.id === sessionPickerRequirement);
+    const task = (typeof conversationWorkspace === 'function' ? conversationWorkspace(sessionPickerEnvironment) : state).requirements.find(q => q.id === sessionPickerRequirement);
     const paths = new Set(task ? [task.path,...task.members.map(m => m.path)] : []);
     sessionPickerItems = [...byID.values()].sort((a,b) => Number(paths.has(b.cwd))-Number(paths.has(a.cwd)));
     sessionPickerCursor = page.nextCursor;
@@ -155,8 +157,8 @@ document.addEventListener('click', async event => {
   if (action === 'picker') {
     if (sessionPickerLoading) return;
     sessionPickerRequirement = id;
-    sessionPickerEnvironment = activeEnvironment;
-    refreshRequirementSessions(id).then(() => { if (sessionPickerRequirement === id && $('#sessionDialog').open) renderSessionPicker(); });
+    sessionPickerEnvironment = target.dataset.environment || activeEnvironment;
+    if (sessionPickerEnvironment === activeEnvironment) refreshRequirementSessions(id).then(() => { if (sessionPickerRequirement === id && $('#sessionDialog').open) renderSessionPicker(); });
     sessionPickerGeneration++;
     sessionPickerCursor = null;
     sessionPickerSearch = '';
@@ -167,7 +169,7 @@ document.addEventListener('click', async event => {
   }
   if (action === 'link') return linkPickedSession(target.dataset.session);
   if (action === 'resume') return mutation('正在打开会话终端', async () => {
-    const result = await api(`/api/sessions/${encodeURIComponent(target.dataset.session)}/resume`, { method: 'POST', body: '{}' });
+    const result = await api(`/api/sessions/${encodeURIComponent(target.dataset.session)}/resume`, { environment: sessionHistoryState?.environment || activeEnvironment, method: 'POST', body: '{}' });
     toast(result.message);
   });
 });

@@ -1,0 +1,40 @@
+name: Core checks
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+      - run: npm ci
+      - run: npm run web:check && npm run chat:check
+      - run: npm run web:build && npm run chat:build
+      - run: node --test scripts/*.test.cjs
+      - run: npm run chat:test && npm run workspace:test
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Isolated task workflow
+        run: |
+          go build -o "$RUNNER_TEMP/work-hub-backend" .
+          node scripts/desktop-workflow-smoke.mjs "$RUNNER_TEMP/work-hub-backend"
+      - run: go test -race ./internal/store ./internal/task ./internal/project ./internal/session ./internal/workspace ./internal/app
+      - run: npm run desktop:check

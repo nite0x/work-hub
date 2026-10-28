@@ -63,6 +63,8 @@ func (c *fakeLiveClient) Call(ctx context.Context, method string, params any, ou
 	c.mu.Unlock()
 	var result any = map[string]any{}
 	switch method {
+	case "model/list":
+		result = map[string]any{"data": []any{map[string]any{"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "isDefault": true, "defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}, map[string]any{"reasoningEffort": "low"}}}}}
 	case "thread/start":
 		result = map[string]any{"thread": map[string]any{"id": c.sessionID(), "cwd": c.cwd, "status": map[string]any{"type": "idle"}}}
 	case "thread/read":

@@ -34,11 +34,10 @@ type environmentHub struct {
 	local   *App
 	entries []Environment
 	apps    map[string]*App
-	stops   map[string]func()
 }
 
 func newEnvironmentHub(a *App) (*environmentHub, error) {
-	h := &environmentHub{local: a, apps: map[string]*App{}, stops: map[string]func(){}}
+	h := &environmentHub{local: a, apps: map[string]*App{}}
 	raw, err := os.ReadFile(filepath.Join(a.Workspace.DataDir, "environments.json"))
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
@@ -63,10 +62,7 @@ func environmentID(distro, user string) string {
 func (h *environmentHub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for id, a := range h.apps {
-		if stop := h.stops[id]; stop != nil {
-			stop()
-		}
+	for _, a := range h.apps {
 		_ = a.Close()
 	}
 }
@@ -112,7 +108,6 @@ func (h *environmentHub) connectLocked(e Environment) (*App, error) {
 	a.token = h.local.token
 	a.Workspace.ReadOnlySessions = h.local.Workspace.ReadOnlySessions
 	h.apps[e.ID] = a
-	h.stops[e.ID] = a.Projects.StartMasterSync(context.Background())
 	return a, nil
 }
 func (h *environmentHub) listHandler(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +215,6 @@ func (h *environmentHub) addHandler(w http.ResponseWriter, r *http.Request) {
 	a.token = h.local.token
 	a.Workspace.ReadOnlySessions = h.local.Workspace.ReadOnlySessions
 	h.apps[e.ID] = a
-	h.stops[e.ID] = a.Projects.StartMasterSync(context.Background())
 	e.Connected = true
 	e.Root = a.Workspace.Root
 	httpx.WriteJSON(w, 201, e)
@@ -236,10 +230,8 @@ func (h *environmentHub) reconnectHandler(w http.ResponseWriter, r *http.Request
 		if old := h.apps[id]; old != nil {
 			old.Workspace.Closing.Store(true)
 			old.Workspace.Remote.Close()
-			h.stops[id]()
 			_ = old.Close()
 			delete(h.apps, id)
-			delete(h.stops, id)
 		}
 		a, err := h.connectLocked(e)
 		if err != nil {

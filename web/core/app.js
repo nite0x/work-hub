@@ -3,12 +3,12 @@
 let refreshTimer;
 
 async function refresh(force = false) {
-  if (state.refreshing || state.busy) return;
+  if (state.refreshing) return;
   clearTimeout(refreshTimer);
   let nextRefresh = 10000;
   state.refreshing = true;
   const revision = environmentRevision;
-  const needsScopedState = state.view !== 'requirements' || !!state.selectedRequirement;
+  const needsScopedState = state.view !== 'requirements' || !!state.selectedRequirement || !!$('#taskShortcutPicker')?.open;
   $('#refreshButton').disabled = true;
   try {
     const suffix = force ? '?refresh=1' : '';
@@ -65,7 +65,7 @@ async function refresh(force = false) {
 function renderStateKey(data) {
   // Once a result exists, polling metadata must not rebuild the workspace.
   // The first completed check still changes the key and enables its actions.
-  return JSON.stringify([data.projects, data.requirements, data.terminal, data.master_sync, data.root, data.environments, data.project_count, data.read_only_sessions], function (key, value) {
+  return JSON.stringify([data.projects, data.requirements, data.terminal, data.root, data.environments, data.project_count, data.read_only_sessions], function (key, value) {
     if (key === 'refreshing' && this.status_updated_at) return undefined;
     if (key === 'status_updated_at') return Boolean(value);
     return value;
@@ -125,12 +125,13 @@ function render() {
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
   $('#eyebrow').textContent = sessionsView ? 'SESSIONS' : settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
   $('#pageTitle').textContent = sessionsView ? '会话' : settingsView ? '设置' : detailView ? requirement?.name || '任务不存在' : reqView ? '任务' : '项目';
-  $('#pageSubtitle').textContent = settingsView ? '管理执行环境、终端工具与每日更新。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
+  $('#pageSubtitle').textContent = settingsView ? '管理执行环境、终端工具、对话标题与每日更新。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
   $('#pageSubtitle').hidden = detailView || sessionsView;
   $('#newButton').innerHTML = `<span>＋</span> ${reqView ? '创建任务' : '添加项目'}`;
   $('#panelTitle').textContent = reqView ? '全部任务' : '已登记项目';
   $('#search').placeholder = reqView ? '搜索任务名称、说明…' : '搜索项目名称、目录…';
   $('#archiveFilterWrap').hidden = !reqView;
+  $('#taskStatusFilterWrap').hidden = !reqView;
   $('#projectEnvironmentWrap').hidden = reqView;
   $('#projectAddButton').hidden = state.view !== 'projects';
   renderSettings();
@@ -144,11 +145,18 @@ function render() {
   if (typeof refreshSessionWorkspace === 'function') refreshSessionWorkspace(false);
   if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(requirement);
   syncTaskDescription();
+  syncMutationControls();
 }
 
 async function handleAction(action, target) {
   if (state.busy) return;
   const id = target.dataset.id;
+  if (action === 'task-project-filter') {
+    taskProjectFilters.set(JSON.stringify([activeEnvironment,id]), target.dataset.filter);
+    render();
+    document.querySelector(`.task-signal-filters [data-filter="${target.dataset.filter}"]`)?.focus({preventScroll:true});
+    return;
+  }
   if (action === 'open-requirement') return selectEnvironment(target.dataset.environment, '/requirements/' + id);
   if (action === 'new-project') return openProject();
   if (action === 'new-worktree') return openWorktree(id);
@@ -164,16 +172,16 @@ async function handleAction(action, target) {
   if (action === 'workspace-terminal') return mutation('正在打开项目终端', async () => {
     const result = await api(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify({ action: 'terminal', path: target.dataset.path }) });
     toast(result.message);
-  });
+  }, undefined, {project:id});
   if (action === 'copy-path') return copy(target.dataset.path);
   if (action === 'command') {
     try { const plan = await api(`/api/requirements/${id}/launch`); showCommand(plan.command); } catch (e) { toast(e.message, true); } return;
   }
   if (action === 'launch') return mutation('正在打开 Codex 终端', async () => { const r = await api(`/api/requirements/${id}/launch`, { method: 'POST', body: '{}' }); toast(r.message); });
-  if (action === 'retry') return mutation('正在重试失败项目', async () => { const q = await api(`/api/requirements/${id}/retry`, { method: 'POST', body: JSON.stringify({project_id: target.dataset.project || ''}) }); toast(q.state === 'ready' ? '全部项目已就绪' : '仍有项目未就绪，请查看失败原因', q.state !== 'ready'); });
+  if (action === 'retry') return mutation('正在重试失败项目', async () => { const q = await api(`/api/requirements/${id}/retry`, { method: 'POST', body: JSON.stringify({project_id: target.dataset.project || ''}) }); toast(q.state === 'ready' ? '全部项目已就绪' : '仍有项目未就绪，请查看失败原因', q.state !== 'ready'); }, undefined, {task:id});
   if (action === 'archive') {
     const q = state.requirements.find(q => q.id === id);
-    return mutation('正在更新任务状态', async () => { const r = await api(`/api/requirements/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived: q.state !== 'archived' }) }); toast(r.message); });
+    return mutation('正在更新任务状态', async () => { const r = await api(`/api/requirements/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived: q.state !== 'archived' }) }); toast(r.message); }, undefined, {task:id});
   }
   if (action === 'remove-project') {
     const p = state.projects.find(p => p.id === id);
@@ -189,13 +197,14 @@ document.addEventListener('click', event => {
   }
   if (action) handleAction(action.dataset.action, action);
   const nav = event.target.closest('[data-view]'); if (nav) navigate('/' + nav.dataset.view);
-  if (event.target.closest('.close-dialog') && !state.busy) event.target.closest('dialog').close();
+  if (event.target.closest('.close-dialog') && !event.target.closest('dialog')?.hasAttribute('data-block-close')) event.target.closest('dialog').close();
 });
 $('#newButton').addEventListener('click', () => state.view === 'requirements' ? openRequirement() : openProject());
 $('#refreshButton').addEventListener('click', () => refresh(true));
 $('#search').addEventListener('input', () => { if (state.view === 'projects') projectDetailOpen = false; render(); });
 $('#archiveFilter').addEventListener('change', render);
-document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (state.busy) event.preventDefault(); }));
+$('#taskStatusFilter')?.addEventListener('change', render);
+document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (dialog.hasAttribute('data-block-close')) event.preventDefault(); }));
 
 $('#copyCommand').addEventListener('click', () => copy($('#commandText').value));
 window.addEventListener('DOMContentLoaded', () => {

@@ -4,30 +4,32 @@ import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Textarea} from "@/components/ui/textarea";
 import type {ChatController} from "./controller";
-import {cleanText, type Approval, type Question, type QuestionDraft} from "./model";
+import {cleanText, questionDraftKey, type Approval, type Question, type QuestionDraft} from "./model";
 
 function answerText(question: Question, draft?: QuestionDraft) {
   const choice = question.options?.find(option => option.label === draft?.choice)?.label;
   return [choice, draft?.text.trim()].filter(Boolean).join("\n\n");
 }
 
-// This form occupies the thread's composer slot. It replies to the pending RPC,
-// rather than sending a user message or steering a turn past its question.
+// Both blocking requests and async message questions share the composer UI.
+// The controller routes their answers through the corresponding protocol.
 export function QuestionComposer({approval, controller}: {approval: Approval; controller: ChatController}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const key = JSON.stringify([state.chat.id, approval.id]);
+  const key = questionDraftKey(approval, state.chat.id);
   const questions = approval.questions!;
-  const [drafts, setDrafts] = useState(() => controller.questionDrafts.get(key) || {});
+  const drafts = controller.questionDrafts.get(key) || {};
   const [index, setIndex] = useState(0);
   const [error, setError] = useState("");
   const form = useRef<HTMLFormElement>(null);
   const question = questions[index];
   const draft = drafts[question.id] || {text: ""};
-  const disabled = !!state.answering || state.stopping || !state.chat.busy || state.chat.status === "stopping";
+  const disabled = !!state.answering || state.submitting || state.stopping || (approval.delivery === "async"
+    ? approval.question_status === "pending" || !!state.session?.archived || !!state.chat.blocked || !!state.chat.external && (state.chat.busy || state.chat.status === "unknown") || state.chat.busy && (!state.chat.turn_id || !["running", "waiting"].includes(state.chat.status))
+    : !state.chat.busy || state.chat.status === "stopping");
   const completed = questions.filter(q => answerText(q, drafts[q.id])).length;
   const update = (patch: Partial<QuestionDraft>) => {
     const next = {...drafts, [question.id]: {...draft, ...patch}};
-    setDrafts(next); controller.questionDrafts.set(key, next); setError("");
+    controller.setQuestionDraft(key, next); setError("");
   };
   useEffect(() => {
     form.current?.querySelector<HTMLElement>('input:checked, input, textarea')?.focus();
@@ -50,6 +52,7 @@ export function QuestionComposer({approval, controller}: {approval: Approval; co
     }
   }}>
     <div className="chat-question-heading" aria-live="polite"><span>需要你的回答</span><span>{index + 1} / {questions.length}</span></div>
+    {approval.delivery === "async" && <p className="m-0 text-xs text-muted-foreground">{approval.question_status === "pending" ? "回答的投递结果未确认，请检查会话历史。你的选择已保留。" : "回答会作为消息发送到当前会话。"}</p>}
     {questions.length > 1 && <div className="chat-question-tabs" role="group" aria-label="切换问题">{questions.map((q, i) => <Button key={q.id} type="button" variant={i === index ? "secondary" : "ghost"} size="sm" aria-pressed={i === index} disabled={disabled} onClick={() => {setIndex(i); setError("");}}>{answerText(q, drafts[q.id]) && <CheckIcon aria-hidden="true" />}{cleanText(q.header) || `问题 ${i + 1}`}</Button>)}</div>}
     <fieldset key={question.id} disabled={disabled} className="chat-question-fields">
       <legend>{cleanText(question.question || question.header)}</legend>

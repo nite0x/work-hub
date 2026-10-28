@@ -23,7 +23,7 @@ func TestChatQuestionsEnabledForCreatedAndResumedThreads(t *testing.T) {
 			c.mu.Lock()
 			params := c.threadParams[method]
 			c.mu.Unlock()
-			if !reflect.DeepEqual(params["config"], map[string]any{"features.default_mode_request_user_input": true}) {
+			if params["config"].(map[string]any)["features.default_mode_request_user_input"] != true {
 				t.Fatal("default-mode questions not enabled on thread", params)
 			}
 			if createThread && !strings.Contains(params["developerInstructions"].(string), "request_user_input") {

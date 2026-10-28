@@ -9,7 +9,7 @@
     "web:build": "node scripts/build-frontend.mjs",
     "web:watch": "vite build --watch",
     "web:check": "tsc --noEmit",
-    "web:test": "npm run web:check && npm run web:build && node --test scripts/*.test.cjs",
+    "web:test": "npm run web:check && npm run web:build && npm run workspace:test && node --test scripts/*.test.cjs",
     "desktop:prepare": "node scripts/prepare-desktop.mjs",
     "desktop:dev": "node scripts/desktop-dev.mjs",
     "desktop:build": "tauri build",
@@ -18,7 +18,8 @@
     "desktop:test": "npm run desktop:prepare && cargo test --manifest-path src-tauri/Cargo.toml",
     "chat:build": "node scripts/build-chat.mjs",
     "chat:check": "tsc -p tsconfig.chat.json",
-    "chat:test": "tsx --test scripts/chat-*.test.ts"
+    "chat:test": "tsx --test scripts/chat-*.test.ts",
+    "workspace:test": "tsx --test scripts/workspace-*.test.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

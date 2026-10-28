@@ -52,7 +52,7 @@ func Open(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	// A crash can interrupt filesystem work. Preserve the records and require explicit retry.
-	_, err = db.Exec(`UPDATE requirements SET state='partial' WHERE state='creating'; UPDATE members SET state='failed', error='上次创建被中断，请检查后重试' WHERE state='creating'; UPDATE master_sync_runs SET status='interrupted' WHERE status='running'`)
+	_, err = db.Exec(`UPDATE requirements SET state='partial' WHERE state='creating'; UPDATE members SET state='failed', error='上次创建被中断，请检查后重试' WHERE state IN ('creating','pending')`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -67,13 +67,14 @@ CREATE TABLE IF NOT EXISTS projects (
  path TEXT NOT NULL UNIQUE, common_dir TEXT NOT NULL UNIQUE,
  folder TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS master_sync_runs (
- date TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT NOT NULL,
- status TEXT NOT NULL, results TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS conversation_async_answers (
+ session_id TEXT NOT NULL, item_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL, status TEXT NOT NULL, request_id TEXT NOT NULL,
+ PRIMARY KEY(session_id,item_id,turn_id));
 CREATE TABLE IF NOT EXISTS requirements (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
  description TEXT NOT NULL, branch TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
- primary_project_id TEXT NOT NULL REFERENCES projects(id), state TEXT NOT NULL,
+ primary_project_id TEXT REFERENCES projects(id), state TEXT NOT NULL,
  created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS members (
  requirement_id TEXT NOT NULL REFERENCES requirements(id), project_id TEXT NOT NULL REFERENCES projects(id),
@@ -105,7 +106,7 @@ CREATE TABLE IF NOT EXISTS session_create_requests (
 		return err
 	}
 	if columns["mode"] {
-		return s.migrateSessions()
+		return s.finishTaskMigration()
 	}
 	// Existing directories may participate in multiple tasks. Retain every old
 	// member while removing the old exclusive-path constraint.
@@ -122,7 +123,7 @@ COMMIT;`)
 	if err != nil {
 		return err
 	}
-	return s.migrateSessions()
+	return s.finishTaskMigration()
 }
 
 func tableColumns(db *sql.DB, name string) (map[string]bool, error) {
@@ -160,7 +161,24 @@ func (s *Store) Projects() ([]model.Project, error) {
 	}
 	return out, rows.Err()
 }
-func (s *Store) Requirements() ([]model.Requirement, error) {
+
+// Requirements reads tasks and members with two bounded queries, including on
+// offline legacy databases. A read transaction keeps both halves consistent.
+func (s *Store) Requirements() ([]model.Requirement, error) { return s.requirements("") }
+func (s *Store) Requirement(id string) (model.Requirement, error) {
+	if id == "" {
+		return model.Requirement{}, sql.ErrNoRows
+	}
+	tasks, err := s.requirements(id)
+	if err != nil {
+		return model.Requirement{}, err
+	}
+	if len(tasks) == 0 {
+		return model.Requirement{}, sql.ErrNoRows
+	}
+	return tasks[0], nil
+}
+func (s *Store) requirements(id string) ([]model.Requirement, error) {
 	columns, err := tableColumns(s.DB, "members")
 	if err != nil {
 		return nil, err
@@ -177,11 +195,23 @@ func (s *Store) Requirements() ([]model.Requirement, error) {
 	if requirementColumns["has_workspace"] {
 		workspaceColumn = "has_workspace"
 	}
-	rows, err := s.DB.Query(`SELECT id,name,slug,description,branch,path,primary_project_id,state,created_at,` + workspaceColumn + ` FROM requirements ORDER BY created_at DESC,id`)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	query := `SELECT id,name,slug,description,branch,path,COALESCE(primary_project_id,''),state,created_at,` + workspaceColumn + ` FROM requirements`
+	args := []any{}
+	if id != "" {
+		query += ` WHERE id=?`
+		args = append(args, id)
+	}
+	rows, err := tx.Query(query+` ORDER BY created_at DESC,id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	out := []model.Requirement{}
+	index := map[string]int{}
 	for rows.Next() {
 		var v model.Requirement
 		if err := rows.Scan(&v.ID, &v.Name, &v.Slug, &v.Description, &v.Branch, &v.Path, &v.PrimaryProjectID, &v.State, &v.CreatedAt, &v.HasWorkspace); err != nil {
@@ -189,6 +219,7 @@ func (s *Store) Requirements() ([]model.Requirement, error) {
 			return nil, err
 		}
 		v.Members = []model.Member{}
+		index[v.ID] = len(out)
 		out = append(out, v)
 	}
 	err = rows.Err()
@@ -196,41 +227,37 @@ func (s *Store) Requirements() ([]model.Requirement, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range out {
-		rows, err := s.DB.Query(`SELECT m.project_id,p.name,m.path,m.base_commit,m.state,m.error,`+memberScope+` FROM members m JOIN projects p ON p.id=m.project_id WHERE m.requirement_id=? ORDER BY p.name`, out[i].ID)
-		if err != nil {
+	if len(out) == 0 {
+		return out, tx.Commit()
+	}
+	query = `SELECT m.requirement_id,m.project_id,p.name,m.path,m.base_commit,m.state,m.error,` + memberScope + ` FROM members m JOIN projects p ON p.id=m.project_id`
+	if id != "" {
+		query += ` WHERE m.requirement_id=?`
+	}
+	rows, err = tx.Query(query+` ORDER BY m.requirement_id,p.name`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var taskID string
+		var m model.Member
+		if err := rows.Scan(&taskID, &m.ProjectID, &m.ProjectName, &m.Path, &m.BaseCommit, &m.State, &m.Error, &m.Mode, &m.BaseRef, &m.Branch); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		for rows.Next() {
-			var m model.Member
-			if err := rows.Scan(&m.ProjectID, &m.ProjectName, &m.Path, &m.BaseCommit, &m.State, &m.Error, &m.Mode, &m.BaseRef, &m.Branch); err != nil {
-				rows.Close()
-				return nil, err
-			}
+		if i, ok := index[taskID]; ok {
 			if m.Mode == "new" && m.Branch == "" {
 				m.Branch = out[i].Branch
 			}
 			out[i].Members = append(out[i].Members, m)
 		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
 	}
-	return out, nil
-}
-func (s *Store) Requirement(id string) (model.Requirement, error) {
-	reqs, err := s.Requirements()
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
-		return model.Requirement{}, err
+		return nil, err
 	}
-	for _, r := range reqs {
-		if r.ID == id {
-			return r, nil
-		}
-	}
-	return model.Requirement{}, sql.ErrNoRows
+	return out, tx.Commit()
 }
 func MustAffected(result sql.Result, err error) error {
 	if err != nil {

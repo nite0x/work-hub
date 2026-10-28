@@ -4,6 +4,18 @@
 @import "tw-shimmer";
 
 #assistantChatRoot { display: none; min-height: 0; height: 100%; }
+.chat-file-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / .4); }
+.chat-file-dialog { position: fixed; z-index: 101; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: min(1000px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); box-shadow: 0 18px 60px rgb(0 0 0 / .2); overflow: hidden; }
+.chat-file-heading { position: relative; padding: 16px 48px 12px 16px; border-bottom: 1px solid var(--border); }
+.chat-file-heading p { margin-top: 6px; }
+.chat-file-close { position: absolute; right: 12px; top: 12px; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; }
+.chat-file-close:hover { background: var(--muted); }
+.chat-file-meta { padding: 8px 16px; font-size: 12px; color: var(--muted-foreground); }
+.chat-file-source { min-height: 0; overflow: auto; padding: 8px 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.65; }
+.chat-file-line { display: flex; width: max-content; min-width: 100%; padding-right: 16px; white-space: pre; }
+.chat-file-line[data-selected] { background: color-mix(in srgb, var(--primary) 15%, var(--background)); box-shadow: inset 3px 0 var(--primary); }
+.chat-file-number { position: sticky; left: 0; flex: 0 0 64px; padding: 0 12px; text-align: right; color: var(--muted-foreground); user-select: none; background: var(--background); }
+.chat-file-line[data-selected] .chat-file-number { background: var(--muted); }
 .session-history-panel[data-assistant-ui] > :not(#assistantChatRoot) { display: none !important; }
 .session-history-panel[data-assistant-ui] #assistantChatRoot { display: flex; flex: 1; min-width: 0; }
 

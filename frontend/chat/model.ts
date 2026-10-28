@@ -4,19 +4,40 @@ import type {ApprovalChoice, Elicitation} from "./approval";
 export interface Entry {
   id: string; turn_id: string; kind: string; text?: string; command?: string; cwd?: string;
   tool?: string; images?: string[]; local_images?: Record<string,string>; status?: string; output?: string | null; exit_code?: number | null; duration_ms?: number | null;
+  delivery?: string; questions?: Question[]; question_status?: string;
 }
 export interface Question { id: string; header: string; question: string; isOther?: boolean; isSecret?: boolean; options?: {label: string; description: string}[] }
 export interface QuestionDraft { choice?: string; text: string }
-export interface Approval { id: string; title: string; details: string; kind: string; can_accept: boolean; questions?: Question[]; choices?: ApprovalChoice[]; elicitation?: Elicitation }
+export interface Approval { id: string; title: string; details: string; kind: string; can_accept: boolean; questions?: Question[]; choices?: ApprovalChoice[]; elicitation?: Elicitation; delivery?: "async"; turn_id?: string; question_status?: string }
+export const questionDraftKey = (approval: Approval, run?: string) => JSON.stringify(approval.delivery === "async" ? ["async", approval.turn_id, approval.id] : [run, approval.id]);
+export function pendingAsyncQuestion(entries: Entry[], resolved: ReadonlySet<string> = new Set()): Approval | undefined {
+  let after = entries.length - 1;
+  while (after >= 0 && entries[after].kind !== "user") after--;
+  const entry = entries.slice(after + 1).find(e => e.delivery === "async" && e.questions?.length && !["accepted", "skipped"].includes(e.question_status || "") && !resolved.has(entryKey(e)));
+  return entry ? {id: entry.id, turn_id: entry.turn_id, kind: "questions", title: "Codex 需要你的回答", details: "", can_accept: true, questions: entry.questions, delivery: "async", question_status: entry.question_status} : undefined;
+}
 export interface ChatState { id?: string; revision?: number; turn_id?: string; status: string; busy: boolean; external?: boolean; entries: Entry[]; approvals: Approval[]; error?: string; blocked?: string; can_handoff?: boolean; notice?: string; accepted_inputs?: string[]; context?: ChatContext; session_name?: string }
 export interface HistoryPush { connected: boolean; entries: Entry[]; sync: number; message?: string; waiting?: boolean; confirmations?: {id: string; title: string; details?: string; questions?: Question[]}[] }
 export interface Session { id: string; name: string; cwd: string; available?: boolean; pinned?: boolean; archived?: boolean; model?: string; reasoningEffort?: string }
 export interface Task { id: string; name: string; state: string; primary_project_id: string; members: {project_id: string; project_name: string; path: string}[] }
 export type PermissionMode = "ask" | "auto" | "full";
 export interface TurnSettings {model?: string;effort?: string;mode?: string;permission?: PermissionMode}
+export function newConversationSettings(settings: TurnSettings = {}): TurnSettings {
+  const model = settings.model || "gpt-6.1-sol";
+  return {...settings, model, ...(settings.effort ? {} : model === "gpt-6.1-sol" ? {effort: "high"} : {}), permission: settings.permission || "full"};
+}
 export interface ChatContext {model?:string;reasoningEffort?:string;mode?:string;cwd?:string;approvalPolicy?:unknown;approvalsReviewer?:string;sandbox?:{type?:string;writableRoots?:string[];networkAccess?:boolean};additional_directories?:string[]}
 export interface ChatModel {id:string;model:string;displayName:string;isDefault:boolean;defaultReasoningEffort:string;supportedReasoningEfforts:{reasoningEffort:string}[]}
 export const entryKey = (e: Entry) => JSON.stringify([e.turn_id, e.id]);
+// A compact read marker also detects a reply growing while its item ID stays the same.
+export function latestEntryFingerprint(entries: Entry[]): string {
+  const tail = entries.at(-1);
+  if (!tail) return "";
+  const content = JSON.stringify([tail.kind, tail.text, tail.command, tail.output, tail.images]);
+  let hash = 2166136261;
+  for (let i = 0; i < content.length; i++) hash = Math.imul(hash ^ content.charCodeAt(i), 16777619);
+  return entryKey(tail) + ":" + (hash >>> 0).toString(16);
+}
 export const cleanText = (value?: string | null) => String(value ?? "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 export function mergeEntries(saved: Entry[], live: Entry[]) {
   const entries = new Map(saved.map(e => [entryKey(e), e]));

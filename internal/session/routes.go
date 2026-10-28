@@ -3,8 +3,13 @@ package session
 import "net/http"
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/chat-attachments", s.UploadAttachmentHandler)
+	mux.HandleFunc("GET /api/settings/session-title", s.SessionTitleSettingsHandler)
+	mux.HandleFunc("PUT /api/settings/session-title", s.SessionTitleSettingsHandler)
 	mux.HandleFunc("GET /api/sessions", s.SessionsHandler)
 	mux.HandleFunc("GET /api/sessions/{session}/image", s.SessionImageHandler)
+	mux.HandleFunc("GET /api/sessions/{session}/file", s.SessionFileHandler)
+	mux.HandleFunc("POST /api/sessions/{session}/open-link", s.SessionExternalLinkHandler)
 	mux.HandleFunc("GET /api/conversation-drafts", s.DraftHandler)
 	mux.HandleFunc("POST /api/conversation-drafts", s.DraftHandler)
 	mux.HandleFunc("GET /api/codex/chat-options", s.ChatOptionsHandler)
@@ -20,6 +25,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{session}/chat/events", s.ChatEventsHandler)
 	mux.HandleFunc("POST /api/sessions/{session}/chat/stop", s.ChatStopHandler)
 	mux.HandleFunc("POST /api/sessions/{session}/chat/approval", s.ChatApprovalHandler)
+	mux.HandleFunc("POST /api/sessions/{session}/chat/question", s.AsyncQuestionHandler)
 	mux.HandleFunc("POST /api/sessions/{session}/chat/approval/open", s.ChatApprovalOpenHandler)
 	mux.HandleFunc("POST /api/sessions/{session}/chat/handoff", s.ChatHandoffHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/launch", s.LaunchHandler)
@@ -37,6 +43,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/requirements/{id}/sessions/{session}/chat/events", s.taskSessionAdapter(s.ChatEventsHandler, false))
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/stop", s.taskSessionAdapter(s.ChatStopHandler, false))
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/approval", s.taskSessionAdapter(s.ChatApprovalHandler, false))
+	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/question", s.taskSessionAdapter(s.AsyncQuestionHandler, false))
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/approval/open", s.taskSessionAdapter(s.ChatApprovalOpenHandler, false))
 	mux.HandleFunc("POST /api/requirements/{id}/sessions/{session}/chat/handoff", s.taskSessionAdapter(s.ChatHandoffHandler, true))
 }

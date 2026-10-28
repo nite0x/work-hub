@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,7 +22,13 @@ func TestRemoteChatHelper(t *testing.T) {
 		return
 	}
 	if os.Args[len(os.Args)-1] == "--workspace-agent" {
-		err := workspace.RunAgent(os.Stdin, os.Stdout, workspace.AgentHooks{TerminalConflict: func(string, string) error { return nil }})
+		var checks atomic.Int32
+		err := workspace.RunAgent(os.Stdin, os.Stdout, workspace.AgentHooks{TerminalConflict: func(string, string) error {
+			if os.Getenv("WORKTREE_HUB_REMOTE_CHAT_BUSY") == "1" && checks.Add(1) <= 2 {
+				return workspace.ErrBusy
+			}
+			return nil
+		}})
 		if err != nil {
 			os.Exit(2)
 		}
@@ -64,6 +71,8 @@ func TestRemoteChatHelper(t *testing.T) {
 		}
 		var result any = map[string]any{}
 		switch req.Method {
+		case "model/list":
+			result = map[string]any{"data": []any{map[string]any{"id": "gpt-6.1-sol", "model": "gpt-6.1-sol", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high"}}}}}
 		case "thread/start", "thread/read":
 			result = map[string]any{"thread": map[string]any{"id": "remote-session", "cwd": os.Getenv("WORKTREE_HUB_REMOTE_CHAT_CWD"), "status": map[string]any{"type": "idle"}}}
 		case "thread/resume":
@@ -91,7 +100,7 @@ func TestRemoteTaskChatCreatesStreamsApprovesContinuesAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(executable, "-test.run=^TestRemoteChatHelper$", "--", "--workspace-agent")
-	cmd.Env = append(os.Environ(), "WORKTREE_HUB_REMOTE_CHAT_HELPER=1", "WORKTREE_HUB_REMOTE_CHAT_CWD="+q.Members[0].Path)
+	cmd.Env = append(os.Environ(), "WORKTREE_HUB_REMOTE_CHAT_HELPER=1", "WORKTREE_HUB_REMOTE_CHAT_CWD="+q.Members[0].Path, "WORKTREE_HUB_REMOTE_CHAT_BUSY=1")
 	remote, err := workspace.StartClient(cmd)
 	if err != nil {
 		t.Fatal(err)

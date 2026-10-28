@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -69,6 +70,8 @@ type ChatRun struct {
 	created      *codex.Session
 	handoff      bool
 	settings     TurnSettings
+	asyncRequest string
+	started      chan struct{}
 }
 
 func (run *ChatRun) snapshot() ChatState {
@@ -101,11 +104,19 @@ func (a *Service) ChatBusy(session string) bool {
 }
 func (a *Service) CloseChats() {
 	a.chatMu.Lock()
+	a.chatsClosing = true
 	runs := []*ChatRun{}
 	for _, run := range a.chats {
 		runs = append(runs, run)
 	}
+	titles := []*titleRun{}
+	for _, title := range a.titleRuns {
+		titles = append(titles, title)
+	}
 	a.chatMu.Unlock()
+	for _, title := range titles {
+		title.cancel()
+	}
 	for _, run := range runs {
 		if run.snapshot().Busy {
 			_ = run.interrupt()
@@ -115,6 +126,12 @@ func (a *Service) CloseChats() {
 	for _, run := range runs {
 		select {
 		case <-run.finished:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	for _, title := range titles {
+		select {
+		case <-title.finished:
 		case <-time.After(3 * time.Second):
 		}
 	}
@@ -158,6 +175,10 @@ func (a *Service) ChatStateHandler(w http.ResponseWriter, r *http.Request) {
 		a.DecorateHandoff(&state, r.PathValue("session"), cwd)
 	}
 	a.prepareHistoryMedia(record.ID, state.Entries)
+	if err := a.decorateAsyncQuestions(record.ID, state.Entries); err != nil {
+		httpx.DbError(w, err)
+		return
+	}
 	httpx.WriteJSON(w, 200, state)
 }
 func (a *Service) ChatStartHandler(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +376,16 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		return
 	}
 	params := map[string]any{"threadId": run.session, "cwd": s.Cwd, "input": chatTurnInput(text, images)}
-	if err := a.applyTurnSettings(ctx, c, params, run.settings, s.Model, resumed.ChatContext.Effort); err != nil {
+	if run.asyncRequest != "" {
+		params["clientUserMessageId"] = run.asyncRequest
+	}
+	currentModel := s.Model
+	if run.created != nil {
+		// The first turn must resolve an explicitly selected model's default
+		// effort even when thread/start already returned that same model.
+		currentModel = ""
+	}
+	if err := a.applyTurnSettings(ctx, c, params, run.settings, currentModel, resumed.ChatContext.Effort); err != nil {
 		fail(err.Error())
 		return
 	}
@@ -428,6 +458,14 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 		return
 	}
 	run.change(func(state *ChatState) { state.TurnID = started.Turn.ID; state.Status = "running" })
+	a.startSessionTitle(run, text)
+	if run.asyncRequest != "" {
+		if _, err := a.Workspace.Store.DB.Exec(`UPDATE conversation_async_answers SET status='accepted' WHERE session_id=? AND request_id=?`, run.session, run.asyncRequest); err != nil {
+			fail(err.Error())
+			return
+		}
+		close(run.started)
+	}
 	watch := time.NewTicker(time.Second)
 	defer watch.Stop()
 	budget := time.NewTimer(30 * time.Minute)
@@ -448,6 +486,11 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			}
 		case <-watch.C:
 			if err := a.AppTerminalConflict(run.session, s.Cwd); err != nil {
+				// An unavailable check does not establish another owner. Retry on
+				// the next tick without interrupting the turn already in progress.
+				if errors.Is(err, workspace.ErrBusy) || errors.Is(err, context.DeadlineExceeded) {
+					continue
+				}
 				_ = run.interrupt()
 				run.change(func(s *ChatState) {
 					s.Status = "conflict"
@@ -547,6 +590,9 @@ func (a *Service) ChatEventsHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		s := run.snapshot()
 		a.prepareHistoryMedia(r.PathValue("session"), s.Entries)
+		if err := a.decorateAsyncQuestions(r.PathValue("session"), s.Entries); err != nil {
+			return
+		}
 		if s.Revision != last {
 			raw, _ := json.Marshal(s)
 			_, err := fmt.Fprintf(w, "data: %s\n\n", raw)

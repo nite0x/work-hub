@@ -14,7 +14,7 @@ export function ProjectForm() {
 }
 
 export function TaskForm() {
-  return <form id="requirementForm"><ModalHeader id="requirementDialogTitle" title="创建任务" eyebrow="NEW TASK" /><p className="dialog-description">围绕一项开发目标，选择参与项目，可使用原目录、已有 Worktree，或新建分支和工作目录。</p>
+  return <form id="requirementForm"><ModalHeader id="requirementDialogTitle" title="创建任务" eyebrow="NEW TASK" /><p className="dialog-description">围绕一项开发目标，选择参与项目，可使用原目录、已有 Worktree，或使用新分支或已有分支创建 Worktree。</p>
     <Field id="requirementEnvironment" label="任务执行环境" required help="只能关联此环境中的项目，创建后任务环境固定。"><NativeSelect id="requirementEnvironment" required /></Field>
     <div><Field id="requirementName" label="任务名称" required><Input id="requirementName" name="name" required maxLength={100} placeholder="例如：订单审批流程" /></Field></div>
     <Field id="requirementDescription" label="任务说明"><Textarea id="requirementDescription" name="description" rows={3} maxLength={6000} placeholder="描述开发目标、涉及的修改和完成标准，新建任务会话时会提供这份说明。" /></Field>

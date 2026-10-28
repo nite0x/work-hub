@@ -19,14 +19,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Installed backend did not start' }
     $descriptor = Get-Content -LiteralPath (Join-Path $data 'service.json') -Raw | ConvertFrom-Json
     $headers = @{ 'X-CSRF-Token' = $descriptor.token }
-    Invoke-RestMethod -Uri ($info.url + '/api/settings/master-sync') -Method Put -Headers $headers -ContentType 'application/json' -Body '{"enabled":false,"time":"09:25"}' | Out-Null
+    Invoke-RestMethod -Uri ($info.url + '/api/settings/terminal') -Method Put -Headers $headers -ContentType 'application/json' -Body '{"kind":"auto"}' | Out-Null
     Install-WorkHub # preinstall must stop the detached default backend.
     if (Test-Path -LiteralPath (Join-Path $data 'service.json')) { throw 'Installer left the old backend running' }
     $info = (& $backend --desktop-start | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0) { throw 'Upgraded backend did not start' }
     $descriptor = Get-Content -LiteralPath (Join-Path $data 'service.json') -Raw | ConvertFrom-Json
     $state = Invoke-RestMethod -Uri ($info.url + '/api/state') -Headers @{ 'X-CSRF-Token' = $descriptor.token }
-    if ($state.master_sync.settings.time -ne '09:25') { throw 'Upgrade lost saved settings' }
+    if ($state.terminal.settings.kind -ne 'auto') { throw 'Upgrade lost saved settings' }
     $uninstaller = Join-Path $temporary 'uninstall-test.exe'
     Copy-Item -LiteralPath (Join-Path $directory 'uninstall.exe') -Destination $uninstaller
     $p = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$directory" -Wait -PassThru

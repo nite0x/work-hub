@@ -22,6 +22,11 @@ type AgentHooks struct {
 	TerminalConflict func(string, string) error
 }
 
+const (
+	agentRequestLimit = 32
+	agentWatchLimit   = 16
+)
+
 // The helper only serves the private stdin/stdout channel opened by Windows.
 // There is no listening network port and no shell command execution API.
 func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
@@ -30,7 +35,10 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 	var mu, writeMu sync.Mutex
 	running := map[uint64]context.CancelFunc{}
 	var wg sync.WaitGroup
-	slots := make(chan struct{}, 8)
+	slots := make(chan struct{}, agentRequestLimit)
+	// History subscriptions live until cancelled; they must not consume the
+	// capacity needed by Git, file operations and session ownership checks.
+	watchSlots := make(chan struct{}, agentWatchLimit)
 	respond := func(r Response) { writeMu.Lock(); _ = json.NewEncoder(output).Encode(r); writeMu.Unlock() }
 	scan := bufio.NewScanner(input)
 	scan.Buffer(make([]byte, 4096), 16<<20)
@@ -50,10 +58,14 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 			}
 			continue
 		}
+		requestSlots := slots
+		if request.Op == "session-watch" {
+			requestSlots = watchSlots
+		}
 		select {
-		case slots <- struct{}{}:
+		case requestSlots <- struct{}{}:
 		default:
-			respond(Response{ID: request.ID, Error: "辅助程序繁忙，请稍后重试"})
+			respond(Response{ID: request.ID, Code: "busy", Error: ErrBusy.Error()})
 			continue
 		}
 		duration := time.Duration(request.Timeout) * time.Millisecond
@@ -72,7 +84,7 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 		go func(request Request) {
 			defer wg.Done()
 			defer stop()
-			defer func() { <-slots; mu.Lock(); delete(running, request.ID); mu.Unlock() }()
+			defer func() { <-requestSlots; mu.Lock(); delete(running, request.ID); mu.Unlock() }()
 			var value any
 			var err error
 			if request.Op == "session-watch" {
@@ -115,6 +127,20 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 
 func executeWorkspaceRequest(ctx context.Context, r Request) (any, error) {
 	switch r.Op {
+	case "git-preview":
+		return RunGitPreview(ctx, r.Path, r.Args...)
+	case "write-generated":
+		if len(r.Args) != 1 {
+			return nil, fmt.Errorf("缺少自动文件标记")
+		}
+		return nil, WriteGenerated(ctx, r.Path, r.Data, r.Args[0])
+	case "store-attachment":
+		if len(r.Args) != 1 {
+			return nil, fmt.Errorf("缺少附件文件名")
+		}
+		return StoreAttachment(ctx, platform.DefaultDataDir(), r.Args[0], r.Data)
+	case "read-workspace-text":
+		return ReadWorkspaceText(ctx, r.Path, r.Args)
 	case "rollout-activity":
 		return codex.RolloutActivity(r.Path), nil
 	case "read-image":

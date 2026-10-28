@@ -16,10 +16,23 @@ import (
 )
 
 type TurnSettings struct {
-	Model  string `json:"model,omitempty"`
-	Effort string `json:"effort,omitempty"`
-	Mode   string `json:"mode,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Effort     string `json:"effort,omitempty"`
+	Mode       string `json:"mode,omitempty"`
 	Permission string `json:"permission,omitempty"`
+}
+
+func newConversationSettings(settings TurnSettings) TurnSettings {
+	if settings.Permission == "" {
+		settings.Permission = "full"
+	}
+	if settings.Model == "" {
+		settings.Model = "gpt-6.1-sol"
+	}
+	if settings.Model == "gpt-6.1-sol" && settings.Effort == "" {
+		settings.Effort = "high"
+	}
+	return settings
 }
 
 func (s TurnSettings) validate() error {
@@ -44,7 +57,7 @@ type ChatContext struct {
 	Mode                  string   `json:"mode,omitempty"`
 	Cwd                   string   `json:"cwd"`
 	ApprovalPolicy        any      `json:"approvalPolicy,omitempty"`
-	ApprovalsReviewer string `json:"approvalsReviewer,omitempty"`
+	ApprovalsReviewer     string   `json:"approvalsReviewer,omitempty"`
 	Sandbox               any      `json:"sandbox,omitempty"`
 	AdditionalDirectories []string `json:"additional_directories"`
 }

@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -84,4 +86,42 @@ func Write(ctx context.Context, p string, data []byte, flags int, mode os.FileMo
 	}
 	_, err = f.Write(data)
 	return errors.Join(err, f.Close())
+}
+
+// WriteGenerated replaces only an identified generated file. A temporary file
+// prevents a crash from truncating the previously published task context.
+func WriteGenerated(ctx context.Context, p string, data []byte, marker string) error {
+	if c := RemoteClient(ctx); c != nil {
+		return c.Call(ctx, Request{Op: "write-generated", Path: p, Data: data, Args: []string{marker}}, nil)
+	}
+	parent := filepath.Dir(p)
+	resolved, err := filepath.EvalSymlinks(parent)
+	if err != nil || !platform.SameWorkspacePath(parent, resolved) {
+		return fmt.Errorf("任务说明目录已移动或不可用")
+	}
+	if st, err := os.Lstat(p); err == nil {
+		if !st.Mode().IsRegular() || st.Size() > 1<<20 {
+			return fmt.Errorf("自动上下文路径不是可更新的普通文件")
+		}
+		previous, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if marker == "" || !bytes.HasPrefix(previous, []byte(marker)) {
+			return fmt.Errorf("自动上下文路径已有用户文件，未覆盖")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	f, err := os.CreateTemp(parent, ".task-context-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, writeErr := f.Write(data)
+	err = errors.Join(writeErr, f.Sync(), f.Close())
+	if err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), p)
 }

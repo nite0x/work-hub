@@ -1,5 +1,5 @@
-import {entryKey, idleChat, mergeEntries, mergeHistoryEntries, readSnapshots, type Approval, type ChatState, type Entry, type HistoryPush, type Session, type Task, type QuestionDraft} from "./model";
-import {cacheDraft, draftImages, readLocalDraft, restoreImages, validDraft, type DraftRecord} from "./drafts";
+import {entryKey, idleChat, latestEntryFingerprint, mergeEntries, mergeHistoryEntries, newConversationSettings, pendingAsyncQuestion, questionDraftKey, readSnapshots, type Approval, type ChatState, type Entry, type HistoryPush, type Session, type Task, type QuestionDraft} from "./model";
+import {cacheDraft, draftFiles, draftImages, readLocalDraft, restoreFiles, restoreImages, validDraft, type DraftRecord} from "./drafts";
 import type {TurnSettings,ChatContext,ChatModel} from "./model";
 import type {Attachment} from "@assistant-ui/react";
 import {validateImages} from "./attachments";
@@ -30,12 +30,20 @@ export interface Snapshot {
   draftRestore: number; settings: TurnSettings; context?: ChatContext; models: ChatModel[]; modes: string[]; optionsLoading: boolean; draftNotice: string; search: string; searching: boolean; searchError: string; managing: boolean;
   terminal?: HistoryPush;
 }
-type History = {session: Session; entries: Entry[]; next_cursor?: string | null};
+type History = {session: Session; entries: Entry[]; next_cursor?: string | null; has_user_message?: boolean};
 export class ChatController {
-  reading = {top: 0, bottom: true, anchor: "", offset: 0};
+  reading: DraftRecord['reading'] = {top: 0, bottom: true, anchor: "", offset: 0};
+  opening = true;
+  latestMessage = () => latestEntryFingerprint(mergeEntries(this.snapshot.entries, this.snapshot.chat.entries));
   draftAttachments: readonly Attachment[] = [];
   // Pending answers stay separate from the message draft, including on reopen.
   questionDrafts = new Map<string, Record<string, QuestionDraft>>();
+  private resolvedQuestions = new Set<string>();
+  question = () => this.snapshot.chat.approvals.find(a => a.kind === "questions" && a.questions?.length)
+    || pendingAsyncQuestion(mergeEntries(this.snapshot.entries, this.snapshot.chat.entries), this.resolvedQuestions);
+  setQuestionDraft = (key: string, draft: Record<string, QuestionDraft>) => {
+    this.questionDrafts.set(key, draft); this.update({}); this.draftChanged();
+  };
   private snapshot: Snapshot;
   private listeners = new Set<() => void>();
   private connected = false;
@@ -68,7 +76,7 @@ export class ChatController {
     if (!document.hidden) void this.history().then(() => this.watchHistory());
   };
   constructor(public options: ChatOptions) {
-    this.snapshot = {session: options.session, entries: [], chat: idleChat(), project: options.target?.project_id || options.task?.primary_project_id || "", draft: "", error: "", historyError: "", loading: false, submitting: false, stopping: false, answering: null, cursor: null, draftRestore: 0, settings: {}, models: [], modes: [], optionsLoading: false, draftNotice: "", search: "", searching:false, searchError:"", managing:false};
+    this.snapshot = {session: options.session, entries: [], chat: idleChat(), project: options.target?.project_id || options.task?.primary_project_id || "", draft: "", error: "", historyError: "", loading: false, submitting: false, stopping: false, answering: null, cursor: null, draftRestore: 0, settings: options.session ? {} : newConversationSettings(), models: [], modes: [], optionsLoading: false, draftNotice: "", search: "", searching:false, searchError:"", managing:false};
     if (options.persistDraft && !options.readOnly) { const saved = readLocalDraft(conversationKey(options)); if (saved) this.restoreDraft(saved); }
   }
   getSnapshot = () => this.snapshot;
@@ -117,10 +125,23 @@ export class ChatController {
   attachmentsChanged = () => this.draftChanged();
   connect() {
     this.disconnect(); this.connected = true; this.readAbort = new AbortController();
-    if (this.options.persistDraft && !this.options.readOnly) { void this.loadDraft(); if (typeof window !== "undefined") window.addEventListener("pagehide", this.pageHide); }
+    this.opening = true;
+    const generation = this.generation;
+    const draft = this.options.persistDraft && !this.options.readOnly ? this.loadDraft() : Promise.resolve();
+    const opened = () => {
+      if (!this.connected || generation !== this.generation) return;
+      const latest = this.latestMessage();
+      if (latest && this.reading.latest !== undefined && latest !== this.reading.latest) this.reading.bottom = true;
+      // Older saved positions have no read marker. Establish their baseline
+      // without losing the user's position on the first opening after upgrade.
+      if (latest && (this.reading.bottom || this.reading.latest === undefined)) this.reading.latest = latest;
+      this.opening = false;
+      this.update({});
+    };
+    if (this.options.persistDraft && !this.options.readOnly && typeof window !== "undefined") window.addEventListener("pagehide", this.pageHide);
     if (this.options.readOnly) {
       document.addEventListener?.("visibilitychange", this.visibilityChanged);
-      if (this.snapshot.session) void this.history().then(() => this.watchHistory());
+      void this.history().then(() => {opened(); return this.watchHistory();});
       this.timer = setInterval(() => {
         if (!this.connected || document.hidden || !this.snapshot.session) return;
         if (!this.snapshot.terminal?.connected || this.historyNeedsSync) void this.history();
@@ -128,7 +149,7 @@ export class ChatController {
       }, 1000);
       return;
     }
-    if (this.snapshot.session) { void this.history(); void this.poll(); }
+    void Promise.all([draft, this.history(), this.poll()]).then(opened);
     this.timer = setInterval(() => { if (this.connected && !document.hidden && this.snapshot.session) void this.poll(); }, 2000);
   }
   disconnect() {
@@ -156,7 +177,7 @@ export class ChatController {
       const known = this.savedKeys;
       const cursors = new Set<string>();
       // Catch up without dropping turns between the newest page and our history.
-      while (!older && known.size && page.next_cursor && !fresh.some(e => known.has(entryKey(e)))) {
+      while (!older && page.next_cursor && (known.size > 0 && !fresh.some(e => known.has(entryKey(e))) || !this.options.readOnly && page.has_user_message === false && !fresh.some(e => e.kind === "user"))) {
         if (cursors.has(page.next_cursor)) throw new Error("历史分页游标重复");
         cursors.add(page.next_cursor);
         page = await this.options.request<History>(this.base() + "/history?cursor=" + encodeURIComponent(page.next_cursor), {signal: this.readAbort?.signal});
@@ -207,7 +228,7 @@ export class ChatController {
     if (previous.busy && !chat.id && !previous.external && !chat.external) return;
     if (chat.id === previous.id && (chat.revision || 0) < (previous.revision || 0)) return;
     const pendingQuestions = new Set(chat.approvals.filter(a => a.kind === "questions").map(a => JSON.stringify([chat.id, a.id])));
-    for (const key of this.questionDrafts.keys()) if (!chat.busy || !pendingQuestions.has(key)) this.questionDrafts.delete(key);
+    for (const key of this.questionDrafts.keys()) if (!key.startsWith('["async",') && (!chat.busy || !pendingQuestions.has(key))) this.questionDrafts.delete(key);
     if (chat.session_name && chat.session_name !== previous.session_name && this.snapshot.session) {
       this.update({session: {...this.snapshot.session, name: chat.session_name}});
       this.options.managed?.(this.snapshot.session!, "title");
@@ -251,26 +272,27 @@ export class ChatController {
     } catch (error) { if (!abort.signal.aborted && generation === this.generation) this.update({error: "实时连接暂时断开，将自动重连，不会重复发送消息。"}); }
     finally { if (this.streamAbort === abort) this.streamRun = undefined; }
   }
-  send = async (text: string, images: string[] = []) => {
+  send = async (text: string, images: string[] = [], restoreDraftOnError = true) => {
     if (this.options.readOnly || this.snapshot.chat.external && (this.snapshot.chat.busy || this.snapshot.chat.status === "unknown")) return;
     text = text.trim();
+    const messageText = [text, ...draftFiles(this.draftAttachments).map(f=>f.text)].filter(Boolean).join("\n\n");
     const before = this.snapshot;
     const steering = before.chat.busy;
-    if (!text && !images.length) return;
+    if (!messageText && !images.length) return;
     if (before.submitting || (steering && (!before.chat.turn_id || !["running","waiting"].includes(before.chat.status))) || before.chat.blocked || !this.canSend()) throw new Error("当前暂不能发送，草稿已保留，请稍后重试");
     try { validateImages(images); }
     catch (error) { this.update({error: (error as Error).message}); throw error; }
     const target: SessionTarget & {project_id: string} = before.session ? {project_id: ""}
       : {...this.options.target, ...(this.options.task ? {task_id: this.options.task.id} : {}), project_id: before.project};
-    const samePending = this.pending?.text === text && this.pending.project_id === target.project_id && this.pending.task_id === target.task_id && this.pending.cwd === target.cwd
+    const samePending = this.pending?.text === messageText && this.pending.project_id === target.project_id && this.pending.task_id === target.task_id && this.pending.cwd === target.cwd
       && JSON.stringify(this.pending.additional_directories) === JSON.stringify(target.additional_directories)
       && (this.pending.images || []).length === images.length
       && images.every((image, i) => image === this.pending?.images?.[i])
       && this.pending?.turn_id === (steering ? before.chat.turn_id : undefined) && (steering || JSON.stringify(this.pending?.settings || {}) === JSON.stringify(before.settings));
-    const pending = samePending ? this.pending! : {text, ...(images.length ? {images} : {}), ...target, request_id: crypto.randomUUID(), settings: before.settings, ...(steering ? {turn_id:before.chat.turn_id} : {})};
+    const pending = samePending ? this.pending! : {text: messageText, ...(images.length ? {images} : {}), ...target, request_id: crypto.randomUUID(), settings: before.settings, ...(steering ? {turn_id:before.chat.turn_id} : {})};
     this.pending = pending;
     const attachments = this.draftAttachments;
-    const entry: Entry = {id: "local:" + pending.request_id, turn_id: "local:" + pending.request_id, kind: "user", text, ...(images.length ? {images} : {})};
+    const entry: Entry = {id: "local:" + pending.request_id, turn_id: "local:" + pending.request_id, kind: "user", text: messageText, ...(images.length ? {images} : {})};
     this.echoes.set(pending.request_id, {entry, known: new Set(mergeEntries(before.entries, before.chat.entries).map(entryKey)), turn: steering ? before.chat.turn_id : undefined, steering});
     // Preserve the current live turn before appending a steering message.
     this.update({submitting: true, error: "", entries: [...mergeEntries(before.entries, before.chat.entries), entry]});
@@ -278,14 +300,14 @@ export class ChatController {
     try {
       let chat: ChatState;
       if (steering) {
-        const result = await this.options.request<{chat:ChatState;accepted:string}>(this.base()+"/chat/steer", {method:"POST",body:JSON.stringify({text,images,request_id:pending.request_id,turn_id:pending.turn_id})});
+        const result = await this.options.request<{chat:ChatState;accepted:string}>(this.base()+"/chat/steer", {method:"POST",body:JSON.stringify({text: messageText,images,request_id:pending.request_id,turn_id:pending.turn_id})});
         if (result.accepted !== pending.request_id) throw new Error("补充消息未确认，草稿已保留");
         chat = result.chat;
       } else if (!before.session) {
         const result = await this.options.request<{session: Session; chat: ChatState}>("/api/sessions/new", {method: "POST", body: JSON.stringify(pending)});
         this.update({session: result.session}); this.options.created(result.session); chat = result.chat;
       } else {
-        chat = await this.options.request<ChatState>(this.base() + "/chat", {method: "POST", body: JSON.stringify({text, ...(images.length ? {images} : {}), request_id: pending.request_id, ...(Object.keys(before.settings).length ? {settings:before.settings} : {})})});
+        chat = await this.options.request<ChatState>(this.base() + "/chat", {method: "POST", body: JSON.stringify({text: messageText, ...(images.length ? {images} : {}), request_id: pending.request_id, ...(Object.keys(before.settings).length ? {settings:before.settings} : {})})});
       }
       this.settleAttachments(attachments);
       this.pending = undefined; if (!steering) this.submitted = {id: chat.id, text, attachments}; this.apply(chat); this.draftChanged();
@@ -302,7 +324,7 @@ export class ChatController {
         } catch { /* Keep the same idempotency key for an explicit retry. */ }
       }
       this.removeEcho(pending.request_id);
-      if (!this.snapshot.draft) {
+      if (restoreDraftOnError && !this.snapshot.draft) {
         this.update({draft: text}); this.draftChanged();
       }
       this.update({error: (error as Error).message});
@@ -315,9 +337,12 @@ export class ChatController {
   }
   private restoreDraft(record: DraftRecord) {
     this.draftUpdated = record.updated;
-    this.reading = record.reading;
-    this.draftAttachments = restoreImages(record.images);
-    this.update({draft:record.text,settings:record.settings,project:record.project || this.snapshot.project,draftRestore:this.snapshot.draftRestore+1});
+    this.reading = {...record.reading};
+    this.draftAttachments = [...restoreImages(record.images), ...restoreFiles(record.files)];
+    for (const [key, draft] of Object.entries(record.questions || {})) {
+      if (key.startsWith('["async",') && draft && typeof draft === "object") this.questionDrafts.set(key, draft);
+    }
+    this.update({draft:record.text,settings:this.snapshot.session ? record.settings : newConversationSettings(record.settings),project:record.project || this.snapshot.project,draftRestore:this.snapshot.draftRestore+1});
   }
   private async loadDraft() {
     const revision=this.draftRevision;
@@ -337,7 +362,8 @@ export class ChatController {
     if (!this.options.persistDraft || this.options.readOnly) return;
     const key=conversationKey(this.options,this.snapshot.session?.id || null);
     this.draftUpdated=Math.max(Date.now(),this.draftUpdated+1);
-    const record:DraftRecord={text:this.snapshot.draft,images:draftImages(this.draftAttachments),settings:this.snapshot.settings,project:this.snapshot.project,reading:this.reading,updated:this.draftUpdated};
+    const questions = Object.fromEntries([...this.questionDrafts].filter(([key]) => key.startsWith('["async",')));
+    const record:DraftRecord={text:this.snapshot.draft,images:draftImages(this.draftAttachments),files:draftFiles(this.draftAttachments),settings:this.snapshot.settings,project:this.snapshot.project,reading:this.reading,updated:this.draftUpdated,questions};
     cacheDraft(key,record);this.writeDraft(key,record);
   };
   private writeDraft(key:string,record:DraftRecord) {
@@ -412,12 +438,18 @@ export class ChatController {
   };
   answer = async (approval: Approval, decision: string, answers: Record<string, string[]>, content?: Record<string, unknown>) => {
     if (this.options.readOnly) return;
-    if (this.snapshot.answering || !this.snapshot.chat.busy) return;
+    const asyncQuestion = approval.delivery === "async";
+    if (this.snapshot.answering || this.snapshot.submitting || !asyncQuestion && !this.snapshot.chat.busy) return;
     this.update({answering: approval.id, error: ""});
     try {
       const runID = this.snapshot.chat.id;
-      this.apply(await this.options.request<ChatState>(this.base() + "/chat/approval", {method: "POST", body: JSON.stringify({run_id: runID, approval_id: approval.id, decision, answers, ...(content === undefined ? {} : {content})})}));
-      this.questionDrafts.delete(JSON.stringify([runID, approval.id]));
+      const chat = await this.options.request<ChatState>(this.base() + (asyncQuestion ? "/chat/question" : "/chat/approval"), {method: "POST", body: JSON.stringify(asyncQuestion
+        ? {item_id: approval.id, turn_id: approval.turn_id, decision, answers}
+        : {run_id: runID, approval_id: approval.id, decision, answers, ...(content === undefined ? {} : {content})})});
+      if (asyncQuestion) this.resolvedQuestions.add(JSON.stringify([approval.turn_id, approval.id]));
+      this.questionDrafts.delete(questionDraftKey(approval, runID));
+      this.apply(chat); this.draftChanged();
+      if (asyncQuestion) { this.persist(); void this.history(); }
     }
     catch (error) { this.update({error: (error as Error).message}); }
     finally { this.update({answering: null}); }

@@ -167,7 +167,6 @@ func (a *Service) SessionsHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, status, err.Error())
 		return
 	}
-	scanStarted := time.Now().UnixMilli()
 	titleObservedAt := time.Now().UnixNano()
 	archived := r.URL.Query().Get("archived") == "true"
 	cached, err := a.cachedScope(scope)
@@ -186,48 +185,20 @@ func (a *Service) SessionsHandler(w http.ResponseWriter, r *http.Request) {
 		cached = filtered
 		httpx.WriteJSON(w, 200, map[string]any{"sessions": cached, "error": cause.Error()})
 	}
-	c, err := a.openSessions(r.Context())
-	if err != nil {
-		failure(err)
-		return
-	}
-	defer c.Close()
 	found := map[string]codex.Session{}
-	params := map[string]any{"archived": archived}
-	if scope.paths != nil && !scope.linkedOnly {
-		params["cwd"] = scope.paths
-	}
-	seen := map[string]bool{}
-	for !scope.linkedOnly {
-		page, err := sessionList(c, params)
+	if !scope.linkedOnly {
+		found, err = a.sessionCatalog(r.Context(), scope, archived, r.URL.Query().Get("refresh") == "1")
 		if err != nil {
 			failure(err)
 			return
 		}
-		for _, s := range page.Data {
-			if s.ID != "" && scope.includes(s.ID, s.Cwd) && (!scope.linkedOnly || r.URL.Query().Get("cwd") == "" || platform.SameWorkspacePath(s.Cwd, r.URL.Query().Get("cwd"))) {
-				found[s.ID] = s
-				if err := a.SaveSession("", s, "workspace", titleObservedAt); err != nil {
-					httpx.DbError(w, err)
-					return
-				}
-
-				if err := a.Workspace.Store.ObserveSessionArchive(s.ID, archived, scanStarted); err != nil {
-					httpx.DbError(w, err)
-					return
-				}
-			}
-		}
-		if page.NextCursor == nil {
-			break
-		}
-		if seen[*page.NextCursor] {
-			failure(fmt.Errorf("Codex 会话分页未前进，请重试"))
-			return
-		}
-		seen[*page.NextCursor] = true
-		params["cursor"] = *page.NextCursor
 	}
+	var c codex.SessionClient
+	defer func() {
+		if c != nil {
+			c.Close()
+		}
+	}()
 	// Cached/missing records and external manual pins are revalidated by ID.
 	for _, s := range cached {
 		if s.Archived != archived {
@@ -235,6 +206,13 @@ func (a *Service) SessionsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := found[s.ID]; ok {
 			continue
+		}
+		if c == nil {
+			c, err = a.openSessions(r.Context())
+			if err != nil {
+				failure(err)
+				return
+			}
 		}
 		current, readErr := readSession(c, s.ID)
 		if readErr == nil {

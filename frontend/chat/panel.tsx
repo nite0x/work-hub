@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from "react";
-import {AssistantRuntimeProvider, MessageNotSentError, useExternalStoreRuntime, type ThreadMessageLike} from "@assistant-ui/react";
+import {AssistantRuntimeProvider, ExportedMessageRepository, MessageNotSentError, useExternalStoreRuntime, type ThreadMessage} from "@assistant-ui/react";
 import {PlusIcon, RefreshCwIcon, SearchIcon, GitBranchIcon, FolderIcon, TerminalIcon, LoaderCircleIcon, HandIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
 import {TooltipIconButton} from "@/components/assistant-ui/elements/tooltip-icon-button";
@@ -11,17 +11,16 @@ import {Label} from "@/components/ui/label";
 import {NativeSelect, NativeSelectOption} from "@/components/ui/native-select";
 import {ChatController} from "./controller";
 import {useChatReading} from "./use-chat-reading";
-import {cleanText, convertEntries, mergeEntries, type Approval} from "./model";
+import {cleanText, convertEntries, mergeEntries, questionDraftKey, type Approval} from "./model";
 import {readElicitation} from "./approval";
 import {ApprovalActions, ElicitationFields} from "./approval-fields";
 import {ChatControls, ChatPermissions, ChatSearch, ChatSessionMenu, ChatStatus} from "./controls";
 import {ChatMediaProvider, ChatMessageText, ChatUserImage} from "./media";
-import {ChatImageAttachmentAdapter} from "./attachments";
+import {ChatAttachmentAdapter} from "./attachments";
 import {conversationContext} from "../workspace/conversation-context";
 import {QuestionComposer} from "./questions";
 
 const chatComponents = {Text: ChatMessageText, UserImage: ChatUserImage};
-const toThreadMessage = (message: ThreadMessageLike) => message;
 
 function ChatRunIndicator({controller}: {controller: ChatController}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -85,8 +84,8 @@ export function ChatPanel({controller}: {controller: ChatController}) {
   const closeSearch = () => {setSearchOpen(false); controller.setSearch(""); searchTrigger.current?.focus();};
   const reading = useChatReading(controller);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const attachments = useMemo(() => new ChatImageAttachmentAdapter(), []);
-  const question = !readOnly ? state.chat.approvals.find(a => a.kind === "questions" && a.questions?.length) : undefined;
+  const attachments = useMemo(() => new ChatAttachmentAdapter((name, data) => controller.options.request("/api/chat-attachments", {method: "POST", body: JSON.stringify({name, data})})), [controller]);
+  const question = !readOnly ? controller.question() : undefined;
   const approvals = state.chat.approvals.filter(a => a !== question);
   const previousQuestion = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -95,9 +94,12 @@ export function ChatPanel({controller}: {controller: ChatController}) {
   }, [question?.id]);
   const entries = useMemo(() => mergeEntries(state.entries, state.chat.entries), [state.entries, state.chat.entries]);
   const messages = useMemo(() => convertEntries(entries), [entries]);
-  const runtime = useExternalStoreRuntime({
+  // The server owns a linear history. Replacing a local echo must remove its
+  // old repository entry rather than retain it as an alternate branch.
+  const messageRepository = useMemo(() => ExportedMessageRepository.fromArray(messages), [messages]);
+  const runtime = useExternalStoreRuntime<ThreadMessage>({
     adapters: {attachments},
-    messages, convertMessage: toThreadMessage,
+    messageRepository,
     isRunning: state.chat.busy || state.submitting,
     isLoading: state.loading && messages.length === 0,
     hasEarlier: !!state.cursor,
@@ -108,7 +110,12 @@ export function ChatPanel({controller}: {controller: ChatController}) {
       const text = message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
       const images = [...message.content, ...(message.attachments || []).flatMap(a => a.content)].filter(p => p.type === "image").map(p => p.image);
       controller.draftAttachments = message.attachments || [];
-      try { await controller.send(text, images); } catch (error) { throw new MessageNotSentError((error as Error).message); }
+      // The composer returns failed submissions to its draft. Let it own that
+      // restoration, then mirror the result below so text is never appended twice.
+      try { await controller.send(text, images, false); } catch (error) {
+        if (!panel.current && !controller.getSnapshot().draft) controller.setDraft(text);
+        throw new MessageNotSentError((error as Error).message);
+      }
     },
     onCancel: state.chat.external && state.chat.busy ? undefined : controller.stop,
   });
@@ -123,7 +130,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
     }
     const unsubscribe = composer.subscribe(() => {
       const draft = composer.getState();
-      if (!draft.submission && !controller.getSnapshot().submitting) { controller.draftAttachments = draft.attachments; controller.attachmentsChanged(); }
+      if (!draft.submission && !controller.getSnapshot().submitting) { controller.draftAttachments = draft.attachments; controller.setDraft(draft.text); controller.attachmentsChanged(); }
     });
     const unsubscribeErrors = composer.unstable_on("attachmentAddError", event => controller.setError(event.message));
     return () => { unsubscribe(); unsubscribeErrors(); };
@@ -154,8 +161,8 @@ export function ChatPanel({controller}: {controller: ChatController}) {
           </div>
         </div>
         <details className="chat-workspace-context">
-          <summary><span className="chat-workspace-project"><FolderIcon aria-hidden="true" />{context.project || "工作目录"}</span>{context.branch && <span className="chat-workspace-branch" title={`分支 · ${context.branch}`}><GitBranchIcon aria-hidden="true" />{context.branch}</span>}<span className="chat-workspace-kind">{context.kind}</span><span className="chat-workspace-task" title={context.tasks.map(t => t.name).join("、")}>{context.tasks.length ? `任务 · ${context.tasks.map(t => t.name).join("、")}` : "未关联任务"}</span></summary>
-          <dl className="chat-context-facts grid gap-2 text-xs"><dt>执行环境</dt><dd>{controller.options.environmentName || (controller.options.environment === "local" ? "本机" : controller.options.environment)}</dd><dt>{state.chat.busy ? "运行目录" : "工作目录"}</dt><dd>{path || "请选择工作目录"}</dd>{additionalDirectories.length > 0 && <><dt>额外工作目录</dt><dd>{additionalDirectories.join("、")}</dd></>}</dl>
+          <summary><span className="chat-workspace-project"><FolderIcon aria-hidden="true" />{context.project || "工作目录"}</span>{context.branch && <span className="chat-workspace-branch" title={`分支 · ${context.branch}`}><GitBranchIcon aria-hidden="true" />{context.branch}</span>}</summary>
+          <dl className="chat-context-facts grid gap-2 text-xs"><dt>执行环境</dt><dd>{controller.options.environmentName || (controller.options.environment === "local" ? "本机" : controller.options.environment)}</dd><dt>{state.chat.busy ? "运行目录" : "工作目录"}</dt><dd>{path || "请选择工作目录"}</dd><dt>目录类型</dt><dd>{context.kind}</dd><dt>关联任务</dt><dd>{context.tasks.length ? context.tasks.map(t => t.name).join("、") : "未关联任务"}</dd>{additionalDirectories.length > 0 && <><dt>额外工作目录</dt><dd>{additionalDirectories.join("、")}</dd></>}</dl>
           {!readOnly && state.session && <Button type="button" size="sm" variant="outline" className="chat-workspace-resume" disabled={!state.session.available} onClick={() => void controller.resume()}><TerminalIcon aria-hidden="true" />在终端继续</Button>}
         </details>
         {readOnly && <div className="flex items-center gap-2"><ChatControls controller={controller} portal={panel} />{state.session && <Button type="button" variant="ghost" size="sm" data-session-action="global-resume" data-session={state.session.id} onClick={() => void controller.resume()} disabled={!state.session.available}>在终端继续 ↗</Button>}</div>}
@@ -165,7 +172,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
       {state.historyError && <Alert variant="destructive" className="shrink-0 rounded-none"><AlertDescription>{state.historyError}</AlertDescription></Alert>}
       <div ref={reading.container} className="relative min-h-0 flex-1" onChange={event => {
         if (event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) controller.setDraft(event.target.value);
-      }}><Thread composerStatus={<ChatRunIndicator controller={controller} />} components={chatComponents} managedScroll autoFocus={false} readOnly={readOnly} composer={question ? <QuestionComposer key={JSON.stringify([state.chat.id, question.id])} approval={question} controller={controller} /> : undefined} composerLeadingControls={<ChatPermissions controller={controller} portal={panel} />} composerControls={<ChatControls controller={controller} portal={panel} />} />{reading.hasNew && !question && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
+      }}><Thread composerStatus={<ChatRunIndicator controller={controller} />} components={chatComponents} managedScroll autoFocus={false} readOnly={readOnly} composer={question ? <QuestionComposer key={questionDraftKey(question, state.chat.id)} approval={question} controller={controller} /> : undefined} composerLeadingControls={<ChatPermissions controller={controller} portal={panel} />} composerControls={<ChatControls controller={controller} portal={panel} />} />{reading.hasNew && !question && <Button type="button" size="sm" className="absolute bottom-24 left-1/2 z-10 -translate-x-1/2" onClick={reading.latest}>有新消息 · 查看最新</Button>}</div>
       {readOnly && (terminal?.waiting || !!terminal?.confirmations?.length) && <Alert className="max-h-[40%] shrink-0 overflow-y-auto rounded-none" role="alert"><AlertDescription>
         <p>终端有待确认事项，请在原终端处理。{!terminal.connected && "连接已断开，以下提示尚未核实。"}</p>
         {terminal.confirmations?.map(item => <div key={item.id} className="space-y-2"><strong>{cleanText(item.title)}</strong>{item.details && <pre className="whitespace-pre-wrap wrap-anywhere">{cleanText(item.details)}</pre>}{item.questions?.map(q => <p key={q.id}>{cleanText(q.header)} · {cleanText(q.question)}{q.options?.map(o => <span key={o.label} className="block">{cleanText(o.label)} · {cleanText(o.description)}</span>)}</p>)}</div>)}
