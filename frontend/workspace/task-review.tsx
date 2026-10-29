@@ -22,7 +22,7 @@ export function TaskReviewItems({items}: {items: CleanupCandidate[]}) {
   if (!items.length) return <p className="task-project-empty">没有需要检查的工作目录。</p>
   return <div className="task-review-items">{items.map((item,i) => <article className="task-review-item" key={`${item.project_id}:${item.path}`}>
     <label className="flex items-start gap-3"><input type="checkbox" data-cleanup-index={i} disabled={!item.cleanable} aria-label={`选择清理 ${item.path}`} /><span className="min-w-0"><strong>{item.project_name}</strong><span className="quiet"> · {item.current ? "当前关联目录" : "任务工作区中的旧目录"}</span><code className="block break-all mt-1">{item.path}</code></span></label>
-    <div className="text-sm mt-2">分支 {item.branch || "未检出"} · {item.dirty || 0} 项修改 · {item.unpushed || 0} 个待推送提交</div>
+    <div className="text-sm mt-2">分支 {item.branch || "未检出"} · {item.dirty || 0} 项改动 · {item.unpushed || 0} 个待推送提交</div>
     {item.cleanable ? <p className="text-sm text-emerald-700">检查通过，可选择清理；执行前会再次核实。</p> : <ul className="text-sm text-amber-800 list-disc pl-5">{item.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>}
   </article>)}</div>
 }

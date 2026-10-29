@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react"
+import { Children, cloneElement, isValidElement, type ComponentProps, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert } from "@/components/ui/alert"
@@ -27,17 +27,18 @@ export function TreeStatus({ tree: t, pending = false, compact = false }: { tree
   if (!t) return <StatusBadge kind={pending ? "neutral" : "failed"}>{pending ? "正在发现目录" : "目录未发现"}</StatusBadge>
   if (t.missing) return <StatusBadge kind="failed">目录丢失</StatusBadge>
   if (t.error) return <StatusBadge kind="failed">读取失败</StatusBadge>
+  if (t.bare) return <StatusBadge kind="warning">裸仓库</StatusBadge>
   if (t.prunable) return <StatusBadge kind="warning">待修复登记</StatusBadge>
   if (!t.status_updated_at) return <StatusBadge kind="neutral">正在检查</StatusBadge>
-  return <><StatusBadge kind={t.dirty ? "warning" : "ready"}>{t.dirty ? `${t.dirty} 项修改` : "干净"}</StatusBadge>{!compact ? <div className="comparison status-checked-at">上次检查 <time data-status-path={t.path} dateTime={t.status_updated_at}>{new Date(t.status_updated_at).toLocaleTimeString("zh-CN", { hour12: false })}</time></div> : null}</>
+  return <><StatusBadge kind={t.dirty ? "warning" : "neutral"}>{t.dirty ? `${t.dirty} 项改动` : "无未提交改动"}</StatusBadge>{!compact ? <div className="comparison status-checked-at">上次检查 <time data-status-path={t.path} dateTime={t.status_updated_at}>{new Date(t.status_updated_at).toLocaleTimeString("zh-CN", { hour12: false })}</time></div> : null}</>
 }
 export const reusesDirectory = (m: Member) => m.mode === "project" || m.mode === "worktree"
 export const expectedBranch = (m: Member, q: Task) => m.branch || q.branch
-export const canOpenMember = (m: Member) => m.state === "ready" && !!m.worktree?.status_updated_at && !m.worktree.bare && !m.worktree.missing && !m.worktree.prunable && !m.worktree.error
+export const canOpenMember = (m: Member) => m.state === "ready" && !m.error && !!m.worktree?.status_updated_at && !m.worktree.bare && !m.worktree.missing && !m.worktree.prunable && !m.worktree.error
 export const branchSummary = (q: Task) => [...new Set(q.members.map(m => m.worktree?.branch || m.branch || (reusesDirectory(m) ? "detached HEAD" : q.branch)).filter(Boolean))].join(" · ") || "使用已有工作目录"
 
 export function GitSyncStatus({ tree: t, compact = false }: { tree?: Worktree; compact?: boolean }) {
-  if (!t?.status_updated_at) return null
+  if (!t?.status_updated_at || t.missing || t.error || t.prunable || t.bare) return null
   const differences = [t.sync_ahead ? `待推 ${t.sync_ahead}` : "", t.sync_behind ? `待拉 ${t.sync_behind}` : ""].filter(Boolean).join(" · ") || "已同步"
   return <div className="comparison space-y-1" title="同步数量基于本地最近获取的上游记录；获取远端后更新。">
     <div>{t.detached ? "游离 HEAD" : !t.upstream ? compact ? "未设置上游" : "尚未设置上游 · 推送时发布分支" : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : compact ? <>上游 <code>{t.upstream}</code> · {differences}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</> : <>上游 {t.upstream}<br />待推送 {t.sync_ahead || 0} · 待拉取 {t.sync_behind || 0}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</>}</div>
@@ -54,17 +55,18 @@ export function ProjectOpenActions(props: Parameters<typeof TaskOpenActions>[0])
 }
 export type ProjectOpenTool = "vscode" | "idea" | "terminal"
 export const projectOpenLabels: Record<ProjectOpenTool, string> = { vscode: "VS Code", idea: "IDEA", terminal: "终端" }
-export function TaskOpenActions({ project, path, disabled, tool }: { project: string; path: string; disabled?: boolean; tool: ProjectOpenTool }) {
-  return <div className="task-split-action" data-project-open>
-    <Action className="task-split-primary rounded-r-none" action={tool === "terminal" ? "workspace-terminal" : `project-open-${tool}`} id={project} data-path={path} data-project-open-primary aria-label={`用 ${projectOpenLabels[tool]} 打开工作目录`} disabled={disabled}>{tool === "terminal" ? <Terminal aria-hidden="true" /> : <CodeXml aria-hidden="true" />}<span data-project-open-label>{projectOpenLabels[tool]} 打开</span></Action>
+export function TaskOpenActions({ project, path, disabled, tool, primary = false }: { project: string; path: string; disabled?: boolean; tool: ProjectOpenTool; primary?: boolean }) {
+  return <div className={`task-split-action${primary ? " task-split-accent" : ""}`} data-project-open>
+    <Action className="task-split-primary rounded-r-none" variant={primary ? "default" : "outline"} action={tool === "terminal" ? "workspace-terminal" : `project-open-${tool}`} id={project} data-path={path} data-project-open-primary aria-label={`用 ${projectOpenLabels[tool]} 打开工作目录`} disabled={disabled}>{tool === "terminal" ? <Terminal aria-hidden="true" /> : <CodeXml aria-hidden="true" />}<span data-project-open-label>{projectOpenLabels[tool]} 打开</span></Action>
     {!disabled ? <details className="task-action-menu"><summary aria-label="选择打开方式"><ChevronDown aria-hidden="true" /></summary><div className="task-action-menu-body">
       {(["vscode", "idea", "terminal"] as const).map(choice => <Action key={choice} variant="ghost" className="justify-start font-normal" action={choice === "terminal" ? "workspace-terminal" : `project-open-${choice}`} id={project} data-path={path} data-project-open-choice={choice}>{choice === "terminal" ? <Terminal aria-hidden="true" /> : <CodeXml aria-hidden="true" />}{projectOpenLabels[choice]}</Action>)}
       <hr /><Action variant="ghost" className="justify-start font-normal" action="project-open-remote" id={project} data-path={path}><FolderGit2 aria-hidden="true" />打开远端仓库</Action>
-    </div></details> : <Button className="task-split-toggle rounded-l-none border-l-0" size="icon-sm" variant="outline" disabled aria-label="选择打开方式"><ChevronDown aria-hidden="true" /></Button>}
+    </div></details> : <Button className="task-split-toggle rounded-l-none border-l-0" size="icon-sm" variant={primary ? "default" : "outline"} disabled aria-label="选择打开方式"><ChevronDown aria-hidden="true" /></Button>}
   </div>
 }
 export function Field({ id, label, help, required, children, ...props }: ComponentProps<"div"> & { id: string; label: string; help?: string; required?: boolean; children: ReactNode }) {
-  return <div {...props} className={cn("field grid gap-2", props.className)}><Label htmlFor={id} className="leading-relaxed">{label}{required ? <span className="text-destructive" aria-hidden="true"> *</span> : null}</Label>{children}{help ? <small className="text-xs leading-relaxed text-muted-foreground">{help}</small> : null}</div>
+  const described = help ? Children.map(children, child => isValidElement<{ id?: string; "aria-describedby"?: string }>(child) && child.props.id === id ? cloneElement(child, { "aria-describedby": [child.props["aria-describedby"], `${id}-help`].filter(Boolean).join(" ") }) : child) : children
+  return <div {...props} className={cn("field grid gap-2", props.className)}><Label id={`${id}-label`} htmlFor={id} className="leading-relaxed">{label}{required ? <span className="text-destructive" aria-hidden="true"> *</span> : null}</Label>{described}{help ? <small id={`${id}-help`} className="text-xs leading-relaxed text-muted-foreground">{help}</small> : null}</div>
 }
 export function Check({ label, ...props }: ComponentProps<"input"> & { label: ReactNode }) {
   return <Label className="flex min-h-9 cursor-pointer items-center gap-2 leading-relaxed"><Input {...props} type="checkbox" className="m-0 size-4 min-w-4 shrink-0 accent-primary shadow-none" /><span>{label}</span></Label>
@@ -91,6 +93,6 @@ export function SourceOptions({ overview: v, includeHead = true }: { overview: G
   })}{includeHead ? <Option value="HEAD">当前 HEAD（{v.current || "detached"}，请明确确认基线）</Option> : null}</>
 }
 export function EmptyState({ title, description, action, button, href }: { title: string; description: string; action?: string; button?: string; href?: string }) {
-  return <Card className="shadcn-scope min-h-72 items-center justify-center gap-4 rounded-none border-0 p-8 text-center shadow-none"><h2 className="m-0 text-lg font-semibold">{title}</h2><p className="m-0 max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>{action ? <Action action={action} variant="default">＋ {button}</Action> : href ? <Button variant="outline" asChild><a href={href}>{button}</a></Button> : null}</Card>
+  return <Card className="shadcn-scope min-h-72 items-center justify-center gap-4 rounded-none border-0 p-8 text-center shadow-none"><h2 className="m-0 text-lg font-semibold">{title}</h2><p className="m-0 max-w-md text-sm leading-relaxed text-muted-foreground">{description}</p>{action ? <Action action={action} variant="default">{action.startsWith("new-") ? "＋ " : ""}{button}</Action> : href ? <Button variant="outline" asChild><a href={href}>{button}</a></Button> : null}</Card>
 }
 export { NativeSelect, Option }

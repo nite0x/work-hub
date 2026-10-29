@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { Card } from "@/components/ui/card"
-import { TaskActions, TaskDetail, TaskList, ProjectPicker } from "./tasks"
-import { Projects, type ProjectFilter } from "./projects"
+import { TaskActions, TaskDetail, TaskList } from "./tasks"
+import { ProjectPicker, projectChoiceReady, projectChoiceSummary } from "./project-picker"
+import { mountGitView, resetGitView, selectGitTab } from "./git-interactive"
+import { notifyWorkspace } from "./interactions"
+import { Projects, type DirectoryFilter, type ProjectFilter } from "./projects"
 import { GitView } from "./git"
 import { SessionList, SessionPicker, NewSession, type Session, type SessionsData } from "./sessions"
 import { HistoryMessage, FileChange, ChatApprovals, HistoryAttention, type HistoryEntry, type Approval } from "./session-timeline"
@@ -19,9 +22,10 @@ import { createOperations } from "./operations"
 import { setupConversationResize, conversationPathKey, conversationEnvironmentKey } from "./conversation-runtime"
 import { createSessionRequests } from "./session-requests"
 
-// Components render inert markup. The existing controllers keep ownership of
-// events, form state, native dialog lifecycle, polling and API requests.
+// Static views retain their native controllers. Interactive islands have
+// separate React roots; their native fields bridge existing API/form logic.
 export const workspaceUI = {
+  mountGitView, resetGitView, selectGitTab, projectChoiceReady, projectChoiceSummary, notifyWorkspace,
   setupConversationResize, conversationPathKey, conversationEnvironmentKey, createSessionRequests,
   createOperations,
   createTaskReviewController,
@@ -36,7 +40,7 @@ export const workspaceUI = {
   tasks: (tasks: Task[]) => renderToStaticMarkup(<TaskList tasks={tasks} />),
   taskDetail: (task: Task, projects: Project[], environment: string, openTool?: ProjectOpenTool, filter?: TaskFilter) => renderToStaticMarkup(<TaskDetail task={task} projects={projects} environment={environment} openTool={openTool} filter={filter} />),
   taskActions: (task: Task, environment: string) => renderToStaticMarkup(<TaskActions task={task} environment={environment} />),
-  projects: (projects: Project[], selectedID: string | null, openTool?: ProjectOpenTool, filter?: ProjectFilter, detailOpen?: boolean) => renderToStaticMarkup(<Projects projects={projects} selectedID={selectedID} openTool={openTool} filter={filter} detailOpen={detailOpen} />),
+  projects: (projects: Project[], selectedID: string | null, openTool?: ProjectOpenTool, filter?: ProjectFilter, detailOpen?: boolean, tasks?: Task[], directoryFilter?: DirectoryFilter, searching?: boolean) => renderToStaticMarkup(<Projects projects={projects} selectedID={selectedID} openTool={openTool} filter={filter} detailOpen={detailOpen} tasks={tasks} directoryFilter={directoryFilter} searching={searching} />),
   git: (overview: GitOverview) => renderToStaticMarkup(<GitView overview={overview} />),
   projectPicker: (rows: PickerRow[]) => renderToStaticMarkup(<ProjectPicker rows={rows} />),
   badge: (kind: string, text?: string) => renderToStaticMarkup(<span className="shadcn-scope"><StatusBadge kind={kind}>{text}</StatusBadge></span>),

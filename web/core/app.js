@@ -1,6 +1,40 @@
 'use strict';
 
 let refreshTimer;
+// The inventory is global across environments. Keep one list context while
+// task details retain their own per-task workspace memory.
+const taskListMemory = { search: '', archived: false, status: 'all', scrollTop: 0, focus: null };
+let taskListMounted = false;
+function saveTaskListView(target) {
+  if (!taskListMounted) return;
+  taskListMemory.search = $('#search').value;
+  taskListMemory.archived = $('#archiveFilter').checked;
+  taskListMemory.status = $('#taskStatusFilter')?.value || 'all';
+  taskListMemory.scrollTop = $('main').scrollTop;
+  const row = target || document.activeElement?.closest?.('[data-action="open-requirement"]');
+  if (row) taskListMemory.focus = { id: row.dataset.id, environment: row.dataset.environment };
+}
+function suspendTaskListView() { saveTaskListView(); taskListMounted = false; }
+function restoreTaskListControls() {
+  $('#search').value = taskListMemory.search;
+  $('#archiveFilter').checked = taskListMemory.archived;
+  if ($('#taskStatusFilter')) $('#taskStatusFilter').value = taskListMemory.status;
+}
+function restoreTaskListPosition(focus) {
+  if (!taskListMounted) return;
+  $('main').scrollTop = taskListMemory.scrollTop;
+  if (!focus) return;
+  const saved = taskListMemory.focus;
+  const row = saved && [...document.querySelectorAll('[data-action="open-requirement"]')].find(row => row.dataset.id === saved.id && row.dataset.environment === saved.environment);
+  (row || $('#pageTitle')).focus?.({preventScroll:true});
+}
+function changeListFilters() {
+  if (taskListMounted) { taskListMemory.focus = null; $('main').scrollTop = 0; }
+  if (state.view === 'projects') projectDetailOpen = false;
+  render();
+}
+$('main').addEventListener('scroll', () => saveTaskListView(), {passive:true});
+window.addEventListener('pagehide', () => saveTaskListView());
 
 async function refresh(force = false) {
   if (state.refreshing) return;
@@ -84,6 +118,7 @@ function updateCheckTimes() {
 }
 
 function readRoute() {
+  suspendTaskListView();
   const route = location.hash.slice(1);
   state.view = route === '/settings' ? 'settings' : route === '/projects' ? 'projects' : route === '/sessions' ? 'sessions' : 'requirements';
   const match = route.match(/^\/requirements\/([a-zA-Z0-9_-]+)$/);
@@ -96,15 +131,21 @@ function navigate(route) {
 }
 window.addEventListener('hashchange', () => {
   readRoute(); $('#search').value = '';
-  render(); $('main').scrollTop = 0; $(state.view === 'projects' ? '#panelTitle' : '#pageTitle').focus({ preventScroll: true });
+  render();
+  if (!taskListMounted) { $('main').scrollTop = 0; $(state.view === 'projects' ? '#panelTitle' : '#pageTitle').focus({ preventScroll: true }); }
   refresh();
 });
 function render() {
+  saveTaskListView();
   if (typeof saveTaskWorkspace === 'function') saveTaskWorkspace();
   const settingsView = state.view === 'settings';
   const sessionsView = state.view === 'sessions';
   const reqView = state.view === 'requirements';
   const detailView = reqView && !!state.selectedRequirement;
+  const listView = reqView && !detailView;
+  const returningToList = listView && !taskListMounted;
+  if (returningToList) restoreTaskListControls();
+  taskListMounted = listView;
   const requirement = detailView ? state.requirements.find(q => q.id === state.selectedRequirement) : null;
   document.body.classList.toggle('task-detail-page', !!requirement);
   document.body.classList.toggle('projects-page', state.view === 'projects');
@@ -125,10 +166,10 @@ function render() {
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
   $('#eyebrow').textContent = sessionsView ? 'SESSIONS' : settingsView ? 'SETTINGS' : detailView ? 'TASK' : reqView ? 'TASKS' : 'PROJECTS';
   $('#pageTitle').textContent = sessionsView ? '会话' : settingsView ? '设置' : detailView ? requirement?.name || '任务不存在' : reqView ? '任务' : '项目';
-  $('#pageSubtitle').textContent = settingsView ? '管理执行环境、终端工具、对话标题与每日更新。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
+  $('#pageSubtitle').textContent = settingsView ? '配置执行环境、终端工具与对话标题。' : detailView ? '查看关联项目和 Codex 会话，继续当前任务中的开发。' : reqView ? '围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。' : '登记项目，掌握它的全部工作目录、分支与任务归属。';
   $('#pageSubtitle').hidden = detailView || sessionsView;
   $('#newButton').innerHTML = `<span>＋</span> ${reqView ? '创建任务' : '添加项目'}`;
-  $('#panelTitle').textContent = reqView ? '全部任务' : '已登记项目';
+  $('#panelTitle').textContent = reqView ? '全部任务' : taskInventory.loaded ? `项目 · 当前环境 ${state.projects.length} / 全部 ${taskInventory.project_count}` : '已登记项目';
   $('#search').placeholder = reqView ? '搜索任务名称、说明…' : '搜索项目名称、目录…';
   $('#archiveFilterWrap').hidden = !reqView;
   $('#taskStatusFilterWrap').hidden = !reqView;
@@ -146,6 +187,7 @@ function render() {
   if (typeof syncTaskWorkspace === 'function') syncTaskWorkspace(requirement);
   syncTaskDescription();
   syncMutationControls();
+  restoreTaskListPosition(returningToList);
 }
 
 async function handleAction(action, target) {
@@ -157,7 +199,11 @@ async function handleAction(action, target) {
     document.querySelector(`.task-signal-filters [data-filter="${target.dataset.filter}"]`)?.focus({preventScroll:true});
     return;
   }
-  if (action === 'open-requirement') return selectEnvironment(target.dataset.environment, '/requirements/' + id);
+  if (action === 'open-requirement') { saveTaskListView(target); return selectEnvironment(target.dataset.environment, '/requirements/' + id); }
+  if (action === 'clear-task-filters') {
+    $('#search').value = ''; $('#archiveFilter').checked = false; $('#taskStatusFilter').value = 'all';
+    changeListFilters(); $('#search').focus(); return;
+  }
   if (action === 'new-project') return openProject();
   if (action === 'new-worktree') return openWorktree(id);
   if (action === 'new-requirement') return openRequirement();
@@ -168,6 +214,14 @@ async function handleAction(action, target) {
   if (action === 'select-project') { state.selectedProject = id; projectDetailOpen = true; render(); $('#projectDetail h2')?.focus({ preventScroll: true }); return; }
   if (action === 'project-list') { projectDetailOpen = false; render(); $('#content [aria-pressed="true"][data-action="select-project"]')?.focus(); return; }
   if (action === 'project-filter') { projectFilter = target.dataset.filter; projectDetailOpen = false; render(); $('#content [data-filter="' + projectFilter + '"]')?.focus(); return; }
+  if (action === 'project-directory-filter') {
+    projectDirectoryFilters.set(projectDirectoryFilterKey(id), target.dataset.filter);
+    render();
+    document.querySelector('.project-directory-filters [data-filter="' + target.dataset.filter + '"]')?.focus({preventScroll:true});
+    return;
+  }
+  if (action === 'project-refresh') return refresh(true);
+  if (action === 'clear-project-search') { $('#search').value = ''; projectDetailOpen = false; render(); $('#search').focus(); return; }
   if (action === 'jump-requirement') { navigate('/requirements/' + id); return; }
   if (action === 'workspace-terminal') return mutation('正在打开项目终端', async () => {
     const result = await api(`/api/projects/${id}/git`, { method: 'POST', body: JSON.stringify({ action: 'terminal', path: target.dataset.path }) });
@@ -201,9 +255,9 @@ document.addEventListener('click', event => {
 });
 $('#newButton').addEventListener('click', () => state.view === 'requirements' ? openRequirement() : openProject());
 $('#refreshButton').addEventListener('click', () => refresh(true));
-$('#search').addEventListener('input', () => { if (state.view === 'projects') projectDetailOpen = false; render(); });
-$('#archiveFilter').addEventListener('change', render);
-$('#taskStatusFilter')?.addEventListener('change', render);
+$('#search').addEventListener('input', changeListFilters);
+$('#archiveFilter').addEventListener('change', changeListFilters);
+$('#taskStatusFilter')?.addEventListener('change', changeListFilters);
 document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (dialog.hasAttribute('data-block-close')) event.preventDefault(); }));
 
 $('#copyCommand').addEventListener('click', () => copy($('#commandText').value));

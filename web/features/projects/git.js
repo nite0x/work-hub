@@ -17,7 +17,7 @@ async function openGit(id, path = '', requirement = '') {
   $('#gitError').hidden = true;
   $('#gitAuthHelp').hidden = true;
   $('#gitResult').hidden = true;
-  $('#gitContent').innerHTML = '<div class="loading">正在读取分支与远端…</div>';
+  window.WorkHubUI.resetGitView($('#gitContent'));
   $('#gitDialog').showModal();
   try {
     const overview = await api(`/api/projects/${id}/git`, {environment});
@@ -28,7 +28,7 @@ async function openGit(id, path = '', requirement = '') {
     gitState = overview;
     gitSelectedPath = path || gitState.project.path;
     renderGit();
-  } catch (error) { if (revision !== gitViewRevision || environment !== activeEnvironment || !$('#gitDialog').open) return; $('#gitContent').textContent = ''; $('#gitError').textContent = error.message; $('#gitError').hidden = false; }
+  } catch (error) { if (revision !== gitViewRevision || environment !== activeEnvironment || !$('#gitDialog').open) return; window.WorkHubUI.resetGitView($('#gitContent'), ''); $('#gitError').textContent = error.message; $('#gitError').hidden = false; }
 }
 function defaultBranchSource(v) {
   return ['refs/heads/master', 'refs/heads/main', 'refs/remotes/origin/master', 'refs/remotes/origin/main'].find(ref => v.branches.some(b => b.ref === ref)) || 'HEAD';
@@ -40,7 +40,7 @@ function renderGit() {
   const v = gitState;
   const local = v.branches.filter(b => b.kind === 'local');
   $('#gitTitle').textContent = 'Git 操作 · ' + v.project.name;
-  $('#gitContent').innerHTML = window.WorkHubUI.git(v);
+  window.WorkHubUI.mountGitView($('#gitContent'), v);
   $('#gitWorktree').value = gitSelectedPath;
   $('#gitWorktree').disabled = !!gitRequirementID;
   if (!$('#gitWorktree').value) {
@@ -70,7 +70,7 @@ function updateGitWorktree() {
     $(`[data-action="${action}"]`, $('#gitContent')).disabled = unavailable || (action !== 'git-push' && !!t?.dirty) || (action !== 'git-switch' && !!t?.detached);
   }
   $('[data-action="git-terminal"]').disabled = !t;
-  $('#gitContext').textContent = `${environmentName()} · ${gitState.project.name}\n${path}\n当前分支：${t?.branch || 'detached HEAD'}\n${!t?.upstream ? '尚未设置上游' : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : `上游 ${t.upstream} · 待推送 ${t.sync_ahead || 0} · 待拉取 ${t.sync_behind || 0}`}${t?.dirty ? `\n${t.dirty} 项未提交修改（推送只发送已提交内容）` : ''}`;
+  $('#gitContext').textContent = `${environmentName()} · 当前分支 ${t?.branch || 'detached HEAD'} · ${t?.dirty ? `${t.dirty} 项未提交修改` : '工作目录干净'}\n${!t?.upstream ? '尚未设置上游，推送时可发布当前分支' : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : `上游 ${t.upstream} · 待推送 ${t.sync_ahead || 0} · 待拉取 ${t.sync_behind || 0}`}`;
   $('#gitSwitch').innerHTML = gitState.branches.map(b => `<option value="${esc(b.ref)}" ${b.worktrees.some(p => p !== gitSelectedPath) ? 'disabled' : ''}>${esc(b.name)}${b.kind === 'remote' ? '（新建跟踪分支）' : ''}${b.worktrees.some(p => p !== gitSelectedPath) ? '（其他 worktree 占用）' : ''}</option>`).join('');
   if (t?.branch) $('#gitSwitch').value = 'refs/heads/' + t.branch;
   $('#gitSwitchNote').textContent = gitRequirementID ? '切换后同步更新当前任务的关联分支，创建基线保留。' : '切换作用于所选目录；关联任务会显示分支变化。';
@@ -88,6 +88,7 @@ function updateGitWorktree() {
   const upstream = gitState.branches.find(b => b.kind === 'remote' && b.name === t?.upstream);
   $('#gitMergeSource').value = upstream?.ref || '';
   clearGitMergePreview();
+  if (t?.operation === 'merge') window.WorkHubUI.selectGitTab($('#gitContent'), 'merge');
 }
 function updateGitSwitch() {
   const b = gitState?.branches.find(b => b.ref === $('#gitSwitch').value);
@@ -278,7 +279,7 @@ document.addEventListener('click', async event => {
   if (action === 'git-reload') {
     try { gitState = await api(`/api/projects/${gitState.project.id}/git`); $('#gitError').hidden = true; $('#gitAuthHelp').hidden = true; renderGit(); } catch (e) { $('#gitError').textContent = e.message; $('#gitError').hidden = false; } return;
   }
-  if (action === 'git-use-source') { $('#gitBranchSource').value = button.dataset.ref; updateGitSource(); $('#gitBranchName').focus(); return; }
+  if (action === 'git-use-source') { window.WorkHubUI.selectGitTab($('#gitContent'), 'branches'); $('#gitBranchSource').value = button.dataset.ref; updateGitSource(); $('#gitBranchName').focus(); return; }
   if (action === 'git-fetch') return gitOperation({ action: 'fetch', remote: $('#gitRemote').value }, '正在获取远端全部分支');
   if (action === 'git-fetch-terminal') return gitOperation({ action: 'fetch_terminal', remote: $('#gitRemote').value }, '正在打开终端获取分支');
   if (action === 'git-prepare-master') return gitOperation({ action: 'create_branch', name: 'master', source: gitState.master_source, track: true }, '正在从远端创建本地 master');

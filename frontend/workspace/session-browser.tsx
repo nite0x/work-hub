@@ -74,7 +74,7 @@ export function ConversationShortcuts({ tasks, directories, pinnedDirectories, s
     </div>
     {pinned.length ? <ul>{pinned.map(task => <li key={task.id} className="conversation-shortcut-row">
       <button type="button" className="conversation-shortcut-open" data-task-shortcut={task.id} aria-current={selected === task.id ? "true" : undefined} title={`${task.name}\n${task.projects}\n打开任务对话`}>
-        <span className="conversation-shortcut-title">{task.name}</span><span className="conversation-shortcut-context">{task.projects || "任务对话"}{task.environment && ` · ${task.environment}`}</span>
+        <span className="conversation-shortcut-title">{task.name}<small className="shortcut-entry-kind">任务对话</small></span><span className="conversation-shortcut-context">{task.projects || "任务对话"}{task.environment && ` · ${task.environment}`}</span>
       </button>
       <button type="button" className="conversation-shortcut-pin" data-task-shortcut-pin={task.id} aria-label={`取消固定任务：${task.name}`} title="取消固定任务"><PinOff aria-hidden="true" /></button>
     </li>)}</ul> : <p className="conversation-shortcuts-empty">点击 + 固定任务或目录</p>}

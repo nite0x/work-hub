@@ -1,0 +1,10 @@
+{
+  "name": "work-hub-design-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../node_modules/vite/bin/vite.js --config vite.config.mts",
+    "build": "node ../node_modules/vite/bin/vite.js build --config vite.config.mts",
+    "check": "node ../node_modules/typescript/bin/tsc -p tsconfig.json"
+  }
+}

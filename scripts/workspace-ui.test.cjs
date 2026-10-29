@@ -103,7 +103,7 @@ async function harness(t, readOnly = true, {origin = 'http://localhost:4317', pi
 
 for (const readOnly of [true, false]) test(`the production UI mounts before controllers in ${readOnly ? 'read-only' : 'interactive'} mode`, async t => {
   const h = await harness(t, readOnly);
-  assert.match(h.$('#content').textContent, /项目工作现场/);
+  assert.match(h.$('#content').textContent, /关联项目与工作目录/);
   assert(h.$('#content .task-project-list'));
   assert(h.$('#projectForm [data-slot="input"]'));
   assert(h.$('#requirementForm [data-slot="native-select"]'));
@@ -1337,7 +1337,7 @@ test('project filters retain selection, distinguish directory changes and recove
   h.click('[data-action="project-filter"][data-filter="dirty"]');
   assert.equal(h.document.querySelectorAll('.project-list-item').length, 1);
   assert.equal(h.$('.project-list-item').dataset.id, 'app');
-  assert.match(h.$('#projectDetail').textContent, /3 项修改/);
+  assert.match(h.$('#projectDetail').textContent, /3 项改动/);
   h.click('[data-action="select-project"][data-id="app"]');
   assert.equal(h.$('.project-workspace').dataset.pane, 'detail');
   h.click('[data-action="select-project"][data-id="app"]');
@@ -1374,6 +1374,125 @@ test('project directory controls retain the exact worktree and compact zero-valu
   assert.deepEqual(h.requests.filter(r => r.url === '/api/projects/app/open').at(-1).body, { tool: 'vscode', path: '/workspace/task/app' });
 });
 
+test('project directories identify their task, separate local and remote state and recover the selected task in place', async t => {
+  const h = await harness(t);
+  const tree = h.data.projects[0].worktrees[1];
+  Object.assign(tree, {requirements:[{id:'task',name:'Billing'}], missing:true, upstream:'origin/feature/task', sync_available:true});
+  await h.navigate('/projects');
+  const rows = h.document.querySelectorAll('[data-directory-path]');
+  assert.equal(rows[0].querySelector('.project-directory-name').textContent, '主工作目录');
+  assert.equal(rows[1].querySelector('.project-directory-name').textContent, 'Billing');
+  assert.deepEqual([...h.document.querySelectorAll('#projectDetail th')].map(n => n.textContent), ['工作目录','远程同步','关联任务','本地改动','操作']);
+  assert.doesNotMatch(rows[1].querySelector('.project-branch-cell').textContent, /已同步/);
+  h.click('.project-directory-filters [data-filter="issues"]');
+  assert.equal(h.document.querySelectorAll('[data-directory-path]').length, 1);
+  h.click('.project-directory-recovery [data-action="change-task-directory"]'); await settle();
+  assert.equal(h.$('#taskDirectoryDialog').open, true);
+  assert.match(h.$('#taskDirectoryCurrent').textContent, /App.*\/workspace\/task\/app/);
+  h.change('#taskDirectoryPicker-app-mode', 'project');
+  await h.submit('#taskDirectoryForm');
+  assert.deepEqual(h.requests.find(r => r.url === '/api/requirements/task/projects/app' && r.options.method === 'PUT').body, {project_id:'app',mode:'project'});
+  assert.equal(h.data.requirements[0].members[0].path, '/repo/app');
+  assert.equal(tree.missing, true);
+  assert(!h.requests.some(r => r.options.method === 'DELETE'));
+});
+
+test('project recovery explains archived and unassociated directories and retains a per-project issue filter', async t => {
+  const h = await harness(t);
+  const tree = h.data.projects[0].worktrees[1];
+  Object.assign(tree, {requirements:[{id:'archived',name:'Archived'}], missing:true});
+  await h.navigate('/projects');
+  assert.equal(h.$('.project-directory-recovery [data-action="change-task-directory"]').disabled, true);
+  assert.match(h.$('.project-directory-recovery').textContent, /取消归档后可更换目录/);
+  tree.requirements = [];
+  await h.window.refresh();
+  assert.equal(h.$('.project-directory-recovery [data-action="change-task-directory"]'), null);
+  assert(h.$('.project-directory-recovery [data-action="new-worktree"]'));
+  h.click('.project-directory-filters [data-filter="issues"]');
+  h.click('[data-action="select-project"][data-id="backend"]');
+  assert.equal(h.$('.project-directory-filters [data-filter="all"]').getAttribute('aria-pressed'), 'true');
+  h.click('[data-action="select-project"][data-id="app"]');
+  assert.equal(h.$('.project-directory-filters [data-filter="issues"]').getAttribute('aria-pressed'), 'true');
+  tree.missing = false;
+  await h.window.refresh();
+  assert.match(h.$('#projectDetail').textContent, /没有需要处理的工作目录/);
+  h.click('.project-detail-empty [data-action="project-directory-filter"]');
+  assert.equal(h.document.querySelectorAll('[data-directory-path]').length, 2);
+});
+
+test('a shared directory recovery only changes the task selected beside its error', async t => {
+  const h = await harness(t);
+  const original = h.data.requirements[0];
+  const second = {...original, id:'second', name:'Second task', members:original.members.map(m => ({...m}))};
+  h.data.requirements.push(second);
+  Object.assign(h.data.projects[0].worktrees[1], {missing:true, requirements:[{id:'task',name:'Billing'},{id:'second',name:'Second task'}]});
+  h.setIntercept((url, options, body) => {
+    if (url === '/api/requirements/second/projects/app' && options.method === 'PUT') {
+      Object.assign(second.members[0], {mode:body.mode,path:'/repo/app',worktree:h.data.projects[0].worktrees[0]});
+      return {ok:true,json:async()=>structuredClone(second)};
+    }
+  });
+  await h.navigate('/projects');
+  h.click('.project-task-recovery [data-action="change-task-directory"][data-id="second"]'); await settle();
+  h.change('#taskDirectoryPicker-app-mode', 'project');
+  await h.submit('#taskDirectoryForm');
+  assert.equal(original.members[0].path, '/workspace/task/app');
+  assert.equal(second.members[0].path, '/repo/app');
+  assert(h.requests.some(r => r.url === '/api/requirements/second/projects/app' && r.options.method === 'PUT'));
+  assert(!h.requests.some(r => r.url === '/api/requirements/task/projects/app' && r.options.method === 'PUT'));
+});
+
+test('returning from a task through browser history restores list filters, scroll and the original task focus', async t => {
+  const h = await harness(t);
+  h.data.projects[0].worktrees[1].dirty = 2;
+  await h.navigate('/requirements');
+  h.input('#search', 'Billing');
+  h.change('#taskStatusFilter', 'dirty');
+  h.click('#archiveFilter');
+  h.$('main').scrollTop = 260;
+  h.click('[data-action="open-requirement"][data-id="task"]'); await settle();
+  assert(h.$('.task-project-list'));
+  const back = new Promise(resolve => h.window.addEventListener('popstate', resolve, {once:true}));
+  h.window.history.back(); await back; await settle();
+  assert.equal(h.$('#search').value, 'Billing');
+  assert.equal(h.$('#taskStatusFilter').value, 'dirty');
+  assert.equal(h.$('#archiveFilter').checked, true);
+  assert.equal(h.$('main').scrollTop, 260);
+  assert.equal(h.document.activeElement.dataset.id, 'task');
+  assert.equal(h.document.activeElement.dataset.environment, 'local');
+  await h.window.refresh(true);
+  assert.equal(h.$('main').scrollTop, 260);
+  await h.navigate('/projects');
+  h.input('#search', 'Backend');
+  await h.navigate('/requirements');
+  assert.equal(h.$('#search').value, 'Billing');
+  assert.equal(h.$('main').scrollTop, 260);
+});
+
+test('empty search states offer a direct reset without confusing an empty project with a pending scan', async t => {
+  const h = await harness(t);
+  await h.navigate('/requirements');
+  h.input('#search', 'not-found');
+  h.click('[data-action="clear-task-filters"]');
+  assert.equal(h.$('#search').value, '');
+  assert.equal(h.$('#taskStatusFilter').value, 'all');
+  assert.equal(h.document.activeElement, h.$('#search'));
+  await h.navigate('/projects');
+  h.input('#search', 'not-found');
+  h.click('[data-action="clear-project-search"]');
+  assert.equal(h.$('#search').value, '');
+  assert.equal(h.document.querySelectorAll('.project-list-item').length, 2);
+  h.data.projects[0].worktrees = [];
+  h.data.projects[0].refreshing = false;
+  await h.window.refresh();
+  assert.match(h.$('.project-detail-empty').textContent, /尚未发现工作目录/);
+  assert(h.$('.project-detail-empty [data-action="project-refresh"]'));
+  h.data.projects[0].refreshing = true;
+  h.data.projects[0].status_updated_at = '';
+  await h.window.refresh();
+  assert.match(h.$('.project-detail-empty').textContent, /正在发现工作目录/);
+});
+
 test('sidebar refresh status stays compact and retains its detailed explanation', async t => {
   const h = await harness(t);
   h.data.status_refreshing = true;
@@ -1398,7 +1517,7 @@ test('project panes resize with pointer and keyboard, retain their width and res
     return originalBounds.call(this);
   };
   assert.equal(h.$('.project-list-item .lucide-chevron-right'), null);
-  assert.equal(h.$('.project-change-indicator').textContent, '有修改');
+  assert.equal(h.$('.project-change-indicator').textContent, '1 个目录有改动');
   assert.match(h.$('.project-change-indicator').title, /1 个工作目录/);
   const pointer = (target, type, clientX) => {
     const event = new h.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX, button: 0 });
@@ -1755,6 +1874,43 @@ test('task status filters surface pending recovery, unpushed commits and Git ope
   assert.match(h.$('#content').textContent,/没有匹配/);
 });
 
+test('a missing task directory exposes recovery in place and preserves project context when changing it', async t => {
+  const h = await harness(t);
+  const member = h.data.requirements[0].members[0];
+  Object.assign(member.worktree, {missing: true, upstream: 'origin/feature/task', sync_available: true});
+  await h.window.refresh();
+  assert.match(h.$('.task-directory-overview').textContent, /1 个关联项目.*0 个目录可打开.*1 个目录需要处理/);
+  const notice = h.$('.task-directory-notice');
+  assert.match(notice.textContent, /工作目录已丢失/);
+  assert.equal(h.$('[data-project-open-primary]').disabled, true);
+  assert.doesNotMatch(h.$('.task-project-state').textContent, /已同步|无未提交改动/);
+  h.click('.task-directory-notice [data-action="change-task-directory"]'); await settle();
+  assert.equal(h.$('#taskDirectoryDialog').open, true);
+  h.change('#taskDirectoryPicker select[id$="-mode"]', 'project');
+  await h.submit('#taskDirectoryForm');
+  const request = h.requests.find(r => r.url === '/api/requirements/task/projects/app' && r.options.method === 'PUT');
+  assert.deepEqual(request.body, {project_id: 'app', mode: 'project'});
+  assert.equal(h.$('[data-project-open-primary]').dataset.path, '/repo/app');
+  assert.equal(h.$('[data-project-open-primary]').disabled, false);
+  assert.match(h.$('.task-directory-overview').textContent, /1 个目录可打开/);
+  assert.equal(h.$('.task-directory-notice'), null);
+});
+
+test('archived tasks explain disabled directory recovery and unchecked directories do not imply clean work', async t => {
+  const h = await harness(t);
+  const member = h.data.requirements[0].members[0];
+  member.worktree.status_updated_at = '';
+  await h.window.refresh();
+  assert.match(h.$('.task-directory-overview').textContent, /0 个目录可打开.*1 个目录正在检查/);
+  assert.doesNotMatch(h.$('.task-project-state').textContent, /无未提交改动/);
+  assert.equal(h.$('.task-directory-notice [data-action="change-task-directory"]'), null);
+  h.data.requirements[0].state = 'archived';
+  member.worktree.missing = true;
+  await h.window.refresh();
+  assert.equal(h.$('.task-directory-notice [data-action="change-task-directory"]').disabled, true);
+  assert.match(h.$('.task-directory-notice').textContent, /取消归档后可处理目录/);
+});
+
 test('read-only changes show working and staged files as inert text and reject late file results', async t => {
   const h=await harness(t);
   let release;
@@ -1816,4 +1972,82 @@ test('a Git network operation keeps refreshing and does not overwrite a differen
   await pending;await settle();
   assert.match(h.$('#gitTitle').textContent,/Backend/);
   assert.equal(h.$('#gitError').hidden,true);
+});
+
+test('project search preserves checked projects and expanded configuration through refresh and submission', async t => {
+  const h = await harness(t);
+  h.window.openRequirement(); await settle();
+  h.input('#requirementName', 'Searchable workspace');
+  h.click('#projectPicker-app-selected'); await settle();
+  const configuration = h.$('[data-picker-project="app"]');
+  configuration.open = true;
+  configuration.dispatchEvent(new h.window.Event('toggle'));
+  h.input('#projectPickerSearch', 'Backend');
+  assert.equal(h.$('[data-picker-search-text][data-project-id="app"]').hidden, true);
+  assert.equal(h.$('#projectPicker-app-selected').checked, true);
+  await h.window.refresh();
+  assert.equal(h.$('#projectPicker-app-selected').checked, true);
+  h.input('#projectPickerSearch', '');
+  assert.equal(h.$('[data-picker-project="app"]').open, true);
+  await h.submit('#requirementForm');
+  const request = h.requests.find(r => r.url === '/api/requirements' && r.options.method === 'POST');
+  assert.deepEqual(request.body.project_ids, ['app']);
+  assert.equal(request.body.members[0].project_id, 'app');
+});
+
+test('searchable native fields preserve disabled state, validation and controller change events', async t => {
+  const h = await harness(t);
+  h.window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  await h.window.openGit('app', '/workspace/task/app'); await settle();
+  [...h.document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent === '分支').click();
+  await settle();
+  const source = h.$('#gitBranchSource');
+  let trigger = h.$('[data-select-trigger="gitBranchSource"]');
+  assert.equal(source.style.getPropertyValue('display'), 'none');
+  assert.equal(trigger.getAttribute('aria-label'), '来源分支');
+  trigger.click(); await settle();
+  assert(h.$('[cmdk-input]'));
+  const option = [...h.document.querySelectorAll('[cmdk-item]')].find(item => item.textContent.includes('origin/master'));
+  option.click(); await settle();
+  assert.equal(source.value, 'refs/remotes/origin/master');
+  assert.equal(h.$('#gitTrack').disabled, false);
+  assert.equal(h.$('#gitTrack').checked, true);
+  source.disabled = true; await settle();
+  assert.equal(h.$('[data-select-trigger="gitBranchSource"]').disabled, true);
+  source.disabled = false; source.value = ''; await settle();
+  const invalid = new h.window.Event('invalid', {cancelable: true});
+  source.dispatchEvent(invalid); await settle();
+  trigger = h.$('[data-select-trigger="gitBranchSource"]');
+  assert.equal(invalid.defaultPrevented, true);
+  assert.equal(trigger.getAttribute('aria-invalid'), 'true');
+  assert.equal(h.document.activeElement, trigger);
+});
+
+test('Radix action menus route through the original project context', async t => {
+  const h = await harness(t);
+  const trigger = h.$('button[aria-label="App 更多操作"]');
+  trigger.dispatchEvent(new h.window.MouseEvent('pointerdown', {bubbles: true, button: 0}));
+  await settle();
+  assert(h.$('[role="menu"]'));
+  [...h.document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent === 'Git 操作').click();
+  await settle();
+  assert.equal(h.$('#gitDialog').open, true);
+  assert.equal(h.$('#gitWorktree').value, '/workspace/task/app');
+  assert.equal(h.$('#gitWorktree').disabled, true);
+});
+
+test('failed conversation refresh retains cached results but a new directory never inherits them', async t => {
+  const h = await harness(t);
+  h.click('[data-action="task-conversations"]'); await settle();
+  assert(h.$('[data-conversation-session="session-1"]'));
+  h.setIntercept(url => url.startsWith('/api/sessions?') ? {ok:false,json:async()=>({error:'fixture offline'})} : undefined);
+  await h.window.refreshSessionWorkspace(true); await settle();
+  assert(h.$('[data-conversation-session="session-1"]'));
+  assert.match(h.$('#sessionBrowserCount').textContent, /部分结果未更新/);
+  assert.match(h.$('#sessionBrowserError').textContent, /保留上次结果/);
+  h.change('#sessionDirectoryFilter', '/workspace/task/app'); await settle();
+  assert.equal(h.$('[data-conversation-session="session-1"]'), null);
+  assert.match(h.$('#sessionBrowserCount').textContent, /数量暂不可用/);
+  assert.doesNotMatch(h.$('#sessionBrowserCount').textContent, /0 个对话/);
+  assert.equal(h.$('#sessionBrowserList').textContent, '');
 });

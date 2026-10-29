@@ -3,3 +3,62 @@
 #gitError{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}#gitAuthHelp{display:flex;align-items:center;justify-content:space-between;gap:12px}#gitAuthHelp[hidden]{display:none}.git-progress{position:sticky;top:0;z-index:1;margin:10px 0!important}.git-result{margin:12px 0}.git-dialog #gitAuthHelp{flex-wrap:wrap}
 
 .git-credentials{margin-top:14px;font-size:14px;line-height:1.8;color:#52587b;background:#ecedf5;padding:10px 12px;border-radius:5px}
+
+/* One stable context and one task at a time. Panels remain mounted so native
+   controls retain their values while the controller refreshes Git state. */
+.git-dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 48px); width: min(960px, calc(100vw - 32px)); padding: 0; overflow: hidden; }
+.git-dialog > .dialog-header { flex-shrink: 0; margin: 0 !important; padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
+.git-dialog > .dialog-header > div > [data-slot="badge"] { display: none; }
+.git-dialog > .dialog-header h2 { font-size: 19px; }
+.git-dialog > .dialog-footer { flex-shrink: 0; margin: 0; padding: 12px 24px; background: var(--background); }
+.git-dialog > #gitError, .git-dialog > #gitAuthHelp, .git-dialog > #gitProgress, .git-dialog > #gitResult { flex-shrink: 0; margin: 12px 24px 0 !important; max-height: 160px; overflow: auto; width: auto; }
+.git-dialog > #gitProgress { position: static; }
+#gitContent { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.git-loading { display: grid; min-height: 240px; place-items: center; padding: 24px; color: var(--muted-foreground); }
+.git-workspace { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.git-workspace-context { flex-shrink: 0; padding: 16px 24px 12px; background: var(--background); }
+.git-workspace-directory { display: flex; align-items: flex-end; gap: 12px; }
+.git-workspace-directory > .field { flex: 1; min-width: 0; margin: 0; }
+.git-workspace-directory > button { margin-bottom: 0; flex-shrink: 0; }
+.git-workspace-context .git-context-summary { margin-top: 10px; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font-size: 12px; line-height: 1.7; }
+.git-tabs { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.git-tab-list { display: flex; flex-shrink: 0; gap: 6px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+.git-tab-list .git-tab { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 18px; background: transparent; color: var(--muted-foreground); font-size: 14px; font-weight: 500; }
+.git-tab-list .git-tab svg { width: 16px; height: 16px; }
+.git-tab-list .git-tab[data-state="active"] { border-bottom-color: var(--primary); color: var(--primary); background: var(--secondary); }
+.git-tab-list .git-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; }
+.git-tab-panel { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 24px 22px; }
+.git-tab-panel[hidden], .git-tab-panel[data-state="inactive"] { display: none !important; }
+.git-dialog .git-tab-panel > .git-section { margin: 0 0 16px; border: 1px solid var(--border); padding: 16px; }
+.git-dialog .git-tab-panel > .git-section:last-child { margin-bottom: 0; }
+.git-section-title { align-items: flex-start; }
+.git-section-title > span { line-height: 1.6; text-align: right; }
+.git-help { margin: 0; font-size: 12px; line-height: 1.7; }
+.git-credential-details { font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.git-credential-details > summary { cursor: pointer; width: fit-content; }
+.git-credential-details > p { margin: 8px 0; }
+.git-credential-details > button { margin-top: 6px; }
+.git-push-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.git-push-direction { margin: 0; color: var(--muted-foreground); font: 12px/1.7 var(--font-mono, monospace); overflow-wrap: anywhere; }
+.git-branch-search { position: relative; }
+.git-branch-search > svg { position: absolute; width: 16px; height: 16px; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted-foreground); pointer-events: none; }
+.git-branch-search > input { padding-left: 35px; }
+.git-dialog .git-tab-panel table { table-layout: fixed; width: 100%; min-width: 0; }
+.git-dialog .git-tab-panel table th:first-child { width: 40%; }
+.git-dialog .git-tab-panel table th:nth-child(2) { width: 38%; }
+.git-dialog .git-tab-panel table th:nth-child(3) { width: 22%; }
+.git-dialog .git-tab-panel table td { min-width: 0; overflow-wrap: anywhere; }
+.git-dialog .git-tab-panel table td:last-child button { max-width: 100%; height: auto; min-height: 32px; white-space: normal; }
+@media (max-width: 760px) {
+  .git-dialog[open] { max-height: calc(100dvh - 24px); width: calc(100vw - 24px); }
+  .git-dialog > .dialog-header { padding: 16px; }
+  .git-dialog > .dialog-footer { padding: 10px 16px; }
+  .git-workspace-context { padding: 12px 16px; }
+  .git-workspace-directory { flex-wrap: wrap; }
+  .git-workspace-directory > .field { flex-basis: 100%; }
+  .git-tab-list { padding: 0 16px; }
+  .git-tab-list .git-tab { flex: 1; padding: 10px; }
+  .git-tab-panel { padding: 12px 16px 16px; }
+  .git-dialog > #gitError, .git-dialog > #gitAuthHelp, .git-dialog > #gitProgress, .git-dialog > #gitResult { margin: 10px 16px 0 !important; }
+  .git-section-title > span { text-align: left; }
+}

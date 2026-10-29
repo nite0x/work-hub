@@ -13,10 +13,11 @@ function Help({ children }: { children: ReactNode }) {
 export function SettingsPage() {
   return <>
     <Card className="settings-card gap-0 p-6 shadow-none" aria-labelledby="environmentSettingsTitle">
-      <Heading id="environmentSettingsTitle" title="执行环境与工作区" actions={<div className="detail-actions"><Button type="button" variant="outline" size="sm" id="reconnectEnvironment" hidden>重新连接</Button><Button type="button" size="sm" id="addEnvironment">连接 WSL</Button></div>}>任务绑定一个执行环境，项目、终端与 AI 会话均在该环境中操作。任务列表统一展示全部环境。</Heading>
+      <Heading id="environmentSettingsTitle" title="执行环境与工作区" actions={<div className="detail-actions"><Button type="button" variant="outline" size="sm" id="reconnectEnvironment" hidden>重新连接</Button><Button type="button" size="sm" id="addEnvironment">连接 WSL</Button></div>}>为当前环境配置工作目录与工具。</Heading>
       <Field id="environmentSelect" label="配置环境"><NativeSelect id="environmentSelect" aria-label="配置环境"><Option value="local">本机</Option></NativeSelect><small id="environmentStatus" role="status" className="text-muted-foreground" /></Field>
-      <dl className="settings-facts"><div><dt>当前执行环境</dt><dd id="settingsEnvironment">正在读取…</dd></div><div><dt>新任务工作区根目录</dt><dd><code id="settingsRoot">正在读取…</code></dd></div></dl>
-      <Help>本机默认使用当前用户的 ~/workspaces，可通过启动参数 --root 指定；连接 WSL 时可指定该环境的根目录。已有任务沿用保存的路径。</Help>
+      <span id="settingsEnvironment" hidden />
+      <dl className="settings-facts"><div><dt>新任务工作区</dt><dd><code id="settingsRoot">正在读取…</code></dd></div></dl>
+      <details className="settings-help-details"><summary>工作区与环境规则</summary><Help>任务创建后环境固定，项目、终端和会话在此环境执行。工作区默认使用 ~/workspaces，可通过 --root 指定；已有任务沿用保存路径。</Help></details>
     </Card>
     <Card className="settings-card gap-0 p-6 shadow-none" aria-labelledby="terminalTitle"><form id="terminalForm">
       <Heading id="terminalTitle" title="终端工具">Codex、Git 终端和在终端获取分支共用此设置，保存后立即生效。</Heading>
@@ -33,7 +34,7 @@ export function SettingsPage() {
       <Heading id="sessionTitleHeading" title="对话标题">发送首条消息后，根据首次输入在后台生成一次主题标题。手动名称优先保留。</Heading>
       <fieldset id="sessionTitleFields" disabled>
         <Field id="sessionTitleModel" label="标题模型"><NativeSelect id="sessionTitleModel"><Option value="">跟随正文模型</Option></NativeSelect></Field>
-        <Help>仅影响当前执行环境中新对话的标题，正文模型保持原来的选择。沿用 Codex 登录，额外消耗一次模型请求；生成失败时保留初始短标题。</Help>
+        <details className="settings-help-details"><summary>标题生成说明</summary><Help>仅影响当前环境的新对话标题。沿用 Codex 登录，额外消耗一次模型请求；生成失败保留初始标题。</Help></details>
         <div className="settings-actions"><Button type="submit">保存标题设置</Button></div>
       </fieldset>
       <Feedback id="sessionTitleError" variant="destructive" className="mt-4" hidden />

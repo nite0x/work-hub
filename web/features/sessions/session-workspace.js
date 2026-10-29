@@ -383,13 +383,13 @@ function renderConversationList() {
     button.setAttribute('aria-pressed', String(status === statusFilter));
     const badge = button.querySelector('[data-status-count]');
     badge.textContent = String(count); badge.hidden = status === 'all' || !count;
-    button.setAttribute('aria-label', `${({all:'全部', running:'进行中', waiting:'待确认', unread:'未读'})[status]}，${count} 个对话`);
+    button.setAttribute('aria-label', `${({all:'全部', running:'进行中', waiting:'待确认', unread:'未读'})[status]}，${view.error && !view.sessions.length ? '数量暂不可用' : count + ' 个对话'}`);
   }
   $('#sessionSearchClear').hidden = !view.search;
   const filterCount = Number(!!view.directory) + Number(!!view.archived) + Number(!!view.environmentFilter);
   $('#sessionClearFilters').hidden = !filterCount && statusFilter === 'all';
   const showContext = !view.directory && view.scope.kind !== 'directory' && new Set(view.sessions.map(session => conversationPathKey(session.cwd))).size > 1;
-  const markup = window.WorkHubUI.conversationList({ sessions, selected: view.creating ? null : view.selected, showDirectory: showContext, showContext, loading: view.loading, taskID: view.scope.kind === 'task' ? view.scope.id : undefined, filtered: !!text || !!filterCount || statusFilter !== 'all', error: !!view.error && !view.sessions.length, canCreate: !$('#newBrowserSession').disabled });
+  const markup = view.error && !view.sessions.length && !view.loading ? '' : window.WorkHubUI.conversationList({ sessions, selected: view.creating ? null : view.selected, showDirectory: showContext, showContext, loading: view.loading, taskID: view.scope.kind === 'task' ? view.scope.id : undefined, filtered: !!text || !!filterCount || statusFilter !== 'all', error: false, canCreate: !$('#newBrowserSession').disabled });
   const list = $('#sessionBrowserList');
   if (list.innerHTML !== markup) {
     const top = list.scrollTop;
@@ -409,14 +409,15 @@ function renderConversationList() {
   }
   const running = sessions.filter(s => ['starting','running','stopping','handoff'].includes(s.chat_status)).length;
   const waiting = sessions.filter(s => s.chat_status === 'waiting').length;
-  const countMarkup = `<span>${sessions.length}${text || statusFilter !== 'all' ? ' / ' + view.sessions.length : ''} 个对话</span><span class="sr-only">${running ? ` · ${running} 个运行中` : ''}${waiting ? ` · ${waiting} 个待确认` : ''}${view.loading ? ' · 更新中' : ''}</span>`;
+  const countMarkup = view.error && !view.sessions.length ? '<span>数量暂不可用</span>' : `<span>${sessions.length}${text || statusFilter !== 'all' ? ' / ' + view.sessions.length : ''} 个对话${view.error ? ' · 部分结果未更新' : ''}</span><span class="sr-only">${running ? ` · ${running} 个运行中` : ''}${waiting ? ` · ${waiting} 个待确认` : ''}${view.loading ? ' · 更新中' : ''}</span>`;
   if ($('#sessionBrowserCount').innerHTML !== countMarkup) $('#sessionBrowserCount').innerHTML = countMarkup;
   const refresh = $('[data-conversation-action="refresh"]');
   refresh.classList.toggle('is-loading', view.loading);
   refresh.disabled = view.loading;
   refresh.setAttribute('aria-label', view.loading ? '正在刷新对话列表' : '刷新会话列表');
   $('#sessionBrowserError').hidden = !view.error;
-  $('#sessionBrowserError').textContent = view.error;
+  const errorMarkup = view.error ? `<strong>${view.sessions.length ? '部分对话未能刷新' : '暂时无法读取对话'}</strong><p>${view.sessions.length ? '保留上次结果，你可以继续查看已有对话。' : '检查执行环境连接后重试。'}</p><button type="button" data-conversation-action="refresh" class="session-error-retry">重新加载</button><details><summary>错误详情</summary><pre>${esc(view.error)}</pre></details>` : '';
+  if ($('#sessionBrowserError').innerHTML !== errorMarkup) $('#sessionBrowserError').innerHTML = errorMarkup;
   updateConversationNavigation();
 }
 function renderConversationBrowser() {
@@ -497,10 +498,11 @@ async function refreshSessionWorkspace(force = false) {
   if (view.scope.kind === 'project') params.set('project_id', view.scope.id);
   const cwd = selectedDirectory?.cwd || directory || (view.scope.kind === 'directory' ? view.scope.cwd : '');
   if (cwd) params.set('cwd', cwd);
+  const sameScope = view.requestKey === requestKey;
   view.loading = true; view.error = ''; view.requestKey = requestKey; view.checkedAt = Date.now();
   renderConversationList();
   const results = new Map(), errors = new Map();
-  const previousSessions = view.sessions;
+  const previousSessions = sameScope ? view.sessions : [];
   const pendingEnvironments = new Set(environments.map(e => e.id));
   const selectionEnvironment = () => {
     const selected = previousSessions.find(s => conversationSessionKey(s) === view.selected);
@@ -511,7 +513,7 @@ async function refreshSessionWorkspace(force = false) {
   const current = () => view.requestID === requestID && view.requestKey === requestKey && view.environment === activeEnvironment;
   function publish() {
     if (!current()) return;
-    view.sessions = [...results.values()].flat().concat(previousSessions.filter(s => pendingEnvironments.has(s.environment_id))).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    view.sessions = [...results.values()].flat().concat(previousSessions.filter(s => pendingEnvironments.has(s.environment_id) || errors.has(s.environment_id) && !results.has(s.environment_id))).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
     view.error = [...errors.values()].join('\n');
     if (view.requestedSession) {
       if (view.sessions.some(s => conversationSessionKey(s) === view.requestedSession)) view.requestedSession = null;
@@ -534,7 +536,7 @@ async function refreshSessionWorkspace(force = false) {
       const result = await conversationRequests.load(api, environment, params.toString(), force);
       if (!current()) return;
       const sessions = (Array.isArray(result.sessions) ? result.sessions : []).map(s => conversationTaggedSession(s, environment));
-      results.set(environment, sessions);
+      if (!result.error || sessions.length) results.set(environment, sessions);
       if (result.error) errors.set(environment, environmentName(environment) + '：' + result.error);
       let index = conversationIndex.get(environment) || new Map();
       if (view.scope.kind === 'all' && !directory && !view.archived) index = new Map();
@@ -560,6 +562,7 @@ function showConversationSelection() {
     closeSessionHistory(false);
     $('#sessionBrowserEmpty').hidden = false;
     $('#sessionBrowserEmpty').textContent = view.creating ? '选择本次对话的工作目录。' : view.loading ? '正在读取对话…' : view.error ? '暂时无法读取对话，请点击列表中的刷新重试。' : '这里还没有对话，可以从列表上方新建。';
+    if (!view.creating && !view.loading && view.error) $('#sessionBrowserEmpty').hidden = true;
     return;
   }
   const targetKey = JSON.stringify(view.target || null);

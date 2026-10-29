@@ -32,8 +32,51 @@ window.addEventListener('resize', syncTaskDescription);
 if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTaskDescription).observe($('#taskProjectsView'));
 
 function resetTaskProjectPicker(selector) {
-  taskProjectPickers.set(selector, { choices: new Map(), overviews: new Map() });
+  taskProjectPickers.set(selector, { choices: new Map(), overviews: new Map(), rows: [], search: '', markup: null });
+  const search = document.querySelector(`[data-picker-search="${selector.slice(1)}"]`);
+  if (search) search.value = '';
 }
+
+function filterTaskProjectPicker(selector) {
+  const container = $(selector);
+  const picker = taskProjectPickers.get(selector);
+  if (!container || !picker) return;
+  const query = picker.search.trim().toLocaleLowerCase();
+  const rows = [...container.querySelectorAll('[data-picker-search-text]')];
+  let visible = 0;
+  for (const row of rows) {
+    row.hidden = !row.dataset.pickerSearchText.toLocaleLowerCase().includes(query);
+    if (!row.hidden) visible++;
+  }
+  const empty = container.querySelector('[data-picker-empty]');
+  if (empty) empty.hidden = visible > 0;
+  const count = document.querySelector(`[data-picker-count="${selector.slice(1)}"]`);
+  if (count) {
+    const selected = container.querySelectorAll('input[name="project_ids"]:checked').length;
+    count.textContent = query ? `找到 ${visible} / ${rows.length} 个项目 · 已选 ${selected} 个` : `${rows.length} 个可选项目 · 已选 ${selected} 个`;
+  }
+}
+
+// Search only changes visibility. Filtered-out projects still participate in
+// selection, validation and submission, and typing never rebuilds its field.
+document.addEventListener('input', event => {
+  const target = event.target;
+  if (!target.dataset.pickerSearch) return;
+  const selector = '#' + target.dataset.pickerSearch;
+  const picker = taskProjectPickers.get(selector);
+  if (picker) { picker.search = target.value; filterTaskProjectPicker(selector); }
+});
+document.addEventListener('toggle', event => {
+  const details = event.target;
+  if (!details.matches?.('[data-picker-project]') || String(details.open) === details.dataset.pickerDefaultExpanded) return;
+  const container = details.closest('#projectPicker, #requirementProjectPicker, #taskDirectoryPicker');
+  const choice = container && taskProjectPickers.get('#' + container.id)?.choices.get(details.dataset.pickerProject);
+  if (choice) { choice.expanded = details.open; details.dataset.pickerDefaultExpanded = String(details.open); }
+}, true);
+document.addEventListener('invalid', event => {
+  const details = event.target.closest?.('[data-picker-project]');
+  if (details) details.open = true;
+}, true);
 
 function taskCreatesWorktree(mode) { return mode === 'new' || mode === 'existing'; }
 
@@ -57,7 +100,30 @@ function renderTaskProjectPicker(selector, projects, selected, environment, defa
     if (choice.mode === 'new' && v && !choice.source) choice.source = defaultBranchSource(v);
     return { project: p, checked: selected.has(p.id), choice, overview: v, trees, prefix: `${selector.slice(1)}-${p.id}` };
   });
-  $(selector).innerHTML = window.WorkHubUI.projectPicker(rows);
+  picker.rows = rows;
+  const container = $(selector);
+  const markup = window.WorkHubUI.projectPicker(rows);
+  // Polling often changes only Git status timestamps. Preserve the mounted
+  // controls and searchable-select roots when their rendered choices agree.
+  if (picker.markup !== markup) {
+    const focused = container.contains(document.activeElement) ? document.activeElement : null;
+    const focusID = focused?.id;
+    const selection = focused && 'selectionStart' in focused ? [focused.selectionStart, focused.selectionEnd] : null;
+    const scroll = container.closest('.task-dialog-scroll');
+    const scrollTop = scroll?.scrollTop;
+    container.innerHTML = markup;
+    picker.markup = markup;
+    filterTaskProjectPicker(selector);
+    if (focusID) {
+      const next = document.getElementById(focusID);
+      if (next && container.contains(next)) {
+        next.focus({ preventScroll: true });
+        if (selection?.[0] != null && typeof next.setSelectionRange === 'function') next.setSelectionRange(...selection);
+      }
+    }
+    if (scroll) scroll.scrollTop = scrollTop;
+  }
+  filterTaskProjectPicker(selector);
   for (const p of projects) {
     const choice = picker.choices.get(p.id);
     if (selected.has(p.id) && choice.mode !== 'project' && !picker.overviews.has(p.id) && !choice.loading && !choice.error) {
@@ -84,8 +150,13 @@ function taskProjectPickerInput(selector, event) {
   const row = target.closest('[data-project-id]');
   if (row && target.dataset.choice) {
     const choice = taskProjectPickers.get(selector).choices.get(row.dataset.projectId);
+    if (target.type === 'radio' && !target.checked) return;
     choice[target.dataset.choice] = target.value;
     if (target.dataset.choice === 'branch') choice.branchEdited = true;
+    if (target.dataset.choice === 'mode') choice.expanded = true;
+    const data = taskProjectPickers.get(selector).rows.find(item => item.project.id === row.dataset.projectId);
+    const summary = row.querySelector('[data-choice-summary]');
+    if (summary && data) summary.textContent = window.WorkHubUI.projectChoiceSummary(data);
   }
   // Keep text inputs in place while typing; changing mode rebuilds its controls.
   if (event.type === 'change' && (target.dataset.choice === 'mode' || target.name === 'project_ids')) refreshTaskProjectPicker(selector);
@@ -94,8 +165,8 @@ function taskProjectPickerInput(selector, event) {
 function taskProjectPickerReady(selector) {
   const picker = taskProjectPickers.get(selector);
   return taskPickerSelection(selector).every(m => {
-    if (m.mode === 'existing') return !picker.choices.get(m.project_id)?.error && !!picker.overviews.get(m.project_id)?.branches.some(b => b.kind === 'local' && b.name === m.branch && !b.worktrees.length);
-    return m.mode === 'project' || (m.mode === 'worktree' ? !!m.path : !!m.branch && !!m.source);
+    const row = picker?.rows.find(item => item.project.id === m.project_id);
+    return !!row && window.WorkHubUI.projectChoiceReady(row);
   });
 }
 
@@ -111,7 +182,7 @@ function renderRequirements() {
   if (!taskInventory.requirements.length) return empty('为下一项开发工作，创建一个任务', '选择项目及其工作目录，围绕同一个目标组织开发工作。', 'new-requirement', '创建第一个任务');
   const text = $('#search').value.trim().toLowerCase();
   const reqs = taskInventory.requirements.filter(q => window.WorkHubUI.taskMatches(q, $('#taskStatusFilter')?.value || 'all') && ($('#archiveFilter').checked || q.state !== 'archived') && `${q.name} ${q.description || ''} ${q.slug} ${q.branch} ${taskBranchSummary(q)} ${q.environment_name}`.toLowerCase().includes(text));
-  if (!reqs.length) return empty('没有匹配的任务', '尝试其他关键词，或勾选“显示归档”。');
+  if (!reqs.length) return empty('没有匹配的任务', '可以清除搜索与状态筛选，返回未归档任务列表。', 'clear-task-filters', '清除搜索与筛选');
   return window.WorkHubUI.tasks(reqs);
 }
 
@@ -137,7 +208,7 @@ function openRequirement() {
 
 function renderRequirementProjectOptions(selectID = null) {
   const projects = requirementEnvironmentData?.projects || [];
-  const selected = new Set([...$('#projectPicker').querySelectorAll('input:checked')].map(input => input.value));
+  const selected = new Set([...$('#projectPicker').querySelectorAll('input[name="project_ids"]:checked')].map(input => input.value));
   if (selectID) selected.add(selectID);
   renderTaskProjectPicker('#projectPicker', projects, selected, $('#requirementEnvironment').value, 'codex/' + requirementDraftSlug);
   updatePreview();
@@ -207,7 +278,7 @@ $('#requirementForm').addEventListener('change', updatePreview);
 $('#requirementForm').addEventListener('submit', async event => {
   if ($('#requirementSubmit').disabled) { event.preventDefault(); return; }
   event.preventDefault(); const data = new FormData(event.target);
-  const projectIDs = [...$('#projectPicker').querySelectorAll('input:checked')].map(i => i.value);
+  const projectIDs = [...$('#projectPicker').querySelectorAll('input[name="project_ids"]:checked')].map(i => i.value);
   const body = { name: data.get('name'), slug: requirementDraftSlug, description: data.get('description'), project_ids: projectIDs, members: taskPickerSelection('#projectPicker') };
   const environment = $('#requirementEnvironment').value;
   let created;

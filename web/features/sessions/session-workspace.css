@@ -97,8 +97,14 @@
 .session-browser-context { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .session-browser-item-context { display: grid; gap: 3px; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--muted-foreground); }
 .session-browser-items > li { position: relative; min-width: 0; }
-.has-session-menu .session-browser-item { padding-right: 32px; }
-.session-item-menu { position: absolute; top: 9px; right: 3px; z-index: 1; }
+.has-session-menu .session-browser-item { padding-right: 40px; }
+.session-item-menu, .ui-session-menu { position: absolute; top: 9px; right: 7px; z-index: 1; }
+.ui-session-menu { opacity: 0; }
+.has-session-menu:hover .ui-session-menu, .has-session-menu:focus-within .ui-session-menu, .ui-session-menu:has([aria-expanded="true"]) { opacity: 1; }
+.ui-session-menu .ui-menu-trigger { width: 26px; height: 26px; padding: 5px; border: 0; box-shadow: none; color: var(--muted-foreground); }
+.ui-session-menu .ui-menu-trigger:hover, .ui-session-menu .ui-menu-trigger[aria-expanded="true"] { background: var(--accent); color: var(--foreground); }
+.ui-session-menu .ui-menu-trigger svg { width: 15px; height: 15px; }
+@media (hover: none) { .ui-session-menu { opacity: 1; } }
 .session-item-menu > summary { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; list-style: none; cursor: pointer; border-radius: 5px; color: var(--muted-foreground); }
 .session-item-menu > summary::-webkit-details-marker { display: none; }
 .session-item-menu > summary:hover { background: var(--muted); }

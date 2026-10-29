@@ -2,6 +2,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Action, Feedback, Field, ModalFooter, ModalHeader, NativeSelect, Option, Preview } from "./shared"
+import "./task-forms.css"
+
+function PickerSearch({ id, label = "搜索项目名称或路径" }: { id: string; label?: string }) {
+  return <div className="task-picker-search"><label className="sr-only" htmlFor={`${id}Search`}>{label}</label><Input id={`${id}Search`} type="search" placeholder={label} data-picker-search={id} aria-controls={id} autoComplete="off" /><p id={`${id}Count`} data-picker-count={id} className="task-picker-count" role="status" aria-live="polite" /></div>
+}
 
 export function ProjectForm() {
   return <form id="projectForm"><ModalHeader id="projectDialogTitle" title="添加项目" eyebrow="ADD PROJECT" /><p className="dialog-description">登记仓库主目录，自动发现它已有的全部 worktree。</p>
@@ -14,21 +19,21 @@ export function ProjectForm() {
 }
 
 export function TaskForm() {
-  return <form id="requirementForm"><ModalHeader id="requirementDialogTitle" title="创建任务" eyebrow="NEW TASK" /><p className="dialog-description">围绕一项开发目标，选择参与项目，可使用原目录、已有 Worktree，或使用新分支或已有分支创建 Worktree。</p>
+  return <form id="requirementForm" className="task-dialog-form"><ModalHeader id="requirementDialogTitle" title="创建任务" eyebrow="NEW TASK" /><div className="task-dialog-scroll"><p className="dialog-description">填写开发目标并选择项目；每个项目的目录与分支可单独配置。</p>
     <Field id="requirementEnvironment" label="任务执行环境" required help="只能关联此环境中的项目，创建后任务环境固定。"><NativeSelect id="requirementEnvironment" required /></Field>
     <div><Field id="requirementName" label="任务名称" required><Input id="requirementName" name="name" required maxLength={100} placeholder="例如：订单审批流程" /></Field></div>
     <Field id="requirementDescription" label="任务说明"><Textarea id="requirementDescription" name="description" rows={3} maxLength={6000} placeholder="描述开发目标、涉及的修改和完成标准，新建任务会话时会提供这份说明。" /></Field>
 
-    <div className="mb-5"><div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium"><span>参与项目</span><Button type="button" variant="outline" size="sm" id="registerNewTaskProject">＋ 登记新项目</Button></div><div id="projectPicker" className="project-picker" /></div>
-    <Preview title="项目工作目录预览" id="workspacePreview" /><Feedback id="requirementError" variant="destructive" hidden />
+    <div className="mb-5"><div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium"><span>参与项目 <small className="text-muted-foreground">最多 30 个</small></span><Button type="button" variant="outline" size="sm" id="registerNewTaskProject">＋ 登记新项目</Button></div><PickerSearch id="projectPicker" /><div id="projectPicker" className="project-picker" /></div>
+    <details className="task-preview-details"><summary>查看工作目录预览</summary><Preview title="项目工作目录预览" id="workspacePreview" /></details><Feedback id="requirementError" variant="destructive" hidden /></div>
     <ModalFooter note="创建前检查全部仓库，已有目录和分支不会被覆盖。"><Button type="submit" id="requirementSubmit">创建任务</Button></ModalFooter>
   </form>
 }
 
 export function TaskProjectsForm() {
-  return <form id="requirementProjectsForm"><ModalHeader id="requirementProjectsTitle" title="添加项目" eyebrow="TASK PROJECTS" /><p className="dialog-description" id="requirementProjectsDescription" />
-    <div className="mb-5"><div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium"><span>选择尚未关联的项目</span><Button type="button" variant="outline" size="sm" id="registerRequirementProject">＋ 登记新项目</Button></div><div id="requirementProjectPicker" className="project-picker" /></div>
-    <Preview title="新增项目的工作目录" id="requirementProjectsPreview" /><Feedback id="requirementProjectsError" variant="destructive" hidden />
+  return <form id="requirementProjectsForm" className="task-dialog-form"><ModalHeader id="requirementProjectsTitle" title="添加项目" eyebrow="TASK PROJECTS" /><div className="task-dialog-scroll"><p className="dialog-description" id="requirementProjectsDescription" />
+    <div className="mb-5"><div className="mb-2 flex items-center justify-between gap-3 text-sm font-medium"><span>选择尚未关联的项目</span><Button type="button" variant="outline" size="sm" id="registerRequirementProject">＋ 登记新项目</Button></div><PickerSearch id="requirementProjectPicker" /><div id="requirementProjectPicker" className="project-picker" /></div>
+    <details className="task-preview-details"><summary>查看新增目录预览</summary><Preview title="新增项目的工作目录" id="requirementProjectsPreview" /></details><Feedback id="requirementProjectsError" variant="destructive" hidden /></div>
     <ModalFooter note="每个项目可分别选择工作目录与来源分支。"><Button type="submit" id="requirementProjectsSubmit" disabled>添加项目</Button></ModalFooter>
   </form>
 }
@@ -38,8 +43,8 @@ export function WorktreeForm() {
     <form id="worktreeForm" hidden>
       <Field id="worktreeSlug" label="工作标识" required help="用于总目录名；多个项目使用相同标识可集中到同一目录。已关联任务的目录，请在对应任务页面管理。"><Input id="worktreeSlug" name="slug" required maxLength={64} pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}" placeholder="例如：order-approval" /></Field>
       <Field id="worktreeMode" label="分支方式"><NativeSelect id="worktreeMode" name="mode"><Option value="new">新建分支</Option><Option value="existing">使用已有本地分支</Option></NativeSelect></Field>
-      <div id="worktreeNewFields" className="form-grid"><Field id="worktreeBranch" label="新分支名称" required help="默认 codex/工作标识，可填写自己的分支名。"><Input id="worktreeBranch" name="branch" required maxLength={160} placeholder="codex/order-approval" /></Field><Field id="worktreeSource" label="来源分支" required><NativeSelect id="worktreeSource" name="source" required /></Field></div>
-      <div id="worktreeExistingField" hidden><Field id="worktreeExisting" label="已有本地分支" required help="已被其他 worktree 占用的分支不可重复检出。"><NativeSelect id="worktreeExisting" disabled required /></Field></div>
+      <div id="worktreeNewFields" className="form-grid"><Field id="worktreeBranch" label="新分支名称" required help="默认 codex/工作标识，可填写自己的分支名。"><Input id="worktreeBranch" name="branch" required maxLength={160} placeholder="codex/order-approval" /></Field><Field id="worktreeSource" label="来源分支" required><NativeSelect id="worktreeSource" name="source" data-searchable-select required /></Field></div>
+      <div id="worktreeExistingField" hidden><Field id="worktreeExisting" label="已有本地分支" required help="已被其他 worktree 占用的分支不可重复检出。"><NativeSelect id="worktreeExisting" data-searchable-select disabled required /></Field></div>
       <Feedback id="worktreeSourceNote" role="status" className="mb-4 bg-muted text-muted-foreground" /><Preview title="即将创建的 Worktree 目录" id="worktreePath" />
       <p className="dialog-description">独立创建后显示为“未关联任务”。创建新目录会保留原目录的分支和未提交修改。</p>
       <ModalFooter><Button id="worktreeSubmit" type="submit">创建 Worktree</Button></ModalFooter>
@@ -66,10 +71,10 @@ export function TaskEditForm() {
   </form>
 }
 export function TaskDirectoryForm() {
-  return <form id="taskDirectoryForm"><ModalHeader id="taskDirectoryTitle" title="更换工作目录" eyebrow="WORKING DIRECTORY" />
+  return <form id="taskDirectoryForm" className="task-dialog-form"><ModalHeader id="taskDirectoryTitle" title="更换工作目录" eyebrow="WORKING DIRECTORY" /><div className="task-dialog-scroll">
     <p className="dialog-description" id="taskDirectoryCurrent" /><div id="taskDirectoryPicker" />
     <Preview title="将改为使用" id="taskDirectoryPreview" />
-    <Feedback id="taskDirectoryError" variant="destructive" hidden />
+    <Feedback id="taskDirectoryError" variant="destructive" hidden /></div>
     <ModalFooter note="旧目录、分支、代码和已有会话均保留。"><Button type="submit" id="taskDirectorySubmit">确认更换</Button></ModalFooter>
   </form>
 }

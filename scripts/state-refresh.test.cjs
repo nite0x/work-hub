@@ -28,7 +28,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
         value: '', checked: false, hidden: false, writes: 0, scrollTop: 0, dataset: {},
         style: {setProperty() {}}, getBoundingClientRect() { return {width: 0}; },
         setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
-        querySelector: element, contains() { return false; },
+        querySelector: element, contains() { return false; }, closest() { return null; },
         classList: { toggle() {}, remove() {} }, addEventListener() {}, querySelectorAll() { return []; },
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
@@ -200,7 +200,7 @@ test('the first completed check enables project actions even with no Git changes
   await h.refresh(snapshot());
   assert.equal(h.element('#content').writes, 2);
   assert.equal(markup(h.element('#content').innerHTML).querySelector('[data-project-open-primary]').disabled, false);
-  assert.match(h.element('#content').innerHTML, /干净/);
+  assert.match(h.element('#content').innerHTML, /无未提交改动/);
 });
 
 test('real status changes are rendered, including errors and branch drift', async () => {

@@ -17,7 +17,7 @@ function refreshRequirementProjectPicker(selectID = null) {
   if (!$('#requirementProjectsDialog').open) return;
   const q = state.requirements.find(q => q.id === requirementProjectsID);
   if (!q) { $('#requirementProjectsDialog').close(); return; }
-  const selected = new Set([...$('#requirementProjectPicker').querySelectorAll('input:checked')].map(i => i.value));
+  const selected = new Set([...$('#requirementProjectPicker').querySelectorAll('input[name="project_ids"]:checked')].map(i => i.value));
   if (selectID) selected.add(selectID);
   const available = state.projects.filter(p => !q.members.some(m => m.project_id === p.id));
   $('#requirementProjectsDescription').textContent = `为“${q.name}”添加 ${environmentName()} 中的项目，可使用已有目录或新建工作目录。最多关联 30 个项目，当前已有 ${q.members.length} 个。`;
@@ -28,7 +28,7 @@ function refreshRequirementProjectPicker(selectID = null) {
 function updateRequirementProjectsPreview() {
   const q = state.requirements.find(q => q.id === requirementProjectsID);
   if (!q) return;
-  const selected = [...$('#requirementProjectPicker').querySelectorAll('input:checked:not(:disabled)')].map(i => state.projects.find(p => p.id === i.value)).filter(Boolean);
+  const selected = [...$('#requirementProjectPicker').querySelectorAll('input[name="project_ids"]:checked:not(:disabled)')].map(i => state.projects.find(p => p.id === i.value)).filter(Boolean);
   const members = taskPickerSelection('#requirementProjectPicker');
   $('#requirementProjectsPreview').textContent = members.length ? members.map(m => {
     const p = state.projects.find(p => p.id === m.project_id);
@@ -48,7 +48,7 @@ $('#requirementProjectsForm').addEventListener('submit', async event => {
   event.preventDefault();
   if (state.busy || $('#requirementProjectsSubmit').disabled) return;
   const id = requirementProjectsID;
-  const project_ids = [...$('#requirementProjectPicker').querySelectorAll('input:checked:not(:disabled)')].map(i => i.value);
+  const project_ids = [...$('#requirementProjectPicker').querySelectorAll('input[name="project_ids"]:checked:not(:disabled)')].map(i => i.value);
   $('#requirementProjectsSubmit').disabled = true;
   try {
     await mutation('正在添加项目并准备工作目录', async () => {

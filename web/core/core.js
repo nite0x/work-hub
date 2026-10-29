@@ -19,6 +19,11 @@ let toastTimer;
 function toast(message, error = false) {
   clearTimeout(toastTimer);
   $('#toastMessage').textContent = message;
+  if (window.WorkHubUI.notifyWorkspace) {
+    $('#toast').hidden = true;
+    window.WorkHubUI.notifyWorkspace(message, error);
+    return;
+  }
   $('#toast').classList.toggle('error', error);
   $('#toast').hidden = false;
   toastTimer = setTimeout(() => { $('#toast').hidden = true; }, error ? 9000 : 4500);

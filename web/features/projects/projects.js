@@ -4,6 +4,8 @@ let projectAddedCallback = null;
 let projectOpenTool;
 let projectFilter = 'all';
 let projectDetailOpen = false;
+const projectDirectoryFilters = new Map();
+function projectDirectoryFilterKey(id) { return JSON.stringify([activeEnvironment, id]); }
 
 const projectWidthKey = 'workhub:project-list-width:v1';
 let projectListWidth = 248;
@@ -125,10 +127,13 @@ document.addEventListener('scroll', positionOpenTaskMenus, true);
 window.addEventListener('resize', positionOpenTaskMenus);
 
 function renderProjects() {
+  if (!state.loaded) return '<div class="loading">正在读取当前环境的项目…</div>';
   if (!state.projects.length) return empty('你的项目，从这里连接', '输入已有 Git 仓库的主目录。已有 worktree 会自动发现，后续每 10 秒刷新本地状态。', 'new-project', '添加第一个项目');
   const text = $('#search').value.trim().toLowerCase();
   const projects = state.projects.filter(p => `${p.name} ${p.path}`.toLowerCase().includes(text));
-  return window.WorkHubUI.projects(projects, state.selectedProject, preferredProjectOpenTool(), projectFilter, projectDetailOpen);
+  const visible = projects.filter(p => projectFilter === 'dirty' ? p.worktrees.some(t => (t.dirty || 0) > 0) : projectFilter === 'error' ? p.error || p.worktrees.some(t => t.missing || t.prunable || t.error) : true);
+  const selected = visible.find(p => p.id === state.selectedProject) || visible[0];
+  return window.WorkHubUI.projects(projects, state.selectedProject, preferredProjectOpenTool(), projectFilter, projectDetailOpen, state.requirements, projectDirectoryFilters.get(projectDirectoryFilterKey(selected?.id)) || 'all', !!text);
 }
 
 function openProject(onAdded = null, environment = activeEnvironment) {
