@@ -11,7 +11,7 @@ import { ProjectForm, TaskForm, TaskProjectsForm, TaskEditForm, TaskDirectoryFor
 import { workspaceUI } from "./workspace/renderers"
 import { SettingsPage, EnvironmentForm } from "./workspace/settings"
 import { SessionPickerDialog, CommandOutputDialog } from "./workspace/sessions"
-import { SessionBrowser, ConversationDialogHeader } from "./workspace/session-browser"
+import { SessionBrowser } from "./workspace/session-browser"
 import "./styles.css"
 import "./workspace/interactions.css"
 import { TaskReviewDialog, ChangesDialog } from "./workspace/task-review"
@@ -23,7 +23,7 @@ function SearchField() {
   return (
     <div className="relative">
       <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input id="search" type="search" placeholder="搜索任务名称、分支…" aria-label="搜索" className="h-9 w-56 pl-9 text-sm max-sm:w-44" />
+      <Input id="search" type="search" placeholder="搜索任务名称、分支…" aria-label="搜索" className="h-9 w-56 pl-9 text-sm max-sm:w-44 [.tasks-page_&]:w-full" />
     </div>
   )
 }
@@ -84,8 +84,7 @@ mount("settingsPage", <SettingsPage />)
 mount("environmentDialog", <EnvironmentForm />)
 mount("sessionDialog", <SessionPickerDialog />)
 mount("sessionCommandOutputDialog", <CommandOutputDialog />)
-mount("sessionBrowserHome", <SessionBrowser />)
-mount("conversationDialogHeader", <ConversationDialogHeader />)
+mount("sessionPageMount", <SessionBrowser />)
 mount("taskReviewDialog", <TaskReviewDialog />)
 mount("changesDialog", <ChangesDialog />)
 setupWorkspaceInteractions()

@@ -2,6 +2,7 @@ import type { ThreadMessageLike } from "@assistant-ui/react";
 import type {ApprovalChoice, Elicitation} from "./approval";
 
 export interface Entry {
+  file_changes?: {path: string; additions: number; deletions: number}[];
   id: string; turn_id: string; kind: string; text?: string; command?: string; cwd?: string;
   tool?: string; images?: string[]; local_images?: Record<string,string>; status?: string; output?: string | null; exit_code?: number | null; duration_ms?: number | null;
   delivery?: string; questions?: Question[]; question_status?: string;
@@ -65,8 +66,8 @@ export function convertEntry(entry: Entry): ThreadMessageLike {
   if (entry.kind === "assistant") return { id, role: "assistant", status, content: [{type: "text", text: cleanText(entry.text)}] };
   // Feed the official ToolFallback its normal args/result shape. Output is a
   // result, never a command argument, and remains available after expansion.
-  const args: Record<string,string> = entry.kind === "change"
-    ? {changes: cleanText(entry.text), ...(entry.cwd ? {cwd: cleanText(entry.cwd)} : {})}
+  const args: Record<string, string | NonNullable<Entry["file_changes"]>> = entry.kind === "change"
+    ? {changes: cleanText(entry.text), ...(entry.file_changes ? {files: entry.file_changes} : {}), ...(entry.cwd ? {cwd: cleanText(entry.cwd)} : {})}
     : entry.kind === "activity" ? {activity: cleanText(entry.text)} : {command: cleanText(entry.command), ...(entry.cwd ? {cwd: cleanText(entry.cwd)} : {})};
   const result = {status: entry.status || "unknown", ...(entry.output != null ? {output: cleanText(entry.output)} : {}), ...(entry.exit_code != null ? {exit_code: entry.exit_code} : {}), ...(entry.duration_ms != null ? {duration_ms: entry.duration_ms} : {})};
   return { id, role: "assistant", status, content: [{type: "tool-call", toolCallId: id, toolName: entry.tool || ({command:"执行命令",change:"文件修改"}[entry.kind] || entry.kind), args, argsText: JSON.stringify(args, null, 2), ...(entry.status !== "inProgress" || entry.output != null ? {result} : {}), ...(entry.status === "inProgress" ? {isPreliminary: true} : {}), ...(entry.status === "failed" ? {isError: true} : {})}] };

@@ -1,7 +1,6 @@
 package project
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -76,6 +75,7 @@ func (a *Service) ChangesHandler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "请选择工作区或暂存区")
 		return
 	}
+	format := "patch"
 	var result workspace.GitPreview
 	if selected.Untracked {
 		full := platform.JoinWorkspacePath(t.Path, file)
@@ -88,7 +88,8 @@ func (a *Service) ChangesHandler(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, 422, "无法预览文件："+readErr.Error())
 			return
 		}
-		result.Text = fmt.Sprintf("未跟踪文件 · %s\n\n%s", file, content.Text)
+		result.Text = content.Text
+		format = "file"
 	} else {
 		args := []string{"--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-color"}
 		if mode == "index" {
@@ -105,7 +106,8 @@ func (a *Service) ChangesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if result.Text == "" {
 			result.Text = "此区域没有文本差异。可切换工作区／暂存区查看。"
+			format = "text"
 		}
 	}
-	httpx.WriteJSON(w, 200, result)
+	httpx.WriteJSON(w, 200, map[string]any{"text": result.Text, "truncated": result.Truncated, "format": format, "name": file})
 }

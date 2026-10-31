@@ -48,7 +48,7 @@
     <nav aria-label="主导航">
       <button class="nav-item active" data-view="requirements" aria-label="任务" title="任务"><span class="nav-icon" aria-hidden="true">▤</span><span class="nav-text">任务</span><span class="nav-count" id="reqCount">0</span></button>
       <button class="nav-item" data-view="projects" aria-label="项目" title="项目"><span class="nav-icon" aria-hidden="true">◇</span><span class="nav-text">项目</span><span class="nav-count" id="projectCount">0</span></button>
-      <button class="nav-item" data-view="sessions" aria-label="会话" title="会话"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-text">会话</span><span id="sessionNavigationStatus" class="session-navigation-status" role="status"></span></button>
+      <button class="nav-item" data-view="sessions" aria-label="对话" title="对话"><span class="nav-icon" aria-hidden="true">◌</span><span class="nav-text">对话</span><span id="sessionNavigationStatus" class="session-navigation-status" role="status"></span></button>
     </nav>
     <section id="conversationShortcuts" class="conversation-shortcuts shadcn-scope" aria-label="对话快捷入口"></section>
     <footer class="sync workspace-status sidebar-footer" aria-label="工作台状态">
@@ -62,15 +62,23 @@
   <div class="shell">
     <main>
       <a href="#/requirements" class="workspace-back" id="backToRequirements" hidden>← 返回任务列表</a>
-      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和会话。</p></div><span id="newTaskButton" class="shadcn-scope"></span><div id="taskPageActions" hidden></div></div>
+      <div class="page-heading"><div><div class="eyebrow" id="eyebrow">TASKS</div><h1 id="pageTitle" tabindex="-1">任务</h1><p id="pageSubtitle">围绕一项开发目标，集中管理相关项目的工作目录、分支和对话。</p></div><span id="newTaskButton" class="shadcn-scope"></span><div id="taskPageActions" hidden></div></div>
       <div id="offlineFeedback" class="shadcn-scope"></div>
       <section id="stats" class="stats" aria-label="工作台统计"></section>
       <section id="settingsPage" class="settings-page shadcn-scope" aria-label="设置" hidden></section>
       <section class="content-panel" id="workContent">
-        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle" tabindex="-1">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><div class="shadcn-scope" id="archiveFilterWrap"></div><div class="shadcn-scope" id="taskStatusFilterWrap"></div><span id="projectAddButton" class="shadcn-scope" hidden></span></div></div>
-        <section id="taskProjectsView" class="task-projects-view" aria-label="项目工作区"><div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div></section>
+        <aside id="taskBrowser" class="task-browser shadcn-scope" aria-label="任务列表" hidden>
+          <div class="task-browser-header">
+            <div class="task-browser-heading"><h2>任务</h2><span id="taskCreateSlot"></span></div>
+            <div id="taskToolbarSlot"></div>
+          </div>
+          <div id="taskListContent" class="task-list-scroll" aria-label="全部任务"></div>
+        </aside>
+        <div class="panel-toolbar" id="panelToolbar"><div class="panel-title" id="panelTitle" tabindex="-1">全部任务</div><div class="toolbar-actions"><div class="shadcn-scope" id="projectEnvironmentWrap" hidden></div><div id="searchField" class="shadcn-scope"></div><details class="task-list-filters" id="taskListFilters"><summary>筛选</summary><div class="task-list-filter-options"><div class="shadcn-scope" id="archiveFilterWrap"></div><div class="shadcn-scope" id="taskStatusFilterWrap"></div></div></details><span id="projectAddButton" class="shadcn-scope" hidden></span></div></div>
+        <div id="taskListResize" class="task-resize-handle" role="separator" tabindex="0" aria-label="调整任务列表宽度" aria-orientation="vertical" aria-controls="taskBrowser taskDetailPane" aria-valuemin="240" aria-valuemax="640" aria-valuenow="300" hidden></div>
+        <section id="taskDetailPane" class="task-detail-pane"><div id="taskHeadingSlot"></div><section id="taskProjectsView" class="task-projects-view" aria-label="项目工作区"><div id="content" aria-live="polite"><div class="loading">正在读取本地状态…</div></div></section></section>
       </section>
-      <section id="sessionsPage" class="sessions-page" aria-label="会话" hidden><div id="sessionPageMount"></div></section>
+      <section id="sessionsPage" class="sessions-page" aria-label="对话" hidden><div id="sessionPageMount"></div></section>
     </main>
   </div>
   <dialog id="environmentDialog" class="shadcn-scope" aria-labelledby="environmentTitle"></dialog>
@@ -86,8 +94,6 @@
   <dialog id="commandDialog" class="wide-dialog shadcn-scope" aria-labelledby="commandTitle" aria-describedby="commandDescription"></dialog>
   <div class="busy-panel" id="busyPanel" role="status" hidden><span class="spinner"></span><div><strong id="busyTitle">正在创建任务</strong><small>请稍候，正在操作本地仓库…</small></div></div>
   <div id="toast" class="toast shadcn-scope" role="status" hidden></div>
-  <div id="sessionBrowserHome" hidden></div>
-  <dialog id="conversationDialog" class="conversation-dialog shadcn-scope" aria-labelledby="conversationDialogTitle" aria-describedby="conversationDialogScope"><div id="conversationDialogHeader"></div><div id="sessionModalMount"></div></dialog>
   <dialog id="sessionDialog" class="wide-dialog shadcn-scope" aria-labelledby="sessionDialogTitle"></dialog>
   <dialog id="sessionCommandOutputDialog" class="session-command-output-dialog shadcn-scope" aria-labelledby="sessionCommandOutputTitle"></dialog>
 </body>

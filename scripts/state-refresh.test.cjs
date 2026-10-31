@@ -20,16 +20,17 @@ function snapshot(updatedAt = '2026-10-22T05:23:13Z', refreshing = false) {
 
 function harness({ fullPage = false, readOnly = false } = {}) {
   const elements = new Map();
+  let mockDocument;
   const element = selector => {
     if (!elements.has(selector)) {
       let html = '';
       elements.set(selector, {
+        get ownerDocument() { return mockDocument; },
         content: selector === 'meta[name="session-mode"]' ? (readOnly ? 'read-only' : 'interactive') : 'token',
         value: '', checked: false, hidden: false, writes: 0, scrollTop: 0, dataset: {},
         style: {setProperty() {}}, getBoundingClientRect() { return {width: 0}; },
-        setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
-        querySelector: element,
-      getElementById: id => element('#' + id), contains() { return false; }, closest() { return null; },
+        append() {}, insertBefore() {}, setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
+        querySelector: element, contains() { return false; }, closest() { return null; },
         classList: { toggle() {}, remove() {} }, addEventListener() {}, querySelectorAll() { return []; },
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
@@ -47,7 +48,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
     document: {
       body: element('body'),
       querySelector: element,
-      getElementById: id => element('#' + id),
+      getElementById: id => element("#" + id),
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
@@ -68,6 +69,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       return { ok: true, json: async () => structuredClone(result) };
     }
   });
+  mockDocument = context.document;
   context.document.defaultView = context.window;
   const scripts = fullPage
     ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer(?: data-ui-bundle)?><\/script>/g)]
@@ -109,7 +111,7 @@ test('listing all tasks does not connect the previously selected environment', a
   await h.refresh(snapshot());
   assert.deepEqual(h.requests.map(r => r.url), ['/api/task-inventory']);
   assert.equal(h.requests[0].options.headers['X-Environment-ID'], 'local');
-  assert.match(h.element('#content').innerHTML, /打开任务 Task/);
+  assert.match(h.element('#taskListContent').innerHTML, /打开任务 Task/);
 });
 
 function prepareEnvironmentPicker(h) {
@@ -243,7 +245,7 @@ for (const readOnly of [true, false]) {
     vm.runInContext("state.view = 'projects'; state.selectedProject = 'app'; render()", h.context);
     assert.match(h.element('#content').innerHTML, /Git 操作 · 分支管理/);
     vm.runInContext("state.view = 'requirements'; state.selectedRequirement = null; render()", h.context);
-    assert.match(h.element('#content').innerHTML, /打开任务 Task/);
+    assert.match(h.element('#taskListContent').innerHTML, /打开任务 Task/);
   });
 }
 

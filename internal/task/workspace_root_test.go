@@ -32,7 +32,7 @@ func TestExistingRequirementSurvivesRootChange(t *testing.T) {
 		t.Fatalf("existing launch target changed: %d %s %v", code, raw, err)
 	}
 	code, created, raw := create(t, restarted, projectID, nil, "new-root")
-	if code != 201 || created.State != "ready" || created.Path != filepath.Join(newRoot, "new-root") {
+	if code != 201 || created.State != "ready" || created.Path != filepath.Join(restarted.Workspace.Root, "new-root") {
 		t.Fatalf("new requirement did not use new root: %d %s", code, raw)
 	}
 }

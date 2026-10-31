@@ -89,3 +89,34 @@ func TestChatWebLinksOpenExternallyWithoutNavigatingApp(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionDirectoryBrowserUsesOnlySavedRoots(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "local", true: "remote"}[remote], func(t *testing.T) {
+			a, _, c, _ := chatFixture(t)
+			if remote {
+				a.Workspace.Remote = testWorkspaceClient(t)
+			}
+			os.MkdirAll(filepath.Join(c.cwd, "src"), 0700)
+			os.WriteFile(filepath.Join(c.cwd, "src", "read.go"), []byte("package reference\n"), 0600)
+			extra := t.TempDir()
+			os.WriteFile(filepath.Join(extra, "extra.txt"), []byte("approved root"), 0600)
+			a.Workspace.Store.SaveSessionDirectories("session", []string{extra})
+			base := "/api/sessions/session/files?"
+			for _, q := range []string{"dir=src", "file=src/read.go", "path=" + url.QueryEscape(extra) + "&file=extra.txt"} {
+				code, raw := call(t, a, "GET", base+q, nil)
+				if code != 200 {
+					t.Fatalf("%s: %d %s", q, code, raw)
+				}
+			}
+			for _, q := range []string{"file=../outside", "file=.git/config", "path=" + url.QueryEscape(t.TempDir()) + "&dir="} {
+				if code, raw := call(t, a, "GET", base+q, nil); code == 200 {
+					t.Fatalf("unsafe root read %s: %s", q, raw)
+				}
+			}
+			if code, _ := call(t, a, "GET", "/api/sessions/missing/files", nil); code == 200 {
+				t.Fatal("unknown session accepted")
+			}
+		})
+	}
+}

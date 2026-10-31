@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"worktree-hub/internal/workspace"
 )
 
 func TestWindowsTerminalCommandConflict(t *testing.T) {
@@ -34,7 +36,7 @@ func TestWindowsTerminalCommandConflict(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := windowsTerminalCommandConflict("session", windows.ComposeCommandLine(tc.args))
-			if (err != nil) != tc.conflict {
+			if (err != nil) != tc.conflict || workspace.IsSessionConflict(err) != tc.conflict {
 				t.Fatalf("conflict = %t: %v", tc.conflict, err)
 			}
 		})

@@ -19,6 +19,7 @@ export function ChatStatus({controller}: {controller: ChatController}) {
   const status = s.chat.blocked ? "conflict" : s.submitting ? "sending" : s.chat.status;
   const labels: Record<string, string> = {sending: "发送中", unknown: "原生状态待核实", handoff: "等待终端交接", idle: "可继续对话", starting: "正在连接", running: "运行中", waiting: "待确认", stopping: "正在停止", completed: "本轮已完成", interrupted: "已停止", failed: "本轮未完成", conflict: "暂不可发送"};
   const readOnly = controller.options.readOnly;
+  if (!readOnly && !s.session?.archived && status === "running" && s.chat.busy) return null;
   const text = s.session?.archived ? "已归档" : readOnly ? (s.terminal?.waiting ? "终端待确认" : s.terminal?.connected ? "终端实时同步" : "历史同步中") : s.chat.external && s.chat.busy ? status === "waiting" ? "Codex 待确认" : "Codex 中运行" : labels[status] || "可继续对话";
   const busy = !readOnly && (s.chat.busy || s.submitting);
   return <Badge variant="secondary" className="chat-status" role="status" aria-live="polite" data-state={status}>

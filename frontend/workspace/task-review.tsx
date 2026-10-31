@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { Feedback, ModalHeader, NativeSelect, Option } from "./shared"
+import { Feedback, ModalHeader } from "./shared"
 
 export interface CleanupCandidate {
   project_id: string; project_name: string; path: string; branch: string; head: string;
@@ -27,15 +27,8 @@ export function TaskReviewItems({items}: {items: CleanupCandidate[]}) {
   </article>)}</div>
 }
 export function ChangesDialog() {
-  return <><ModalHeader id="changesTitle" title="项目改动预览" eyebrow="CHANGES" />
-    <p className="dialog-description break-all" id="changesContext" />
-    <div className="changes-controls"><label htmlFor="changesMode">查看区域</label><NativeSelect id="changesMode"><Option value="working">工作区（含未跟踪文件）</Option><Option value="index">暂存区</Option></NativeSelect><Button type="button" variant="outline" id="changesRefresh">刷新</Button></div>
-    <div className="changes-layout"><nav id="changesFiles" aria-label="改动文件" /><div className="min-w-0"><p id="changesTruncated" role="status" hidden>差异较大，仅显示前 256 KiB；请在编辑器中查看完整内容。</p><pre id="changesText" className="changes-text" tabIndex={0} aria-label="只读文件差异" /></div></div>
-    <Feedback id="changesError" variant="destructive" hidden />
+  return <><ModalHeader id="changesTitle" title="项目文件与改动" eyebrow="FILES & CHANGES" />
+    <div id="changesBrowser" />
     <div className="dialog-footer"><Button type="button" variant="outline" className="close-dialog">关闭</Button></div>
   </>
-}
-export function ChangeFiles({files,selected}: {files: ChangedFile[]; selected: string}) {
-  if (!files.length) return <p className="quiet">此区域没有改动。</p>
-  return <div className="changes-file-list">{files.map(file => <Button type="button" key={file.path} variant={file.path === selected ? "secondary" : "ghost"} className="h-auto w-full justify-start whitespace-normal text-left break-all" data-change-file={file.path} aria-pressed={file.path === selected}><code className="shrink-0">{file.untracked ? "??" : `${file.index}${file.working}`}</code><span>{file.previous ? `${file.previous} → ` : ""}{file.path}</span></Button>)}</div>
 }

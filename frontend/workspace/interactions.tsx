@@ -71,11 +71,12 @@ function ActionMenu({ source, label, iconOnly }: { source: HTMLDetailsElement; l
   const portal = source.closest("dialog") || document.body
   const trigger = source.querySelector("summary")
   const isSessionMenu = source.classList.contains("session-item-menu")
+  const isSplitMenu = source.classList.contains("task-action-menu")
   return <DropdownMenu.Root modal={false} open={source.open} onOpenChange={open => { source.open = open }}>
     <DropdownMenu.Trigger asChild>
-      <Button type="button" variant={source.closest(".task-split-accent") ? "default" : isSessionMenu ? "ghost" : "outline"} size={iconOnly ? isSessionMenu ? "icon-xs" : "icon-sm" : "sm"} className="ui-menu-trigger" aria-label={label}
+      <Button type="button" variant={source.closest(".task-split-accent") ? "default" : isSessionMenu ? "ghost" : "outline"} size={iconOnly ? isSessionMenu ? "icon-xs" : "icon-sm" : "sm"} className={`ui-menu-trigger${isSplitMenu ? " rounded-l-none border-l-0" : ""}`} aria-label={label}
         title={trigger?.getAttribute("title") || label} onClick={event => event.stopPropagation()}>
-        {iconOnly ? source.classList.contains("task-action-menu") ? <ChevronDown aria-hidden="true" /> : <Ellipsis aria-hidden="true" /> : <>{trigger?.textContent?.trim() || "更多"}<ChevronDown aria-hidden="true" /></>}
+        {iconOnly ? isSplitMenu ? <ChevronDown aria-hidden="true" /> : <Ellipsis aria-hidden="true" /> : <>{trigger?.textContent?.trim() || "更多"}<ChevronDown aria-hidden="true" /></>}
       </Button>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal container={portal}>

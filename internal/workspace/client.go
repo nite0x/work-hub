@@ -54,6 +54,8 @@ func (r Response) err() error {
 		return ErrBusy
 	}
 	switch r.Code {
+	case "session_conflict":
+		return &SessionConflictError{Message: r.Error}
 	case "not_exist":
 		return fmt.Errorf("%s: %w", r.Error, os.ErrNotExist)
 	case "exist":

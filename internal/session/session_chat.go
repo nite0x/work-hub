@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -342,12 +341,19 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			return err
 		}
 		if metadata.Thread.Status.Type == "active" {
-			return fmt.Errorf("此会话正在其他 Codex 客户端运行，请等待完成后重试")
+			return &workspace.SessionConflictError{Message: "此会话正在其他 Codex 客户端运行，请等待完成后重试"}
 		}
 		return nil
 	}
+	ownerFailure := func(err error) {
+		if workspace.IsSessionConflict(err) {
+			run.change(func(s *ChatState) { s.Status = "conflict"; s.Error = err.Error() })
+		} else {
+			fail("无法完成会话占用检查，请稍后重试：" + err.Error())
+		}
+	}
 	if err := checkOwner(); err != nil {
-		run.change(func(s *ChatState) { s.Status = "conflict"; s.Error = err.Error() })
+		ownerFailure(err)
 		return
 	}
 	var resumed struct {
@@ -372,7 +378,7 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 	}()
 	metadata.Thread.Status.Type = resumed.Thread.Status.Type
 	if err := checkOwner(); err != nil {
-		run.change(func(s *ChatState) { s.Status = "conflict"; s.Error = err.Error() })
+		ownerFailure(err)
 		return
 	}
 	params := map[string]any{"threadId": run.session, "cwd": s.Cwd, "input": chatTurnInput(text, images)}
@@ -488,13 +494,13 @@ func (a *Service) DriveChat(ctx context.Context, run *ChatRun, plan model.Launch
 			if err := a.AppTerminalConflict(run.session, s.Cwd); err != nil {
 				// An unavailable check does not establish another owner. Retry on
 				// the next tick without interrupting the turn already in progress.
-				if errors.Is(err, workspace.ErrBusy) || errors.Is(err, context.DeadlineExceeded) {
+				if !workspace.IsSessionConflict(err) {
 					continue
 				}
 				_ = run.interrupt()
 				run.change(func(s *ChatState) {
 					s.Status = "conflict"
-					s.Error = "会话占用检查未通过，已请求停止页面发起的工作：" + err.Error()
+					s.Error = "确认会话被占用，已请求停止页面发起的工作：" + err.Error()
 				})
 				return
 			}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/testutil"
 )
 
 func createSelected(t *testing.T, a *App, slug, primary string, selections ...MemberSelection) (int, model.Requirement, []byte) {
@@ -67,7 +68,7 @@ func TestTaskReusesDirectoriesAcrossTasksAndAddsMixedMembers(t *testing.T) {
 	a := testApp(t)
 	path := repo(t, "repo", "main")
 	id := register(t, a, "Repo", path)
-	external := filepath.Join(t.TempDir(), "已有 worktree")
+	external := filepath.Join(testutil.TempDir(t), "已有 worktree")
 	testGit(t, path, "worktree", "add", "-b", "existing", "--", external)
 	dirty := filepath.Join(external, "keep.txt")
 	if err := os.WriteFile(dirty, []byte("unsaved"), 0644); err != nil {
@@ -151,5 +152,32 @@ func TestTaskSelectionRejectsOtherRepositoriesAndInvalidSourceBeforeMutation(t *
 		if _, err := os.Stat(filepath.Join(a.Workspace.Root, slug)); !os.IsNotExist(err) {
 			t.Fatal("created workspace before validation")
 		}
+	}
+}
+
+func TestReusedWorktreeStoresCanonicalPathAndRejectsLinkedEntry(t *testing.T) {
+	a := testApp(t)
+	path := repo(t, "repo", "main")
+	id := register(t, a, "Repo", path)
+	root := testutil.TempDir(t)
+	external := filepath.Join(root, "existing worktree")
+	testGit(t, path, "worktree", "add", "-b", "existing", "--", external)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	code, q, raw := createSelected(t, a, "alias", id, MemberSelection{ProjectID: id, Mode: "worktree", Path: filepath.Join(alias, "existing worktree")})
+	if code != 201 || q.State != "ready" || q.Members[0].Path != external {
+		t.Fatalf("reuse alias: %d %s", code, raw)
+	}
+	if _, err := a.MakeLaunchPlan(context.Background(), q.ID); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(root, "linked-entry")
+	if err := os.Symlink(external, linked); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, raw := createSelected(t, a, "linked", id, MemberSelection{ProjectID: id, Mode: "worktree", Path: linked}); code != 422 {
+		t.Fatalf("accepted linked entry: %d %s", code, raw)
 	}
 }

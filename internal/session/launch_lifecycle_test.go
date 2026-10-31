@@ -1,12 +1,36 @@
 package session
 
 import (
+	"context"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"testing"
 
 	"worktree-hub/internal/model"
 )
+
+func TestNativeLaunchRetainsAdditionalDirectoriesWithoutManagedRelay(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("native terminal launch is used outside Linux")
+	}
+	a := testApp(t)
+	front := register(t, a, "Front", repo(t, "front", "main"))
+	back := register(t, a, "Back", repo(t, "back", "main"))
+	_, q, _ := create(t, a, front, []string{back}, "native-launch")
+	want, err := a.Tasks.MakeLaunchPlan(context.Background(), q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got model.LaunchPlan
+	a.Workspace.Launch = func(p model.LaunchPlan, _ func()) error { got = p; return nil }
+	if code, raw := call(t, a, "POST", "/api/requirements/"+q.ID+"/launch", nil); code != 200 {
+		t.Fatalf("launch: %d %s", code, raw)
+	}
+	if got.Cwd != want.Cwd || !reflect.DeepEqual(got.Args, want.Args) || !reflect.DeepEqual(got.AdditionalDirectories, want.AdditionalDirectories) || len(a.bridges) != 0 {
+		t.Fatalf("native launch changed directory access: %+v", got)
+	}
+}
 
 func TestManagedLaunchFailureIsScopedToItsSessionService(t *testing.T) {
 	if runtime.GOOS != "linux" {

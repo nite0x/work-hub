@@ -4,6 +4,8 @@ let gitViewRevision = 0;
 let gitSelectedPath = '';
 let gitRequirementID = '';
 let gitMergePreviewData = null;
+let gitMergeIntoPreviewData = null;
+let gitMergeIntoSelectionRevision = 0;
 const mergeAIRequests = new Map();
 let gitAILaunching = false;
 async function openGit(id, path = '', requirement = '') {
@@ -14,6 +16,7 @@ async function openGit(id, path = '', requirement = '') {
   gitSelectedPath = path;
   gitRequirementID = requirement;
   gitMergePreviewData = null;
+  gitMergeIntoPreviewData = null;
   $('#gitError').hidden = true;
   $('#gitAuthHelp').hidden = true;
   $('#gitResult').hidden = true;
@@ -88,7 +91,25 @@ function updateGitWorktree() {
   const upstream = gitState.branches.find(b => b.kind === 'remote' && b.name === t?.upstream);
   $('#gitMergeSource').value = upstream?.ref || '';
   clearGitMergePreview();
+  const targets = gitState.branches.filter(b => b.kind === 'local' && b.name !== t?.branch);
+  $('#gitMergeTarget').innerHTML = targets.map(b => `<option value="${esc(b.ref)}">${esc(b.name)}${b.worktrees.length ? '（已检出）' : ''}</option>`).join('');
+  $('#gitMergeTarget').disabled = !targets.length;
+  $('#gitMergeTarget').value = ['refs/heads/main', 'refs/heads/master'].find(ref => targets.some(b => b.ref === ref)) || targets[0]?.ref || '';
+  updateGitMergeInto();
   if (t?.operation === 'merge') window.WorkHubUI.selectGitTab($('#gitContent'), 'merge');
+}
+function updateGitMergeInto() {
+  gitMergeIntoPreviewData = null;
+  $('#gitMergeIntoPreview').hidden = true;
+  $('[data-action="git-merge-into"]').disabled = true;
+  const t = gitState?.project.worktrees.find(t => t.path === gitSelectedPath);
+  const target = gitState?.branches.find(b => b.ref === $('#gitMergeTarget').value);
+  const targetTrees = target?.worktrees.map(path => gitState.project.worktrees.find(t => t.path === path)) || [];
+  const blocked = targetTrees.some(t => !t || t.dirty || t.operation || t.error || t.missing || t.prunable || t.bare);
+  $('[data-action="git-merge-into-preview"]').disabled = !t?.branch || !!t.detached || !!t.operation || !target || blocked;
+  $('#gitMergeIntoDirection').textContent = target
+    ? `${t?.branch || 'detached HEAD'} → ${target.name}\n${target.worktrees.length ? '目标目录：' + target.worktrees.join('、') : '目标分支未检出，将在临时目录中完成合并。'}${blocked ? '\n目标目录不可用或有未提交修改、进行中的 Git 操作，请先处理。' : ''}`
+    : '没有其他本地分支，请先创建目标分支。';
 }
 function updateGitSwitch() {
   const b = gitState?.branches.find(b => b.ref === $('#gitSwitch').value);
@@ -166,12 +187,12 @@ async function gitOperation(body, title) {
   const environment = activeEnvironment, revision = gitViewRevision;
   const current = () => revision === gitViewRevision && environment === activeEnvironment && $('#gitDialog').open;
   const request = (path, options = {}) => api(path, {...options, environment});
-  const scopedActions = ['switch', 'adopt_branch', 'pull', 'push', 'merge_preview', 'merge', 'merge_abort'];
+  const scopedActions = ['switch', 'adopt_branch', 'pull', 'push', 'merge_preview', 'merge', 'merge_abort', 'merge_into_preview', 'merge_into'];
   if (scopedActions.includes(body.action)) {
     body.path ||= gitSelectedPath;
     const t = gitState.project.worktrees.find(t => t.path === body.path);
     if (gitRequirementID) body.requirement_id = gitRequirementID;
-    if (t?.branch) body.expected_branch = t.branch;
+    if (t?.branch) body.expected_branch ||= t.branch;
   }
   let result;
   $('#gitAuthHelp').hidden = true;
@@ -214,6 +235,7 @@ async function gitOperation(body, title) {
     else $('#gitResult').scrollIntoView({ block: 'nearest' });
     }
     buttons.forEach(([button, disabled]) => { if (button.isConnected && current()) button.disabled = disabled; });
+    if (current() && ['merge_into_preview', 'merge_into'].includes(body.action)) updateGitMergeInto();
   }
   if (result?.conflict && current()) {
     toast(`合并出现冲突（${result.conflicts.length} 个文件），正在打开 AI…`, true);
@@ -243,10 +265,11 @@ document.addEventListener('submit', event => {
 });
 document.addEventListener('change', event => {
   if (event.target.id === 'gitBranchSource') updateGitSource();
-  if (event.target.id === 'gitWorktree') updateGitWorktree();
+  if (event.target.id === 'gitWorktree') { gitMergeIntoSelectionRevision++; updateGitWorktree(); }
   if (event.target.id === 'gitSwitch') updateGitSwitch();
   if (event.target.id === 'gitPushRemote') updateGitPush();
   if (event.target.id === 'gitMergeSource') clearGitMergePreview();
+  if (event.target.id === 'gitMergeTarget') { gitMergeIntoSelectionRevision++; updateGitMergeInto(); }
 });
 document.addEventListener('input', event => { if (event.target.id === 'gitPushName') updateGitPush(); });
 document.addEventListener('click', async event => {
@@ -295,6 +318,22 @@ document.addEventListener('click', async event => {
   if (action === 'git-pull') return gitOperation({ action: 'pull', path: $('#gitWorktree').value }, '正在快进拉取当前分支');
   if (action === 'git-terminal') return gitOperation({ action: 'terminal', path: $('#gitWorktree').value }, '正在打开 Git 终端');
   if (action === 'git-push') return pushGitBranch();
+  if (action === 'git-merge-into-preview') {
+    const target = $('#gitMergeTarget').value;
+    if (!target) return;
+    const path = gitSelectedPath, project = gitState.project.id, environment = activeEnvironment, revision = gitViewRevision, selectionRevision = gitMergeIntoSelectionRevision;
+    updateGitMergeInto();
+    const result = await gitOperation({ action: 'merge_into_preview', target, path }, '正在预览当前分支合并到目标分支');
+    if (result && revision === gitViewRevision && selectionRevision === gitMergeIntoSelectionRevision && environment === activeEnvironment && gitState?.project.id === project && gitSelectedPath === path && $('#gitDialog').open) {
+      $('#gitMergeTarget').value = target;
+      gitMergeIntoPreviewData = { target, path, expected_head: result.expected_head, expected_branch: result.expected_branch, target_commit: result.target_commit };
+      $('#gitMergeIntoPreview').textContent = result.message + '\n来源目录：' + path + '\n' + (result.target_path ? '目标目录：' + result.target_path : '目标分支未检出，将在临时目录中合并。') + '\n待合入提交（最多 20 条）：\n' + (result.output || '无新增提交') + '\n当前目录保留原分支，仅合并已提交内容。';
+      $('#gitMergeIntoPreview').hidden = false;
+      $('[data-action="git-merge-into"]').disabled = false;
+    }
+    return;
+  }
+  if (action === 'git-merge-into' && gitMergeIntoPreviewData) return gitOperation({ action: 'merge_into', ...gitMergeIntoPreviewData }, '正在将当前分支合并到目标分支');
   if (action === 'git-merge-preview') {
     const source = $('#gitMergeSource').value;
     if (!source) return;

@@ -1,4 +1,4 @@
-import { Plus, Search, ArrowLeft, ArrowUpRight, X, ChevronDown, Pin, PinOff, GitBranch, SlidersHorizontal, RotateCw, Check, Folder, Ellipsis, MessageSquare, CircleAlert } from "lucide-react"
+import { Plus, Search, ArrowLeft, X, ChevronDown, Pin, PinOff, GitBranch, SlidersHorizontal, RotateCw, Check, Folder, Ellipsis, MessageSquare, CircleAlert, Files, Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -7,23 +7,31 @@ import { SessionHistoryPanel, type Session } from "./sessions"
 
 export interface ConversationScope { kind: string; id?: string; name: string; cwd?: string; environment?: string }
 export function SessionBrowser() {
-  return <div className="session-browser shadcn-scope" id="sessionBrowser" data-pane="list" hidden>
+  return <><div className="session-browser shadcn-scope" id="sessionBrowser" data-pane="list" hidden>
     <div className="session-browser-body">
       <aside className="session-browser-list" id="sessionBrowserListPane" aria-label="对话列表"><div className="session-browser-list-tools">
-        <div className="session-browser-list-heading"><strong>对话</strong><Button type="button" size="sm" variant="outline" id="newBrowserSession" data-conversation-action="new"><Plus aria-hidden="true" />新建对话</Button></div>
+        <div className="session-browser-list-heading"><strong>对话</strong>
+          <div className="session-browser-heading-actions">
+            <Button type="button" size="sm" className="h-[30px] [.has-association_&]:rounded-r-none" id="newBrowserSession" data-conversation-action="new" aria-label="新建对话"><Plus aria-hidden="true" /><span>新建对话</span></Button>
+            <details id="sessionActionPicker" className="session-action-picker" hidden><summary aria-label="更多对话操作" title="更多对话操作"><ChevronDown aria-hidden="true" /></summary>
+              <div id="taskConversationTools" className="session-action-menu" role="group" aria-label="对话操作" hidden>
+                <Button type="button" variant="ghost" size="sm" id="linkTaskConversation" data-session-action="picker" aria-label="关联已有对话">关联已有对话</Button>
+              </div>
+            </details>
+          </div>
+        </div>
     <div className="session-browser-scope" id="sessionBrowserScopeBar">
       <details className="session-scope-picker" id="sessionScopePicker"><summary aria-label="切换对话范围"><Folder aria-hidden="true" /><span id="sessionScopeLabel">全部对话</span><ChevronDown aria-hidden="true" /></summary>
-        <div className="session-scope-menu"><Label htmlFor="sessionScopeSearch">切换对话范围</Label><Input id="sessionScopeSearch" type="search" placeholder="搜索任务、项目或目录" /><Button type="button" variant="ghost" size="sm" data-conversation-action="all" id="sessionScopeAll" hidden>查看全部会话</Button><div id="sessionScopeOptions" /></div>
+        <div className="session-scope-menu" popover="manual"><Label htmlFor="sessionScopeSearch">切换对话范围</Label><Input id="sessionScopeSearch" type="search" placeholder="搜索任务、项目或目录" /><Button type="button" variant="ghost" size="sm" data-conversation-action="all" id="sessionScopeAll" hidden>查看全部对话</Button><div id="sessionScopeOptions" /></div>
       </details>
       <Button type="button" variant="ghost" size="sm" id="pinConversationDirectory" data-conversation-action="pin-directory" hidden><Pin aria-hidden="true" /><span>固定此目录</span></Button>
     </div>
         <p id="sessionBrowserContext" className="sr-only" />
-        <div id="taskConversationTools" className="task-conversation-tools" hidden><Button type="button" variant="outline" size="sm" id="linkTaskConversation" data-session-action="picker">关联已有会话</Button><span className="text-xs text-muted-foreground">仅展示明确关联的会话</span></div>
         <div className="session-browser-search-row">
-          <div className="session-browser-search"><Search aria-hidden="true" /><label className="sr-only" htmlFor="sessionBrowserSearch">搜索对话、项目或分支</label><Input id="sessionBrowserSearch" type="search" placeholder="搜索对话、项目或分支" autoComplete="off" /><button type="button" id="sessionSearchClear" data-conversation-action="clear-search" aria-label="清除搜索" title="清除搜索" hidden><X aria-hidden="true" /></button></div>
+          <div className="session-browser-search"><Search aria-hidden="true" /><label className="sr-only" htmlFor="sessionBrowserSearch">搜索对话、项目或分支</label><Input id="sessionBrowserSearch" className="px-8" type="search" placeholder="搜索对话、项目或分支" autoComplete="off" /><button type="button" id="sessionSearchClear" data-conversation-action="clear-search" aria-label="清除搜索" title="清除搜索" hidden><X aria-hidden="true" /></button></div>
           <details id="sessionFilterPicker" className="session-filter-picker"><summary aria-label="筛选对话" title="筛选环境、目录与归档"><SlidersHorizontal aria-hidden="true" /><span id="sessionFilterCount" hidden /></summary><div className="session-filter-menu" role="group" aria-label="对话筛选条件">
             <div className="session-filter-heading"><strong>筛选对话</strong><button type="button" data-conversation-action="close-filters" aria-label="关闭筛选"><X aria-hidden="true" /></button></div>
-            <label id="sessionEnvironmentField" className="session-environment-label" hidden><span>执行环境</span><NativeSelect id="sessionsEnvironment" aria-label="筛选会话环境"><option value="">全部环境</option></NativeSelect></label>
+            <label id="sessionEnvironmentField" className="session-environment-label" hidden><span>执行环境</span><NativeSelect id="sessionsEnvironment" aria-label="筛选对话环境"><option value="">全部环境</option></NativeSelect></label>
             <label id="sessionDirectoryField"><span>工作目录</span><NativeSelect id="sessionDirectoryFilter" aria-label="筛选工作目录" /></label>
             <label className="session-browser-archive"><input id="sessionBrowserArchived" type="checkbox" aria-label="查看已归档对话" /><span>仅查看已归档对话</span></label>
             <p className="session-filter-hint">筛选仅影响列表，运行中的对话会继续。</p>
@@ -31,17 +39,23 @@ export function SessionBrowser() {
         </div>
         <div id="sessionStatusFilters" className="session-status-filters" role="group" aria-label="按对话状态筛选">{[["all", "全部"], ["running", "进行中"], ["waiting", "待确认"], ["unread", "未读"]].map(([value, label]) => <button key={value} type="button" data-conversation-status={value} aria-pressed={value === "all"}>{label}<span data-status-count={value} hidden /></button>)}</div>
         <p id="sessionActiveFilterLabel" className="session-active-filter-label" hidden />
-        <div className="session-browser-list-caption"><span id="sessionBrowserCount" role="status" aria-live="polite" /><div className="session-browser-caption-actions"><Button type="button" variant="ghost" size="sm" id="sessionClearFilters" data-conversation-action="clear-filters" hidden>清除筛选</Button><Button type="button" variant="ghost" size="icon" data-conversation-action="refresh" title="刷新对话列表" aria-label="刷新会话列表"><RotateCw aria-hidden="true" /></Button></div></div>
+        <div className="session-browser-list-caption"><span id="sessionBrowserCount" role="status" aria-live="polite" /><div className="session-browser-caption-actions"><Button type="button" variant="ghost" size="sm" id="sessionClearFilters" data-conversation-action="clear-filters" hidden>清除筛选</Button><Button type="button" variant="ghost" size="icon" data-conversation-action="refresh" title="刷新对话列表" aria-label="刷新对话列表"><RotateCw aria-hidden="true" /></Button></div></div>
       </div><div id="sessionBrowserError" role="alert" hidden /><div id="sessionBrowserList" aria-label="对话结果" /></aside>
       <div id="sessionBrowserResize" className="session-browser-resize" role="separator" tabIndex={0} aria-label="调整对话列表宽度" aria-orientation="vertical" aria-controls="sessionBrowserListPane" aria-valuemin={220} aria-valuemax={520} aria-valuenow={280} />
-      <section className="session-browser-detail" aria-label="对话详情"><div className="session-browser-mobile-back"><Button type="button" size="sm" variant="ghost" data-conversation-action="back"><ArrowLeft aria-hidden="true" />对话列表</Button></div>
+      <section className="session-browser-detail" aria-label="对话详情">
+        <div className="session-reading-toolbar"><div className="session-browser-mobile-back"><Button type="button" size="sm" variant="ghost" data-conversation-action="back"><ArrowLeft aria-hidden="true" />对话列表</Button></div></div>
+        <div className="session-reading-layout" id="sessionReadingLayout"><div className="session-reading-chat">
         <div id="sessionBrowserNewDirectoryField" className="session-browser-new-directory" hidden><Label htmlFor="sessionBrowserNewDirectory">工作目录</Label><NativeSelect id="sessionBrowserNewDirectory" /></div>
-        <fieldset id="sessionBrowserAdditionalField" className="session-browser-new-directory" hidden><legend>本次会话可访问的其他项目目录</legend><div id="sessionBrowserAdditionalDirectories" /></fieldset>
+        <fieldset id="sessionBrowserAdditionalField" className="session-browser-new-directory" hidden><legend>本次对话可访问的其他项目目录</legend><div id="sessionBrowserAdditionalDirectories" /></fieldset>
         <div id="sessionBrowserEmpty" className="session-browser-empty" role="status">选择一个对话，或新建对话开始工作。</div>
         <aside id="sessionHistoryPanel" className="session-history-panel shadcn-scope" role="region" aria-labelledby="sessionHistoryTitle" hidden><SessionHistoryPanel /></aside>
+        </div><div id="conversationFilesResize" className="reading-splitter conversation-files-resize" role="separator" tabIndex={0} aria-label="调整对话与文件区域大小" aria-orientation="vertical" aria-controls="conversationFilesDock" hidden /><div id="conversationFilesDock" className="conversation-files-dock" hidden><aside id="conversationFilesPane" className="conversation-files-pane" aria-labelledby="conversationFilesTitle">
+          <header className="conversation-files-heading"><h3 id="conversationFilesTitle"><Files aria-hidden="true" />文件与改动</h3><div><Button type="button" size="sm" variant="ghost" id="expandConversationFiles" aria-label="全屏查看文件" aria-pressed={false}><Maximize2 aria-hidden="true" />全屏</Button><Button type="button" size="icon-sm" variant="ghost" id="closeConversationFiles" aria-label="关闭文件面板"><X aria-hidden="true" /></Button></div></header>
+          <div id="conversationFilesMount" />
+        </aside></div></div>
       </section>
     </div>
-  </div>
+  </div><dialog id="conversationFilesDialog" className="conversation-files-dialog shadcn-scope" aria-labelledby="conversationFilesTitle" /></>
 }
 interface ShortcutTask { environment?: string; id: string; name: string; projects: string; pinned: boolean; archived: boolean }
 interface ShortcutDirectory { key?: string; environment?: string; cwd: string; name: string; parent: string; pinned: boolean }
@@ -84,9 +98,6 @@ export function ConversationShortcuts({ tasks, directories, pinnedDirectories, s
     </li>)}</ul></>}
   </section>
 }
-export function ConversationDialogHeader() {
-  return <header className="conversation-dialog-heading"><div><h2 id="conversationDialogTitle">对话</h2><p id="conversationDialogScope" /></div><div className="conversation-dialog-actions"><Button type="button" variant="ghost" size="sm" data-conversation-action="page"><ArrowUpRight aria-hidden="true" />转到会话页</Button><Button type="button" variant="ghost" size="icon" data-conversation-action="close" aria-label="关闭对话，运行继续"><X aria-hidden="true" /></Button></div></header>
-}
 export function ConversationList({ sessions, selected, showDirectory, showContext = true, loading, taskID, filtered, error, canCreate = true, now = Date.now() }: { sessions: Session[]; selected?: string | null; showDirectory: boolean; showContext?: boolean; loading?: boolean; taskID?: string; filtered?: boolean; error?: boolean; canCreate?: boolean; now?: number }) {
   if (!sessions.length) return <div className="session-browser-empty-list" role="status">
     {loading ? <RotateCw className="session-list-loading" aria-hidden="true" /> : error ? <CircleAlert aria-hidden="true" /> : filtered ? <Search aria-hidden="true" /> : <MessageSquare aria-hidden="true" />}
@@ -118,7 +129,7 @@ export function ConversationList({ sessions, selected, showDirectory, showContex
       {showDirectory && !s.context?.project ? <span className="session-browser-item-directory" title={s.cwd}>{directory}</span> : null}
       <span className="session-browser-item-meta"><span className="session-browser-item-signals">{s.environment_name && <span className="session-browser-environment" title={s.environment_name}>{s.environment_name}</span>}<span data-session-indicators={s.id} data-environment={s.environment_id} data-state={s.chat_status || (s.unread ? "unread" : "idle")} hidden={!status && !s.unread}>{status || (s.unread ? "有新消息" : "")}</span></span><time title={date?.toLocaleString("zh-CN", {hour12: false})} dateTime={date?.toISOString()}>{dateLabel}</time></span>
       {s.error ? <span className="table-message">{s.error}</span> : null}
-    </button>{taskID ? <details className="session-item-menu" data-session-menu={key}><summary aria-label={`会话操作：${s.name || "未命名对话"}`} title="会话操作"><Ellipsis aria-hidden="true" /></summary><div><Button type="button" variant="ghost" size="sm" data-conversation-unlink={s.id} data-environment={s.environment_id} data-task={taskID} aria-label={`取消关联 ${s.name || "未命名对话"}`}>取消关联</Button></div></details> : null}</li>
+    </button>{taskID ? <details className="session-item-menu" data-session-menu={key}><summary aria-label={`对话操作：${s.name || "未命名对话"}`} title="对话操作"><Ellipsis aria-hidden="true" /></summary><div><Button type="button" variant="ghost" size="sm" data-conversation-unlink={s.id} data-environment={s.environment_id} data-task={taskID} aria-label={`取消关联 ${s.name || "未命名对话"}`}>取消关联</Button></div></details> : null}</li>
   })}</ul></section>)}</div>
 }
 export function ConversationScopes({ scopes }: { scopes: ConversationScope[] }) {

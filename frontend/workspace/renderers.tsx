@@ -16,10 +16,11 @@ import { ConversationList, ConversationScopes, ConversationShortcuts } from "./s
 import { conversationContext } from "./conversation-context"
 import { taskMatches } from "./task-signals"
 import type { TaskFilter } from "./task-signals"
-import { TaskReviewItems, ChangeFiles } from "./task-review"
+import { TaskReviewItems } from "./task-review"
 import { createTaskReviewController } from "./task-review-controller"
 import { createOperations } from "./operations"
 import { setupConversationResize, conversationPathKey, conversationEnvironmentKey } from "./conversation-runtime"
+import { createConversationFiles } from "./conversation-files"
 import { createSessionRequests } from "./session-requests"
 
 // Static views retain their native controllers. Interactive islands have
@@ -27,17 +28,16 @@ import { createSessionRequests } from "./session-requests"
 export const workspaceUI = {
   mountGitView, resetGitView, selectGitTab, projectChoiceReady, projectChoiceSummary, notifyWorkspace,
   setupConversationResize, conversationPathKey, conversationEnvironmentKey, createSessionRequests,
-  createOperations,
+  createOperations, createConversationFiles,
   createTaskReviewController,
   taskMatches,
   taskReview: (items: Parameters<typeof TaskReviewItems>[0]["items"]) => renderToStaticMarkup(<TaskReviewItems items={items} />),
-  changeFiles: (files: Parameters<typeof ChangeFiles>[0]["files"], selected: string) => renderToStaticMarkup(<ChangeFiles files={files} selected={selected} />),
   conversationContext,
   conversationShortcuts: (props: Parameters<typeof ConversationShortcuts>[0]) => renderToStaticMarkup(<ConversationShortcuts {...props} />),
   conversationList: (props: Parameters<typeof ConversationList>[0]) => renderToStaticMarkup(<ConversationList {...props} />),
   conversationScopes: (scopes: Parameters<typeof ConversationScopes>[0]["scopes"]) => renderToStaticMarkup(<ConversationScopes scopes={scopes} />),
   readElicitation,
-  tasks: (tasks: Task[]) => renderToStaticMarkup(<TaskList tasks={tasks} />),
+  tasks: (tasks: Task[], selectedID?: string | null, environment?: string) => renderToStaticMarkup(<TaskList tasks={tasks} selectedID={selectedID} environment={environment} />),
   taskDetail: (task: Task, projects: Project[], environment: string, openTool?: ProjectOpenTool, filter?: TaskFilter) => renderToStaticMarkup(<TaskDetail task={task} projects={projects} environment={environment} openTool={openTool} filter={filter} />),
   taskActions: (task: Task, environment: string) => renderToStaticMarkup(<TaskActions task={task} environment={environment} />),
   projects: (projects: Project[], selectedID: string | null, openTool?: ProjectOpenTool, filter?: ProjectFilter, detailOpen?: boolean, tasks?: Task[], directoryFilter?: DirectoryFilter, searching?: boolean) => renderToStaticMarkup(<Projects projects={projects} selectedID={selectedID} openTool={openTool} filter={filter} detailOpen={detailOpen} tasks={tasks} directoryFilter={directoryFilter} searching={searching} />),

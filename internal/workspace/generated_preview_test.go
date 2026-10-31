@@ -10,7 +10,10 @@ import (
 )
 
 func TestGeneratedFilePreservesUserContentAndRejectsSymlinks(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(root, "context.md")
 	ctx := context.Background()
 	if err := WriteGenerated(ctx, path, []byte("marker\nfirst"), "marker\n"); err != nil {
@@ -36,7 +39,10 @@ func TestGeneratedFilePreservesUserContentAndRejectsSymlinks(t *testing.T) {
 }
 
 func TestGitPreviewDrainsAndBoundsLargeOutput(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)

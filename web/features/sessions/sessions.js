@@ -111,7 +111,7 @@ async function loadSessionPicker(more = false) {
   const generation = sessionPickerGeneration;
   $('#sessionPickerError').hidden = true;
   $('#sessionPickerMore').disabled = true;
-  if (!more) { sessionPickerItems = []; $('#sessionPickerResults').textContent = '正在读取本地会话…'; }
+  if (!more) { sessionPickerItems = []; $('#sessionPickerResults').textContent = '正在读取本地对话…'; }
   const params = new URLSearchParams();
   if (more && sessionPickerCursor) params.set('cursor', sessionPickerCursor);
   if (sessionPickerSearch) params.set('search', sessionPickerSearch);
@@ -139,7 +139,7 @@ async function loadSessionPicker(more = false) {
 async function linkPickedSession(id) {
   const requirement = sessionPickerRequirement;
   const environment = sessionPickerEnvironment;
-  await mutation('正在关联会话', async () => {
+  await mutation('正在关联对话', async () => {
     const result = await api(`/api/requirements/${encodeURIComponent(requirement)}/sessions`, { environment, method: 'POST', body: JSON.stringify({ session_id: id }) });
     if (environment === activeEnvironment) await refreshRequirementSessions(requirement);
     window.dispatchEvent(new CustomEvent('workhub:task-sessions', {detail:{task:requirement, environment}}));
@@ -168,7 +168,7 @@ document.addEventListener('click', async event => {
     return loadSessionPicker();
   }
   if (action === 'link') return linkPickedSession(target.dataset.session);
-  if (action === 'resume') return mutation('正在打开会话终端', async () => {
+  if (action === 'resume') return mutation('正在打开对话终端', async () => {
     const result = await api(`/api/sessions/${encodeURIComponent(target.dataset.session)}/resume`, { environment: sessionHistoryState?.environment || activeEnvironment, method: 'POST', body: '{}' });
     toast(result.message);
   });

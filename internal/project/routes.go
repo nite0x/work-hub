@@ -7,6 +7,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/projects/{id}", s.InvalidateStateAfter(s.RemoveProjectHandler))
 	mux.HandleFunc("GET /api/projects/{id}/git", s.GitOverviewHandler)
 	mux.HandleFunc("GET /api/projects/{id}/changes", s.ChangesHandler)
+	mux.HandleFunc("GET /api/projects/{id}/files", s.FilesHandler)
 	mux.HandleFunc("GET /api/requirements/{id}/review", s.TaskReviewHandler)
 	mux.HandleFunc("POST /api/requirements/{id}/cleanup/{project}", s.InvalidateStateAfter(s.CleanupWorktreeHandler))
 	mux.HandleFunc("GET /api/projects/{id}/remote", s.ProjectRemoteHandler)

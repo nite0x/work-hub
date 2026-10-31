@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"worktree-hub/internal/codex"
+	"worktree-hub/internal/workspace"
 )
 
 func awaitSessionRun(t *testing.T, a *App, id string, condition func(ChatState) bool) ChatState {
@@ -95,7 +96,7 @@ func TestTerminalOwnershipIsScopedToConversation(t *testing.T) {
 			t.Fatalf("independent conversation %q blocked: %v", id, err)
 		}
 	}
-	if err := a.AppTerminalConflict("session", t.TempDir()); err == nil || !strings.Contains(err.Error(), "保有此会话") {
+	if err := a.AppTerminalConflict("session", t.TempDir()); !workspace.IsSessionConflict(err) || !strings.Contains(err.Error(), "保有此会话") {
 		t.Fatalf("same conversation lost terminal ownership: %v", err)
 	}
 }

@@ -74,6 +74,12 @@ export function bundleFiles(bundleDirectory, plan) {
   return result;
 }
 
+export function validateReleaseSource(plan, status) {
+  if (!plan.requireSigning) return;
+  if (plan.debug) throw new Error('Signed release packaging cannot use --debug');
+  if (status.trim()) throw new Error('Signed release packaging requires a clean Git working tree; commit the reviewed source first');
+}
+
 export function writeChecksums(directory, names) {
   const files = names.sort().map(name => {
     const contents = readFileSync(path.join(directory, name));

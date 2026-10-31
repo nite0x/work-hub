@@ -78,6 +78,13 @@ export const GitView = forwardRef<GitViewHandle, { overview: GitOverview }>(func
       </Tabs.Content>
 
       <Tabs.Content value="merge" forceMount hidden={tab !== "merge"} className="git-tab-panel">
+        <Section title="将当前分支合并到…" description="选择目标分支，当前目录保留在原分支">
+          <Field id="gitMergeTarget" label="目标本地分支"><NativeSelect id="gitMergeTarget" data-searchable-select /></Field>
+          <p id="gitMergeIntoDirection" className="git-help whitespace-pre-wrap break-words" role="status" />
+          <div className="git-inline"><Action action="git-merge-into-preview" variant="default">预览合并</Action><Action action="git-merge-into" disabled>合并到目标分支</Action></div>
+          <Feedback id="gitMergeIntoPreview" className="mt-3 bg-muted" hidden />
+          <small className="git-help">仅合并已提交内容。目标目录需要干净；出现冲突时停止，目标分支保留原状态。需要发布时，再切到目标分支推送。</small>
+        </Section>
         <Section title="合并到当前分支" description="先预览待合入提交，再执行合并">
           <div id="gitMergeActive" hidden><Feedback id="gitMergeStatus" className="bg-muted" role="status" /><div className="git-inline"><Action action="git-merge-ai" variant="default">让 AI 完成合并</Action><Action action="git-merge-abort">中止合并</Action></div></div>
           <div id="gitMergeForm"><Field id="gitMergeSource" label="待合入的分支"><NativeSelect id="gitMergeSource" data-searchable-select><SourceOptions overview={v} includeHead={false} /></NativeSelect></Field><div className="git-inline"><Action action="git-merge-preview" variant="default">预览合并</Action><Action action="git-merge" disabled>执行合并</Action></div><Feedback id="gitMergePreview" className="mt-3 bg-muted" hidden /></div>

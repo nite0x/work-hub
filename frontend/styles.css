@@ -5,6 +5,22 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none) important;
 @source "./";
 
+/* App chrome should not select text while clicking or dragging. Keep editing
+   and conversation content selectable for normal copy/paste workflows. */
+body, button, [role="button"], [role="menuitem"], summary {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input, textarea, [contenteditable]:not([contenteditable="false"]),
+.assistant-chat-scope [data-slot="aui_assistant-message-content"],
+.assistant-chat-scope .aui-user-message-content,
+.assistant-chat-scope [data-slot="aui_spoken-message-content"],
+.history-message, .history-command-body, .session-command-output-text,
+.session-command-output-dialog > .history-command-line {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Native hidden state must beat important display utilities on feedback/fields. */
 @layer base {
   [hidden] { display: none !important; }
@@ -60,3 +76,25 @@
 .shadcn-scope:where([data-slot]),
 .shadcn-scope :where([data-slot]) { border-style: solid; border-width: 0; border-color: var(--border); }
 .shadcn-scope :where(button) { background-color: transparent; }
+
+/* File types keep the same visual identity in the tree and chat changes. */
+.file-type-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; color: #64748b; vertical-align: -3px; }
+.file-type-icon svg { width: 16px; height: 16px; }
+.file-type-label { border-radius: 4px; font: 700 9px/1 ui-sans-serif, system-ui, sans-serif; background: color-mix(in srgb, currentColor 12%, transparent); }
+.file-type-icon[data-file-kind="react"], .file-type-icon[data-file-kind="go"] { color: #0891b2; }
+.file-type-icon[data-file-kind="typescript"] { color: #2476c7; }
+.file-type-icon[data-file-kind="javascript"], .file-type-icon[data-file-kind="json"] { color: #a16c00; }
+.file-type-icon[data-file-kind="python"] { color: #3572a5; }
+.file-type-icon[data-file-kind="java"], .file-type-icon[data-file-kind="markup"] { color: #c9672d; }
+.file-type-icon[data-file-kind="style"] { color: #8854c8; }
+.file-type-icon[data-file-kind="vue"], .file-type-icon[data-file-kind="shell"] { color: #16835b; }
+.file-type-icon[data-file-kind="image"] { color: #bd4c9b; }
+.file-type-icon[data-file-kind="config"], .file-type-icon[data-file-kind="archive"] { color: #7b718e; }
+.file-type-icon[data-file-kind="document"] { color: #497da6; }
+.browser-files .browser-folder { color: #8290a5; }
+.browser-files .browser-folder.is-open { color: #5281b7; }
+.browser-files [data-change-file][aria-pressed="true"] { color: #0969da; background-color: #edf4ff; }
+.browser-files [data-change-file][aria-pressed="true"]:hover { background-color: #e3eeff; }
+.browser-change-status[data-status="added"] { color: #168447; }
+.browser-change-status[data-status="deleted"] { color: #d63838; }
+.browser-change-status[data-status="modified"] { color: #0969da; }

@@ -15,6 +15,7 @@ export interface ChatOptions {
   activity?: (session: string, chat: ChatState) => void;
   close: () => void;
   newConversation?: () => void;
+  openWorkspace?: (kind: "task" | "project", id: string) => void;
  managed?: (session: Session, action: string) => void;
 }
 export interface SessionTarget { task_id?: string; project_id?: string; cwd?: string; additional_directories?: string[] }
@@ -173,6 +174,7 @@ export class ChatController {
     try {
       let page = await this.options.request<History>(this.base() + "/history" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""), {signal: this.readAbort?.signal});
       if (generation !== this.generation) return;
+      if (cursor && page.next_cursor === cursor) throw new Error("历史分页游标重复");
       let fresh = page.entries;
       const known = this.savedKeys;
       const cursors = new Set<string>();

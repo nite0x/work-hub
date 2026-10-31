@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,6 +42,9 @@ func socketPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	return c, peer
 }
 func TestManagedMultiProjectLaunchMovesAdditionalRootsToBridge(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("managed terminal relay requires Linux peer credentials")
+	}
 	a := testApp(t)
 	front := register(t, a, "Front", repo(t, "front", "master"))
 	back := register(t, a, "Back", repo(t, "back", "master"))
@@ -278,6 +282,9 @@ func TestLaunchWatchKeepsConnectedTerminal(t *testing.T) {
 }
 
 func TestTerminalScriptFailureReleasesReservationAndAllowsRetry(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("managed terminal relay requires Linux peer credentials")
+	}
 	for _, mode := range []string{"login", "codex"} {
 		t.Run(mode, func(t *testing.T) {
 			a, q, _, _ := chatFixture(t)
@@ -318,6 +325,9 @@ func TestTerminalScriptFailureReleasesReservationAndAllowsRetry(t *testing.T) {
 // Real CLI + real shared daemon, on an isolated temporary requirement. This
 // sends one tool-free prompt and never resumes or terminates a user's session.
 func TestInstalledCodexNewSessionAndManagedTerminalHandoff(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("managed terminal relay requires Linux peer credentials")
+	}
 	if os.Getenv("WORKTREE_HUB_TEST_CODEX_TURN") != "1" {
 		t.Skip("opt-in real new-session / TUI handoff")
 	}

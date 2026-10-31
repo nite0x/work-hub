@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,6 +98,9 @@ func TestTerminalCommandPreservesWSLArguments(t *testing.T) {
 }
 
 func TestAllTerminalEntrypointsUseSavedLauncher(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("WSL terminal launcher integration requires Linux scripts")
+	}
 	a := testApp(t)
 	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
 	path := repo(t, "terminal repo", "master")

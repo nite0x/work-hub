@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/testutil"
 	"worktree-hub/internal/workspace"
 )
 
@@ -21,7 +22,7 @@ func TestCreateFromMasterAndDiscoverExternalWorktree(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(front, "feature.txt"), []byte("current branch\n"), 0644)
 	testGit(t, front, "add", "feature.txt")
 	testGit(t, front, "commit", "-m", "feature only")
-	external := filepath.Join(t.TempDir(), "external 工作树")
+	external := filepath.Join(testutil.TempDir(t), "external 工作树")
 	testGit(t, front, "worktree", "add", "-b", "external", "--", external, "master")
 	p1 := register(t, a, "Frontend", front)
 	p2 := register(t, a, "Backend", back)

@@ -6,18 +6,19 @@ import type { Project, Task } from "./types"
 import { memberSignals, taskSignals, taskFilterLabels, type TaskFilter } from "./task-signals"
 import { compactWorkspacePath } from "./workspace-path"
 
-export function TaskList({ tasks }: { tasks: Task[] }) {
+export function TaskList({ tasks, selectedID, environment }: { tasks: Task[]; selectedID?: string | null; environment?: string }) {
   return <div className="task-list shadcn-scope divide-y divide-border">{tasks.map(q => {
     const {issues,dirty,push,conflicts,checking} = taskSignals(q)
     const status = !q.connected ? "环境未连接" : !q.members.length ? "待关联项目" : [issues ? `${issues} 个目录异常` : "", conflicts ? `${conflicts} 个 Git 操作待处理` : "", dirty ? `${dirty} 个项目有改动` : "", push ? `${push} 个项目待推送` : ""].filter(Boolean).join(" · ") || (checking ? "等待检查工作目录" : "无未提交改动")
-    return <Card key={`${q.environment_id}:${q.id}`} className="gap-0 rounded-none border-0 p-0 shadow-none"><a className="list-row focus-visible:outline-ring" href={`?environment=${encodeURIComponent(q.environment_id)}#/requirements/${encodeURIComponent(q.id)}`} data-action="open-requirement" data-id={q.id} data-environment={q.environment_id} aria-label={`打开任务 ${q.name}`}><div className="row-main"><div className="row-title">{q.name}{q.state === "archived" ? <StatusBadge kind="archived" /> : null}</div>{q.description?.trim() && q.description.trim() !== q.name.trim() ? <div className="task-list-description">{q.description}</div> : null}<div className="row-subtitle">{q.members.length} 个项目 · {q.environment_name}</div></div><div className="row-meta"><span className={`task-list-status${issues || conflicts || !q.connected ? " has-issues" : dirty || push ? " has-work" : ""}`}>{status}</span><time className="row-time" dateTime={q.created_at} title={`创建时间：${new Date(q.created_at).toLocaleString("zh-CN")}`}>创建于 {new Date(q.created_at).toLocaleDateString("zh-CN")}</time></div><span className="chevron" aria-hidden="true">›</span></a></Card>
+    return <Card key={`${q.environment_id}:${q.id}`} className="gap-0 rounded-none border-0 p-0 shadow-none"><a className="list-row focus-visible:outline-ring" aria-current={q.id === selectedID && q.environment_id === environment ? "true" : undefined} href={`?environment=${encodeURIComponent(q.environment_id)}#/requirements/${encodeURIComponent(q.id)}`} data-action="open-requirement" data-id={q.id} data-environment={q.environment_id} aria-label={`打开任务 ${q.name}`}><div className="row-main"><div className="row-title">{q.name}{q.state === "archived" ? <StatusBadge kind="archived" /> : null}</div>{q.description?.trim() && q.description.trim() !== q.name.trim() ? <div className="task-list-description">{q.description}</div> : null}<div className="row-subtitle">{q.members.length} 个项目 · {q.environment_name}</div></div><div className="row-meta"><span className={`task-list-status${issues || conflicts || !q.connected ? " has-issues" : dirty || push ? " has-work" : ""}`}>{status}</span><time className="row-time" dateTime={q.created_at} title={`创建时间：${new Date(q.created_at).toLocaleString("zh-CN")}`}>创建于 {new Date(q.created_at).toLocaleDateString("zh-CN")}</time></div><span className="chevron" aria-hidden="true">›</span></a></Card>
   })}</div>
 }
 
 export function TaskActions({ task: q, environment }: { task: Task; environment: string }) {
   return <div className="task-page-actions shadcn-scope">
     <span className="task-environment">{environment}</span><StatusBadge kind={q.state === "archived" ? "archived" : "neutral"}>{q.state === "archived" ? "已归档" : "未归档"}</StatusBadge>
-    <Action action="task-conversations" id={q.id}>查看相关会话</Action>
+    <Action action="task-conversations" id={q.id}>查看相关对话</Action>
+    <Action action="task-review" id={q.id} disabled={q.state === "creating"} aria-label="开始收尾检查"><ClipboardCheck aria-hidden="true" />收尾检查</Action>
     <details className="task-more" data-workspace-detail="task-actions"><summary>更多</summary><div className="task-more-menu">
       <Action action="edit-task" id={q.id} disabled={q.state === "creating"}>编辑任务信息</Action>
       <Action action="archive" id={q.id}>{q.state === "archived" ? "取消归档" : "归档任务"}</Action>
@@ -42,7 +43,7 @@ export function TaskDetail({ task: q, projects, openTool = "vscode", filter = "a
   const filterButton = (kind: TaskFilter) => <Action key={kind} action="task-project-filter" id={q.id} data-filter={kind} aria-pressed={kind === filter} className={kind === "issues" && signals.issues ? "task-issue-filter" : undefined} variant={kind === filter ? "secondary" : "outline"}>{kind === "issues" && signals.issues ? <CircleAlert aria-hidden="true" /> : null}{taskFilterLabels[kind]} · {kind === "all" ? q.members.length : signals[kind]}</Action>
   return <Card className="shadcn-scope requirement-workspace gap-4 rounded-none border-0 p-5 shadow-none">
     <section className={`task-info${q.description?.trim() ? "" : " task-info-empty"}`} aria-label="任务目标"><div className="task-info-heading"><strong>任务目标</strong>{q.description?.trim() ? <div className="flex items-center gap-3"><button type="button" className="task-info-toggle" data-action="task-info-toggle" aria-controls="taskDescription" aria-expanded="false" hidden>查看全部</button><Action variant="ghost" action="edit-task" id={q.id} disabled={q.state === "creating"}>编辑目标</Action></div> : null}</div>
-      {q.description?.trim() ? <p id="taskDescription" className="task-description task-description-clamped">{q.description}</p> : <div className="task-goal-prompt"><Action variant="ghost" action="edit-task" id={q.id} disabled={q.state === "creating"}><Plus aria-hidden="true" />添加任务目标</Action><span>记录目标和完成条件，方便下次继续。</span></div>}
+      {q.description?.trim() ? <p id="taskDescription" className="task-description task-description-clamped">{q.description}</p> : <div className="task-goal-prompt"><Action variant="ghost" action="edit-task" id={q.id} disabled={q.state === "creating"}><Plus aria-hidden="true" />添加任务目标</Action></div>}
     </section>
     <div className="task-directory-overview"><div className="detail-top"><div className="min-w-0"><h2 className="m-0 text-base font-semibold">关联项目与工作目录</h2><p className="task-project-summary">{summary}</p></div><div className="detail-actions"><Action action="add-requirement-projects" id={q.id} disabled={!editable || q.members.length >= 30}><Plus aria-hidden="true" />添加项目</Action></div></div>
       {q.members.length ? <div className="task-signal-filters" aria-label="按项目状态筛选">{quickFilters.map(filterButton)}{otherFilters.length > 0 ? <details className="task-more task-filter-more"><summary aria-label="更多项目状态筛选"><SlidersHorizontal aria-hidden="true" />更多筛选</summary><div className="task-more-menu">{otherFilters.map(filterButton)}</div></details> : null}</div> : null}
@@ -68,7 +69,7 @@ export function TaskDetail({ task: q, projects, openTool = "vscode", filter = "a
         </div>
         <div className="workspace-project-actions task-project-primary-actions">
           <TaskOpenActions project={m.project_id} path={m.path} disabled={!usable} tool={openTool} primary />
-          <Action action="changes-open" id={m.project_id} data-path={m.path} disabled={!usable}>查看改动</Action>
+          <Action action="changes-open" id={m.project_id} data-path={m.path} disabled={!usable}>文件与改动</Action>
           <details className="task-more task-project-more" data-workspace-detail={`menu:${m.project_id}`}><summary aria-label={`${m.project_name} 更多操作`}><MoreHorizontal aria-hidden="true" /></summary><div className="task-more-menu">
             <Action action="workspace-terminal" id={m.project_id} data-path={m.path} disabled={!usable}><Terminal aria-hidden="true" />打开终端</Action>
             <Action action="git-open" id={m.project_id} data-path={m.path} data-requirement={q.id} disabled={!active}>Git 操作</Action>
@@ -91,6 +92,5 @@ export function TaskDetail({ task: q, projects, openTool = "vscode", filter = "a
         </div></details>
       </article>
     })}</div>
-    <section className="task-review-entry" aria-label="收尾检查"><div><h2><ClipboardCheck aria-hidden="true" />收尾检查</h2><p>检查未提交改动、未推送提交和目录占用，确认哪些 Worktree 可以清理。</p></div><Action action="task-review" id={q.id} disabled={q.state === "creating"} aria-label="开始收尾检查">开始检查</Action></section>
   </Card>
 }

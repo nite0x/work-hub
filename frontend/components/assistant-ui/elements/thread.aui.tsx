@@ -67,7 +67,6 @@ import {
 import {
   createContext,
   useContext,
-  useLayoutEffect,
   useRef,
   type ComponentType,
   type FC,
@@ -98,6 +97,7 @@ export type ThreadComponents = {
   Text?: ComponentType;
   UserImage?: ImageMessagePartComponent;
   AssistantMessage?: ComponentType | undefined;
+  AssistantMessageEnd?: ComponentType | undefined;
   Welcome?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
   ToolGroup?:
@@ -396,72 +396,23 @@ const SpokenActionBar: FC = () => {
   );
 };
 
-const FOCUSABLE_SELECTOR =
-  "a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([disabled])";
-
-const nextFocusable = (start: Element) => {
-  for (
-    let element = start.nextElementSibling;
-    element;
-    element = element.nextElementSibling
-  ) {
-    const target = element.matches(FOCUSABLE_SELECTOR)
-      ? element
-      : element.querySelector(FOCUSABLE_SELECTOR);
-    if (target instanceof HTMLElement) return target;
-  }
-  return null;
-};
-
 const ThreadLoadEarlier: FC = () => {
   const visible = useAuiState(
     (s) => s.thread.hasEarlier || s.thread.isLoadingEarlier,
   );
   const loading = useAuiState((s) => s.thread.isLoadingEarlier);
-  const slotRef = useRef<HTMLDivElement>(null);
-  const focusedRef = useRef<Element | null>(null);
 
-  // The last page removes the button; a keyboard user on it continues from the
-  // next control in tab order rather than from the document body.
-  useLayoutEffect(() => {
-    const focused = focusedRef.current;
-    const slot = slotRef.current;
-    if (visible || !focused || focused.isConnected || !slot) return;
-    focusedRef.current = null;
-    const active = document.activeElement;
-    if (active && active !== document.body) return;
-    nextFocusable(slot)?.focus();
-  }, [visible]);
-
-  return (
+  return visible ? (
     <div
-      ref={slotRef}
-      className="contents"
-      onFocus={(event) => {
-        focusedRef.current = event.target;
-      }}
+      role="status"
+      data-slot="aui_thread-load-earlier"
+      className="aui-thread-load-earlier text-muted-foreground mb-6 self-center text-xs"
     >
-      <span role="status" className="sr-only">
-        {loading ? "正在加载更早记录…" : ""}
+      <span className={cn(loading && "shimmer motion-reduce:animate-none")}>
+        {loading ? "正在加载更早记录…" : "向上滚动自动加载更早记录"}
       </span>
-      {visible && (
-        <ThreadPrimitive.LoadEarlier asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            data-slot="aui_thread-load-earlier"
-            className="aui-thread-load-earlier text-muted-foreground mb-6 self-center rounded-full"
-          >
-            <span
-              className={cn(loading && "shimmer motion-reduce:animate-none")}
-            >
-              {loading ? "正在加载更早记录…" : "加载更早记录"}
-            </span>
-          </Button>
-        </ThreadPrimitive.LoadEarlier>
-      )}
     </div>
-  );
+  ) : null;
 };
 
 const ThreadScrollToBottom: FC = () => {
@@ -684,6 +635,7 @@ const AssistantMessage: FC = () => {
     ReasoningGroup,
     TaskGroup: TaskGroupComponent,
     Text = MarkdownText,
+    AssistantMessageEnd,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
 
@@ -778,6 +730,7 @@ const AssistantMessage: FC = () => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {AssistantMessageEnd && <AssistantMessageEnd />}
         <MessageError />
       </div>
 

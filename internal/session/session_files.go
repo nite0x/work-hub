@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"worktree-hub/internal/httpx"
+	"worktree-hub/internal/platform"
 	"worktree-hub/internal/workspace"
 )
 
@@ -58,4 +59,39 @@ func (a *Service) SessionFileHandler(w http.ResponseWriter, r *http.Request) {
 	start := max(0, selected-201)
 	end := min(total, start+401)
 	httpx.WriteJSON(w, 200, map[string]any{"path": file.Path, "lines": lines[start:end], "start_line": start + 1, "total_lines": total, "line": selected, "requested_line": line})
+}
+
+// SessionFilesHandler limits browsing to a saved conversation's approved roots.
+func (a *Service) SessionFilesHandler(w http.ResponseWriter, r *http.Request) {
+	record, ok := a.requestSession(w, r)
+	if !ok {
+		return
+	}
+	root := r.URL.Query().Get("path")
+	if root == "" {
+		root = record.Cwd
+	}
+	allowed := false
+	for _, candidate := range append([]string{record.Cwd}, record.AdditionalDirectories...) {
+		if platform.SameWorkspacePath(root, candidate) {
+			root = candidate
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		httpx.WriteError(w, 400, "只能浏览此对话的工作目录及附加目录")
+		return
+	}
+	relative, file := r.URL.Query().Get("dir"), r.URL.Query().Has("file")
+	if file {
+		relative = r.URL.Query().Get("file")
+	}
+	ctx := workspace.WithClient(r.Context(), a.Workspace.Remote)
+	result, err := workspace.BrowseWorkspace(ctx, root, relative, file)
+	if err != nil {
+		httpx.WriteError(w, 422, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, 200, result)
 }

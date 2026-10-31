@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState, useSyncExternalStore} from "react";
+import {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from "react";
 import {AssistantRuntimeProvider, ExportedMessageRepository, MessageNotSentError, useExternalStoreRuntime, type ThreadMessage} from "@assistant-ui/react";
 import {PlusIcon, RefreshCwIcon, SearchIcon, GitBranchIcon, FolderIcon, TerminalIcon, LoaderCircleIcon, HandIcon} from "lucide-react";
 import {Thread} from "@/components/assistant-ui/elements/thread.aui";
@@ -18,9 +18,24 @@ import {ChatControls, ChatPermissions, ChatSearch, ChatSessionMenu, ChatStatus} 
 import {ChatMediaProvider, ChatMessageText, ChatUserImage} from "./media";
 import {ChatAttachmentAdapter} from "./attachments";
 import {conversationContext} from "../workspace/conversation-context";
+import {ChatToolFallback, ChatChangeSummary, ChatChangePathsProvider} from "./file-changes";
 import {QuestionComposer} from "./questions";
 
-const chatComponents = {Text: ChatMessageText, UserImage: ChatUserImage};
+const chatComponents = {Text: ChatMessageText, UserImage: ChatUserImage, ToolFallback: ChatToolFallback, AssistantMessageEnd: ChatChangeSummary};
+
+// The workspace owns this stable button and its file-panel controller. Move it
+// into the active chat toolbar, returning it before the React slot unmounts.
+function ChatFileToggle() {
+  const slot = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const button = document.getElementById("toggleConversationFiles");
+    const original = button?.parentElement;
+    if (!button || !original || !slot.current) return;
+    slot.current.append(button);
+    return () => {original.append(button);};
+  }, []);
+  return <span ref={slot} className="chat-file-toggle-slot" />;
+}
 
 function ChatRunIndicator({controller}: {controller: ChatController}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -82,7 +97,6 @@ export function ChatPanel({controller}: {controller: ChatController}) {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const closeSearch = () => {setSearchOpen(false); controller.setSearch(""); searchTrigger.current?.focus();};
-  const reading = useChatReading(controller);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const attachments = useMemo(() => new ChatAttachmentAdapter((name, data) => controller.options.request("/api/chat-attachments", {method: "POST", body: JSON.stringify({name, data})})), [controller]);
   const question = !readOnly ? controller.question() : undefined;
@@ -119,6 +133,7 @@ export function ChatPanel({controller}: {controller: ChatController}) {
     },
     onCancel: state.chat.external && state.chat.busy ? undefined : controller.stop,
   });
+  const reading = useChatReading(controller, runtime.thread);
   useEffect(() => { controller.connect(); return () => controller.disconnect(); }, [controller]);
   useEffect(() => { runtime.thread.composer.setText(state.draft); }, [runtime, state.draft]);
   useEffect(() => {
@@ -139,16 +154,21 @@ export function ChatPanel({controller}: {controller: ChatController}) {
   const path = state.chat.context?.cwd || state.context?.cwd || state.session?.cwd || controller.options.target?.cwd || task?.members.find(m => m.project_id === state.project)?.path || "";
   const context = conversationContext(path, controller.options.workspace || (task ? {tasks: [task], projects: []} : undefined), task?.id || controller.options.target?.task_id);
   const additionalDirectories = state.chat.context?.additional_directories || state.context?.additional_directories || [];
+  const changePaths = useMemo(() => ({cwd: path, additionalDirectories,
+    projectRoots: [...(controller.options.workspace?.projects.flatMap(project => [project.path, ...project.worktrees.map(tree => tree.path)]) || []), ...(controller.options.workspace?.tasks.flatMap(task => task.members.map(member => member.path)) || []), ...(task?.members.map(member => member.path) || [])],
+  }), [path, additionalDirectories, controller.options.workspace, task]);
   const status = state.chat.blocked;
   const footer = state.draftNotice || status || state.chat.notice || state.chat.can_handoff || state.error || state.chat.error;
   const terminal = state.terminal;
-  return <AssistantRuntimeProvider runtime={runtime}><ChatMediaProvider controller={controller} entries={entries}>
+  return <AssistantRuntimeProvider runtime={runtime}><ChatMediaProvider controller={controller} entries={entries}><ChatChangePathsProvider value={changePaths}>
     <section ref={panel} className="shadcn-scope assistant-chat-scope flex h-full min-h-0 w-full flex-col bg-background text-foreground" aria-labelledby="assistantChatTitle" onKeyDownCapture={event=>{
       if (state.chat.busy && event.key==="Enter" && (event.ctrlKey||event.metaKey) && !event.shiftKey && !event.nativeEvent.isComposing && event.target instanceof HTMLTextAreaElement && event.target.closest(".aui-composer-root")) {event.preventDefault();event.stopPropagation();runtime.thread.composer.send();}
     }}>
       <header className="chat-panel-header shrink-0 border-b px-4 py-3">
         <div className="chat-panel-toolbar">
-          <div className="chat-panel-heading"><h2 id="assistantChatTitle" tabIndex={-1} className="chat-panel-title m-0 min-w-0 truncate text-sm font-semibold" title={state.session?.name}>{state.session ? state.session.name || "未命名对话" : "新建会话"}</h2>
+          <div className="chat-panel-heading">
+            {controller.options.openWorkspace && context.tasks.length > 0 && <nav className="chat-workspace-tasks" aria-label="关联任务详情"><span>任务</span>{context.tasks.map(t => <button key={t.id} type="button" className="chat-workspace-link" aria-label={`打开任务详情：${t.name}`} title={`打开任务详情：${t.name}`} onClick={() => controller.options.openWorkspace?.("task", t.id)}>{t.name}</button>)}</nav>}
+            <h2 id="assistantChatTitle" tabIndex={-1} className="chat-panel-title m-0 min-w-0 truncate text-sm font-semibold" title={state.session?.name}>{state.session ? state.session.name || "未命名对话" : "新建会话"}</h2>
           </div>
           <div className="chat-panel-actions">
             <ChatStatus controller={controller} />
@@ -157,11 +177,12 @@ export function ChatPanel({controller}: {controller: ChatController}) {
               <TooltipIconButton tooltip="刷新历史" aria-label="刷新历史" disabled={state.loading} onClick={() => void controller.history()}><RefreshCwIcon className={state.loading ? "animate-spin motion-reduce:animate-none" : ""} /></TooltipIconButton>
             </>}
             {!readOnly && state.session && controller.options.newConversation && <TooltipIconButton tooltip="新建会话" aria-label="新建会话" disabled={!!task && task.state !== "ready"} onClick={controller.options.newConversation}><PlusIcon /></TooltipIconButton>}
+            <ChatFileToggle />
             <ChatSessionMenu controller={controller} portal={panel} />
           </div>
         </div>
         <details className="chat-workspace-context">
-          <summary><span className="chat-workspace-project"><FolderIcon aria-hidden="true" />{context.project || "工作目录"}</span>{context.branch && <span className="chat-workspace-branch" title={`分支 · ${context.branch}`}><GitBranchIcon aria-hidden="true" />{context.branch}</span>}</summary>
+          <summary>{context.projectID && controller.options.openWorkspace ? <button type="button" className="chat-workspace-project chat-workspace-link" aria-label={`打开项目详情：${context.project}`} title={`打开项目详情：${context.project}`} onClick={event => {event.preventDefault(); event.stopPropagation(); controller.options.openWorkspace?.("project", context.projectID!);}}><FolderIcon aria-hidden="true" /><span>{context.project}</span></button> : <span className="chat-workspace-project"><FolderIcon aria-hidden="true" />{context.project || "工作目录"}</span>}{context.branch && <span className="chat-workspace-branch" title={`分支 · ${context.branch}`}><GitBranchIcon aria-hidden="true" />{context.branch}</span>}</summary>
           <dl className="chat-context-facts grid gap-2 text-xs"><dt>执行环境</dt><dd>{controller.options.environmentName || (controller.options.environment === "local" ? "本机" : controller.options.environment)}</dd><dt>{state.chat.busy ? "运行目录" : "工作目录"}</dt><dd>{path || "请选择工作目录"}</dd><dt>目录类型</dt><dd>{context.kind}</dd><dt>关联任务</dt><dd>{context.tasks.length ? context.tasks.map(t => t.name).join("、") : "未关联任务"}</dd>{additionalDirectories.length > 0 && <><dt>额外工作目录</dt><dd>{additionalDirectories.join("、")}</dd></>}</dl>
           {!readOnly && state.session && <Button type="button" size="sm" variant="outline" className="chat-workspace-resume" disabled={!state.session.available} onClick={() => void controller.resume()}><TerminalIcon aria-hidden="true" />在终端继续</Button>}
         </details>
@@ -186,5 +207,5 @@ export function ChatPanel({controller}: {controller: ChatController}) {
         {(state.error || state.chat.error) && <Alert variant="destructive"><AlertDescription>{state.error || state.chat.error}</AlertDescription></Alert>}
       </footer>}
     </section>
-  </ChatMediaProvider></AssistantRuntimeProvider>;
+  </ChatChangePathsProvider></ChatMediaProvider></AssistantRuntimeProvider>;
 }

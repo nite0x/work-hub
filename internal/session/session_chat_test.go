@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/workspace"
 )
 
 type fakeLiveClient struct {
@@ -214,7 +214,7 @@ func TestChatRejectsTerminalAndActiveRuntimeWithoutStarting(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			a, _, c, endpoint := chatFixture(t)
 			if mode == "terminal" {
-				a.terminalConflict = func(string, string) error { return fmt.Errorf("terminal busy") }
+				a.terminalConflict = func(string, string) error { return &workspace.SessionConflictError{Message: "terminal busy"} }
 			} else {
 				c.active = true
 			}
@@ -290,7 +290,7 @@ func TestTerminalReappearingInterruptsOnlyPageTurn(t *testing.T) {
 	var occupied atomic.Bool
 	a.terminalConflict = func(string, string) error {
 		if occupied.Load() {
-			return fmt.Errorf("terminal appeared")
+			return &workspace.SessionConflictError{Message: "terminal appeared"}
 		}
 		return nil
 	}

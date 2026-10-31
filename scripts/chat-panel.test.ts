@@ -16,12 +16,17 @@ const session = {id:"session",name:"测试会话",cwd:"/workspace/project"};
 const tick = () => new Promise(resolve=>setTimeout(resolve,20));
 async function until(check:()=>unknown) { const deadline=Date.now()+5000; while(Date.now()<deadline){if(check()) return; await tick();} assert.ok(check(),"chat did not reach expected state"); }
 
-function mount(existing = false, entries: Entry[] = [], extra: Partial<ChatOptions> = {}) {
+function mount(existing = false, entries: Entry[] = [], extra: Partial<ChatOptions> = {}, withFileToggle = false) {
   const errors: unknown[] = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError",error=>errors.push(error));
   const dom = new JSDOM('<div class="session-history-panel" data-assistant-ui><div id="assistantChatRoot"></div></div>',{url:"http://localhost",runScripts:"dangerously",pretendToBeVisual:true,virtualConsole});
   const w = dom.window;
+  if (withFileToggle) {
+    const slot=w.document.createElement("span");slot.id="sessionHistoryFilesSlot";
+    slot.innerHTML='<button id="toggleConversationFiles" type="button">文件</button>';
+    w.document.body.append(slot);
+  }
   Object.assign(w,{TransformStream,ReadableStream,WritableStream,TextEncoder,TextDecoder,Response,Request,Headers,ResizeObserver:class {observe(){} unobserve(){} disconnect(){}},IntersectionObserver:class {observe(){} unobserve(){} disconnect(){}},matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}})});
   w.HTMLElement.prototype.scrollTo = function() {};
   w.HTMLElement.prototype.scrollIntoView = function() {};
@@ -80,32 +85,29 @@ test("new chat shows full access and GPT-6.1-Sol high while an explicit medium e
   }finally{h.dispose();}
 });
 
-test("file citations preview inside the chat dialog, highlight lines and never navigate the app", async () => {
+test("file citations open the adjacent reader and never navigate the app", async () => {
   const entries: Entry[] = [{id:"links", turn_id:"turn", kind:"assistant", text:"[配置](/workspace/project/config.go:12) · [相对路径](src/auth.go#L9) · [Windows](<file:///C:/repo/config.go#L5>) · [网页](https://example.com/docs) · [无效](javascript:alert)"}];
   const h = mount(true, entries, {readOnly:true, request:async(path, init) => {
     if (path.includes("/history")) return {session, entries} as any;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     h.calls.push({path, body});
-    if (path.includes("/file?")) return {path:"/workspace/project/config.go", start_line:10, total_lines:50, line:12, requested_line:12, lines:["line 10", "line 11", "<script>alert(1)</script>"]} as any;
     return {} as any;
   }});
   try {
     await until(() => h.w.document.querySelector('.aui-md a'));
-    const native = h.w.document.createElement('dialog'); native.open = true;
-    h.w.document.body.append(native); native.append(h.w.document.querySelector('.session-history-panel')!);
+    const references: any[] = [];
+    h.w.addEventListener('workhub:open-file', (event: any) => {references.push(event.detail); event.preventDefault();});
     const link = [...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "配置")!;
     assert.equal([...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "Windows")?.title, 'C:/repo/config.go:5');
     assert.equal(link.getAttribute('href'), '#file-preview');
     assert.equal(link.dispatchEvent(new h.w.MouseEvent('click', {bubbles:true, cancelable:true})), false);
-    await until(() => h.w.document.querySelector('.chat-file-line[data-selected]'));
-    assert.equal(h.w.document.querySelector('.chat-file-dialog')!.closest('dialog'), native);
-    assert.match(h.w.document.querySelector('.chat-file-line[data-selected]')!.textContent || '', /^12<script>/);
-    assert.equal(h.w.document.querySelector('.chat-file-source script'), null);
-    assert(h.calls.some(c => c.path === '/api/sessions/session/file?path=%2Fworkspace%2Fproject%2Fconfig.go&line=12'));
+    await tick();
+    assert.equal(references[0].path, '/workspace/project/config.go');
+    assert.equal(references[0].line, 12);
+    assert.equal(references[0].session, 'session');
+    assert.equal(h.w.document.querySelector('.chat-file-dialog'), null);
+    assert(!h.calls.some(c => c.path.includes('/file?')));
     assert.equal(h.w.location.pathname, '/'); assert.equal(h.w.location.hash, '');
-    h.w.document.querySelector<HTMLButtonElement>('[aria-label="关闭文件预览"]')!.click();
-    await until(() => !h.w.document.querySelector('.chat-file-dialog'));
-    await until(() => h.w.document.activeElement === link);
     const web = [...h.w.document.querySelectorAll<HTMLAnchorElement>('.aui-md a')].find(a => a.textContent === "网页")!;
     assert.equal(web.dispatchEvent(new h.w.MouseEvent('click', {bubbles:true, cancelable:true})), false);
     await until(() => h.calls.some(c => c.path.endsWith('/open-link')));
@@ -115,18 +117,19 @@ test("file citations preview inside the chat dialog, highlight lines and never n
   } finally {h.dispose();}
 });
 
-test("a missing file displays an error in the preview and leaves the conversation open", async () => {
+test("an unhandled file reference shows an inline error without opening a popup", async () => {
   const entries: Entry[] = [{id:"missing-file", turn_id:"turn", kind:"assistant", text:"[旧文件](src/missing.go#L8)"}];
   const h = mount(true, entries, {readOnly:true, request:async(path) => {
     if (path.includes('/history')) return {session,entries} as any;
-    if (path.includes('/file?')) throw new Error('文件不存在、已移动或不可读取');
     return idleChat() as any;
   }});
   try {
     await until(() => h.w.document.querySelector('.aui-md a'));
     h.w.document.querySelector<HTMLAnchorElement>('.aui-md a')!.click();
-    await until(() => h.w.document.querySelector('.chat-file-dialog [role="alert"]'));
-    assert.match(h.w.document.querySelector('.chat-file-dialog')!.textContent || '', /文件不存在、已移动/);
+    await until(() => h.w.document.querySelector('[role="alert"]'));
+    assert.match(h.w.document.querySelector('[role="alert"]')!.textContent || '', /工作目录或附加目录/);
+    assert.equal(h.w.document.querySelector('.chat-file-dialog'), null);
+    assert(!h.calls.some(c => c.path.includes('/file?')));
     assert(h.w.document.querySelector('#assistantChatTitle'));
     assert.equal(h.w.location.href, 'http://localhost/');
     assert.deepEqual(h.errors, []);
@@ -348,6 +351,31 @@ test("official Markdown and tool components render existing history and expose c
     assert.match(h.w.document.querySelector(".aui-tool-fallback-result")?.textContent||"",/not executable/);
     assert.deepEqual(h.errors,[]);
   } finally {h.dispose();}
+});
+
+test("workspace links expose every task and project without expanding working details", async () => {
+  const opened: [string, string][] = [];
+  const h = mount(true, [], {workspace: {tasks: [task, {...task, id:"other", name:"另一任务"}], projects: []}, openWorkspace: (kind, id) => {opened.push([kind, id]);}});
+  try {
+    await until(() => h.input());
+    const context = h.w.document.querySelector<HTMLDetailsElement>(".chat-workspace-context")!;
+    h.w.document.querySelector<HTMLButtonElement>('[aria-label="打开项目详情：项目"]')!.click();
+    assert.equal(context.open, false);
+    const tasks = h.w.document.querySelectorAll<HTMLButtonElement>('.chat-workspace-tasks button');
+    assert.equal(tasks.length, 2);
+    tasks.forEach(button => button.click());
+    assert.deepEqual(opened, [["project","p"],["task","task"],["task","other"]]);
+    assert.deepEqual(h.errors, []);
+  } finally { h.dispose(); }
+});
+
+test("external directories show no workspace navigation targets", async () => {
+  const h = mount(true, [], {task: undefined, workspace: {tasks: [], projects: []}, openWorkspace() {assert.fail("external directory has no details");}});
+  try {
+    await until(() => h.input());
+    assert.equal(h.w.document.querySelector(".chat-workspace-link"), null);
+    assert.equal(h.w.document.querySelector(".chat-workspace-tasks"), null);
+  } finally { h.dispose(); }
 });
 
 test("chat chrome identifies task and project with expandable working directory details", async () => {
@@ -927,8 +955,8 @@ test("running state appears above the composer and disables archive and fork", a
   const h = mount(true, [{id: "active-user", turn_id: "turn", kind: "user", text: "正在处理的要求"}]);
   h.setChat({...idleChat(), id: 'active', turn_id: 'turn', status: 'running', busy: true}); h.bridge.open(h.options);
   try {
-    await until(() => h.w.document.querySelector('.chat-status[data-state="running"]'));
-    assert.match(h.w.document.querySelector('.chat-status')!.textContent || "", /运行中/);
+    await until(() => h.w.document.querySelector('.chat-run-indicator[data-state="running"]'));
+    assert.equal(h.w.document.querySelector('.chat-status'), null);
     const indicator = h.w.document.querySelector('.chat-run-indicator[data-state="running"]');
     assert(indicator);
     assert.match(indicator.textContent || '', /进行中/);
@@ -999,8 +1027,9 @@ test("native Codex runs show their activity without offering local stop or sendi
   const h = mount(true, [{id:'native-user',turn_id:'native',kind:'user',text:'原生运行'}], {stream:async()=>{streams++;throw new Error('must not subscribe as an owner');}});
   h.setChat({...idleChat(),external:true,busy:true,status:'running',turn_id:'native'});h.bridge.open(h.options);
   try {
-    await until(()=>h.w.document.querySelector('.chat-status[data-state="running"]'));
-    assert.match(h.w.document.querySelector('.chat-status')!.textContent||'',/Codex 中运行/);
+    await until(()=>h.w.document.querySelector('.chat-run-indicator[data-state="running"]'));
+    assert.equal(h.w.document.querySelector('.chat-status'),null);
+    assert.match(h.w.document.querySelector('.chat-run-indicator')!.textContent||'',/Codex 正在运行/);
     assert.equal(h.w.document.querySelector('.aui-composer-cancel'),null);
     h.type('暂存的补充');await tick();
     assert.equal(h.w.document.querySelector<HTMLButtonElement>('.aui-composer-send')?.disabled,true);
@@ -1032,4 +1061,194 @@ test("assistant local Markdown images load through the session image API and fai
     if(path.includes('/image?'))throw new Error('file gone');return idleChat() as any;
   }});
   try {await until(()=>failed.w.document.querySelector('.chat-image-unavailable'));assert.match(failed.w.document.body.textContent||'',/图片不存在、已移动/);assert.equal(failed.w.document.querySelector('img[src="/missing.png"]'),null);assert.deepEqual(failed.errors,[]);}finally{failed.dispose();}
+});
+
+test("file citations hand off to the adjacent reader when the active workspace accepts them", async () => {
+ const entries: Entry[]=[{id:"ref",turn_id:"turn",kind:"assistant",text:"[源码](src/read.ts#L42)"}];
+ const h=mount(true,entries,{readOnly:true});
+ let detail: any;
+ h.w.addEventListener("workhub:open-file",(event:any)=>{detail=event.detail;event.preventDefault();});
+ try {
+  await until(()=>h.w.document.querySelector('.aui-md a'));
+  h.w.document.querySelector<HTMLAnchorElement>('.aui-md a')!.click();await tick();
+  assert.equal(detail.session,"session");assert.equal(detail.environment,"local");assert.equal(detail.path,"src/read.ts");assert.equal(detail.line,42);
+  assert.equal(h.w.document.querySelector('.chat-file-dialog'),null);
+  assert.equal(h.calls.some(call=>call.path.includes('/file?')),false);
+  assert.deepEqual(h.errors,[]);
+ } finally {h.dispose();}
+});
+
+
+test("the files button shares the chat title toolbar and retains its native controller across remounts", async () => {
+  const h=mount(true,[],{readOnly:true},true);
+  try {
+    await until(()=>h.w.document.querySelector('.chat-panel-actions #toggleConversationFiles'));
+    const button=h.w.document.getElementById('toggleConversationFiles')!;
+    let clicks=0;button.addEventListener('click',()=>clicks++);
+    button.click();assert.equal(clicks,1);
+    h.bridge.close();
+    await until(()=>h.w.document.querySelector('#sessionHistoryFilesSlot #toggleConversationFiles'));
+    h.bridge.open(h.options);
+    await until(()=>h.w.document.querySelector('.chat-panel-actions #toggleConversationFiles'));
+    assert.equal(h.w.document.getElementById('toggleConversationFiles'),button);
+    button.click();assert.equal(clicks,2);
+    assert.deepEqual(h.errors,[]);
+  } finally {h.dispose();}
+});
+
+test("inline source paths open the adjacent reader at their line while commands and fenced code remain text", async () => {
+ const entries: Entry[]=[{id:'paths',turn_id:'turn',kind:'assistant',text:'查看 `src/app.ts:42`、`README.md`，执行 `npm test`。\n\n```text\nsrc/in-code.ts:7\n```\n\n[`label.ts`](src/real.ts#L18)'}];
+ const h=mount(true,entries,{readOnly:true});const references:any[]=[];
+ h.w.addEventListener('workhub:open-file',(event:any)=>{references.push(event.detail);event.preventDefault();});
+ try {
+  await until(()=>h.w.document.querySelectorAll('.aui-md .chat-file-reference').length===2);
+  const buttons=[...h.w.document.querySelectorAll<HTMLButtonElement>('.aui-md .chat-file-reference')];
+  buttons.find(b=>b.textContent==='src/app.ts:42')!.click();await tick();
+  assert.equal(references[0].path,'src/app.ts');assert.equal(references[0].line,42);
+  buttons.find(b=>b.textContent==='README.md')!.click();await tick();
+  assert.equal(references[1].path,'README.md');assert.equal(references[1].line,1);
+  assert.equal(h.w.document.querySelector('pre .chat-file-reference'),null);
+  const explicit=h.w.document.querySelector<HTMLAnchorElement>('.aui-md a')!;
+  assert.equal(explicit.querySelector('.chat-file-reference'),null);
+  explicit.click();await tick();assert.equal(references[2].path,'src/real.ts');assert.equal(references[2].line,18);
+  assert.equal(h.w.document.querySelector('.chat-file-dialog'),null);
+  assert.deepEqual(h.errors,[]);
+ } finally {h.dispose();}
+});
+
+test("file change record names open at the first changed line and preserve diff text", async () => {
+ const entries: Entry[]=[{id:'changes',turn_id:'turn',kind:'change',status:'completed',text:'src/app.ts\n@@ -8,3 +8,4 @@\n context\n-old\n+new\n\\ No newline at end of file\nREADME.md\n@@ -1 +1 @@\n-old\n+<script>inert</script>\n'}];
+ const h=mount(true,entries,{readOnly:true});const references:any[]=[];
+ h.w.addEventListener('workhub:open-file',(event:any)=>{references.push(event.detail);event.preventDefault();});
+ try {
+  await until(()=>h.w.document.querySelector('.aui-tool-group-trigger'));
+  h.w.document.querySelector<HTMLButtonElement>('.aui-tool-group-trigger')!.click();
+  await until(()=>h.w.document.querySelector('.aui-tool-fallback-trigger'));
+  h.w.document.querySelector<HTMLButtonElement>('.aui-tool-fallback-trigger')!.click();
+  await until(()=>h.w.document.querySelectorAll('.aui-tool-fallback-args .chat-file-reference').length===2);
+  const buttons=[...h.w.document.querySelectorAll<HTMLButtonElement>('.aui-tool-fallback-args .chat-file-reference')];
+  buttons[0].click();await tick();assert.equal(references[0].path,'src/app.ts');assert.equal(references[0].line,9);
+  buttons[1].click();await tick();assert.equal(references[1].path,'README.md');assert.equal(references[1].line,1);
+  assert.match(h.w.document.querySelector('.aui-tool-fallback-args')!.textContent||'',/<script>inert/);
+  assert.equal(h.w.document.querySelector('.aui-tool-fallback-args script'),null);
+  assert.deepEqual(h.errors,[]);
+ } finally {h.dispose();}
+});
+
+test("each reply shows its edited files outside execution records and can expand diffs", async () => {
+ const entries:Entry[]=[
+  {id:'u1',turn_id:'first',kind:'user',text:'第一次修改'},
+  {id:'c1',turn_id:'first',kind:'change',status:'completed',text:'src/a.ts\n@@ -1 +1 @@\n-old\n+<script>inert</script>\n',file_changes:[{path:'src/a.ts',additions:1,deletions:1}]},
+  {id:'c2',turn_id:'first',kind:'change',status:'completed',text:'src/a.ts\n@@ -2 +2 @@\n-old\n+new\nREADME.md\n@@ -0,0 +1 @@\n+readme\n'},
+  {id:'failed',turn_id:'first',kind:'change',status:'failed',text:'failed.ts\n+bad'},
+  {id:'answer',turn_id:'first',kind:'assistant',text:'第一轮完成'},
+  {id:'u2',turn_id:'second',kind:'user',text:'第二次修改'},
+  {id:'c3',turn_id:'second',kind:'change',status:'completed',text:'next.ts\n+next\n'},
+ ];
+ const h=mount(true,entries,{readOnly:true});const references:any[]=[];
+ h.w.addEventListener('workhub:open-file',(event:any)=>{references.push(event.detail);event.preventDefault();});
+ try {
+  await until(()=>h.w.document.querySelectorAll('.chat-change-summary').length===2);
+  const summaries=[...h.w.document.querySelectorAll<HTMLElement>('.chat-change-summary')];
+  assert.match(summaries[0].textContent||'',/已编辑 2 个文件/);
+  assert.match(summaries[0].querySelector('.chat-change-title')!.textContent||'',/\+3-2/);
+  assert.equal(summaries[0].closest('.aui-tool-group-content'),null);
+  assert.equal(summaries[0].querySelectorAll('.chat-change-file').length,2);
+  assert(!summaries[0].textContent?.includes('failed.ts'));
+  assert.match(summaries[1].textContent||'',/已编辑 1 个文件/);
+  assert.equal(summaries[0].querySelector('pre'),null);
+  summaries[0].querySelector<HTMLButtonElement>('.chat-change-view')!.click();
+  await until(()=>summaries[0].querySelectorAll('.chat-change-preview').length===2);
+  assert.match(summaries[0].querySelector('pre')!.textContent||'',/<script>inert/);
+  assert.equal(summaries[0].querySelector('script'),null);
+  assert.equal(summaries[0].querySelectorAll('pre').length,3);
+  summaries[0].querySelector<HTMLButtonElement>('.chat-file-reference')!.click();await tick();
+  assert.equal(references[0].path,'src/a.ts');assert.equal(references[0].session,'session');
+  summaries[0].querySelector<HTMLButtonElement>('.chat-change-view')!.click();
+  await until(()=>!summaries[0].querySelector('pre'));
+  assert.deepEqual(h.errors,[]);
+ }finally{h.dispose();}
+});
+
+for (const readOnly of [false, true]) test(`history loads automatically near the top and preserves the reading anchor (readOnly=${readOnly})`, async () => {
+  const recent: Entry = {id:"recent",turn_id:"recent-turn",kind:"assistant",text:"最近的回复"};
+  const older: Entry = {id:"older",turn_id:"older-turn",kind:"assistant",text:"更早的回复"};
+  let requests = 0;
+  let complete!: (page: any) => void;
+  const h = mount(true, [], {readOnly, request: async path => {
+    if (!path.includes('/history')) return idleChat() as any;
+    if (!path.includes('cursor=')) return {session,entries:[recent],next_cursor:'older-page'} as any;
+    requests++;
+    return new Promise(resolve => {complete = resolve;}) as any;
+  }});
+  try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {
+      scrollHeight: {get() {return this.textContent?.includes('更早的回复') ? 2800 : 2000;}},
+      clientHeight: {get: () => 400},
+    });
+    const viewport = () => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
+    await until(() => viewport()?.scrollTop === 2000);
+    assert.equal(requests, 0, 'opening at the latest message does not fetch old pages');
+    assert.equal(h.w.document.querySelector('button[data-slot="aui_thread-load-earlier"]'), null);
+    const anchor = viewport().querySelector<HTMLElement>('[data-chat-message-id]')!;
+    anchor.getBoundingClientRect = () => ({top:(viewport().textContent?.includes('更早的回复') ? 1000 : 200) - viewport().scrollTop, bottom:1100 - viewport().scrollTop}) as DOMRect;
+    viewport().scrollTop = 200;
+    viewport().dispatchEvent(new h.w.Event('scroll'));
+    await until(() => requests === 1);
+    await until(() => h.w.document.querySelector('[data-slot="aui_thread-load-earlier"]')?.textContent?.includes('正在加载更早记录'));
+    viewport().dispatchEvent(new h.w.Event('scroll'));
+    viewport().dispatchEvent(new h.w.Event('scroll'));
+    await tick();
+    assert.equal(requests, 1, 'scroll events share the in-flight request');
+    complete({session,entries:[older],next_cursor:null});
+    await until(() => viewport().textContent?.includes('更早的回复'));
+    await until(() => viewport().scrollTop === 1000);
+    assert.equal(anchor.getBoundingClientRect().top, 0, 'the original text stays at the same viewport offset');
+    viewport().scrollTop = 0;
+    viewport().dispatchEvent(new h.w.Event('scroll'));
+    await tick();
+    assert.equal(requests, 1, 'the final page stops pagination');
+    assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
+});
+
+test('automatic history loading stops after an error instead of retrying on every scroll', async () => {
+  let requests = 0;
+  const h = mount(true, [], {readOnly:true, request: async path => {
+    if (!path.includes('/history')) return idleChat() as any;
+    if (!path.includes('cursor=')) return {session,entries:[{id:'latest',turn_id:'t',kind:'assistant',text:'最近消息'}],next_cursor:'older'} as any;
+    requests++;
+    throw new Error('历史读取失败');
+  }});
+  try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {scrollHeight:{get:()=>2000},clientHeight:{get:()=>400}});
+    const viewport = () => h.w.document.querySelector<HTMLElement>('[data-slot="aui_thread-viewport"]')!;
+    await until(() => viewport()?.scrollTop === 2000);
+    viewport().scrollTop = 100; viewport().dispatchEvent(new h.w.Event('scroll'));
+    await until(() => h.w.document.querySelector('[role="alert"]')?.textContent?.includes('历史读取失败'));
+    for (let i=0;i<3;i++) {viewport().dispatchEvent(new h.w.Event('scroll')); await tick();}
+    assert.equal(requests, 1);
+    assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
+});
+
+test('short history automatically fills the viewport across empty pages', async () => {
+  const cursors: string[] = [];
+  const h = mount(true, [], {readOnly:true, request: async path => {
+    if (!path.includes('/history')) return idleChat() as any;
+    const cursor = new URL(path, 'http://localhost').searchParams.get('cursor');
+    if (!cursor) return {session,entries:[{id:'latest',turn_id:'latest',kind:'assistant',text:'最新一条'}],next_cursor:'empty-page'} as any;
+    cursors.push(cursor);
+    if (cursor === 'empty-page') return {session,entries:[],next_cursor:'older-page'} as any;
+    return {session,entries:[{id:'older',turn_id:'older',kind:'assistant',text:'较早内容已补齐'}],next_cursor:null} as any;
+  }});
+  try {
+    Object.defineProperties(h.w.HTMLElement.prototype, {
+      scrollHeight:{get() {return this.textContent?.includes('较早内容已补齐') ? 2000 : 200;}},
+      clientHeight:{get:()=>400},
+    });
+    await until(() => h.w.document.querySelector('[data-slot="aui_message-group"]')?.textContent?.includes('较早内容已补齐'));
+    assert.deepEqual(cursors, ['empty-page','older-page']);
+    assert.deepEqual(h.errors, []);
+  } finally {h.dispose();}
 });

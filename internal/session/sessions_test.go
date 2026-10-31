@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -208,7 +209,21 @@ func TestSessionResumePreservesOriginalDirectoryAndGuardsWorkspace(t *testing.T)
 	if code, raw := call(t, a, "POST", endpoint, nil); code != 200 {
 		t.Fatalf("resume %d %s", code, raw)
 	}
-	if plan.Cwd != path || len(plan.AdditionalDirectories) != 2 || len(plan.Args) != 6 || plan.Args[0] != "resume" || plan.Args[1] != id || plan.Args[4] != "--remote" || !strings.HasPrefix(plan.Args[5], "unix://") {
+	wantArgs := []string{"resume", id, "--cd", path}
+	if runtime.GOOS == "linux" {
+		if len(plan.Args) != 6 || plan.Args[4] != "--remote" || !strings.HasPrefix(plan.Args[5], "unix://") {
+			t.Fatalf("missing managed terminal relay: %+v", plan)
+		}
+		wantArgs = append(wantArgs, plan.Args[4:]...)
+	} else {
+		for _, dir := range plan.AdditionalDirectories {
+			wantArgs = append(wantArgs, "--add-dir", dir)
+		}
+		if a.TerminalOwner(id, path) != nil {
+			t.Fatal("native launcher reserved an unsupported managed relay")
+		}
+	}
+	if plan.Cwd != path || len(plan.AdditionalDirectories) != 2 || !reflect.DeepEqual(plan.Args, wantArgs) {
 		t.Fatalf("resume plan %+v", plan)
 	}
 	if err := exec.Command("bash", "-n", plan.Script).Run(); err != nil {

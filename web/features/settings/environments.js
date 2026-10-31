@@ -32,14 +32,14 @@ async function selectEnvironment(id, route = '/requirements', updateHistory = tr
   if (changed && typeof suspendSessionWorkspace === 'function') suspendSessionWorkspace();
   if (typeof suspendTaskWorkspace === 'function') suspendTaskWorkspace();
   if (changed) closeSessionHistory(false);
-  document.querySelectorAll('dialog[open]').forEach(dialog => { if (changed || dialog.id !== 'conversationDialog') dialog.close(); });
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if (changed) requirementSessions.clear();
   if (changed) environmentRevision++;
   activeEnvironment = id;
   const url = new URL(location.href);
   if (id === 'local') url.searchParams.delete('environment'); else url.searchParams.set('environment', id);
   url.hash = route;
-  if (updateHistory && url.href !== location.href) history.pushState(null, '', url);
+  if (updateHistory && url.href !== location.href) history[updateHistory === 'replace' ? 'replaceState' : 'pushState'](null, '', url);
   if (changed) Object.assign(state, { projects: [], requirements: [], selectedProject: null, selectedRequirement: null, view: 'requirements', root: '', terminal: {}, loaded: false, refreshing: false });
   readRoute();
   $('#search').value = '';

@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"worktree-hub/internal/workspace"
 )
 
 func TestDarwinProcessArgsPreservesBoundariesAndExcludesEnvironment(t *testing.T) {
@@ -27,7 +29,7 @@ func TestDarwinProcessArgsPreservesBoundariesAndExcludesEnvironment(t *testing.T
 		t.Fatalf("argument boundaries changed: %v", err)
 	}
 	for _, invalid := range [][]byte{nil, {1, 0, 0, 0}, {255, 255, 255, 255, 0}, raw[:len(raw)-len("IGNORED=/another/session\x00")-1]} {
-		if _, err := darwinProcessArgs(invalid); err == nil {
+		if _, err := darwinProcessArgs(invalid); err == nil || workspace.IsSessionConflict(err) {
 			t.Fatal("accepted truncated or invalid arguments")
 		}
 	}
@@ -105,7 +107,7 @@ func TestDarwinCodexTerminalConflict(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := nativeTerminalConflict("same", base)
-			if mode == "same" && (err == nil || !strings.Contains(err.Error(), "此会话")) || mode != "same" && err != nil {
+			if mode == "same" && (!workspace.IsSessionConflict(err) || !strings.Contains(err.Error(), "此会话")) || mode != "same" && err != nil {
 				t.Fatalf("wrong terminal ownership result (mode=%s): %v", mode, err)
 			}
 		}()

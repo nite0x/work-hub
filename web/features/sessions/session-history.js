@@ -86,7 +86,7 @@ function updateHistoryToolbar(current) {
   $('#refreshSessionHistory').disabled = current.loading;
   $('#loadOlderHistory').disabled = current.loading;
   $('#loadOlderHistory').hidden = !current.cursor;
-  $('#sessionHistoryStatus').textContent = current.loading && !current.backgroundRefresh ? '正在读取会话历史…' : `${current.entries.length} 条记录${current.cursor ? ' · 可加载更早内容' : ''} · ${current.pushConnected ? '终端实时推送中' : current.pushStatus || '每秒自动刷新'}`;
+  $('#sessionHistoryStatus').textContent = current.loading && !current.backgroundRefresh ? '正在读取对话历史…' : `${current.entries.length} 条记录${current.cursor ? ' · 可加载更早内容' : ''} · ${current.pushConnected ? '终端实时推送中' : current.pushStatus || '每秒自动刷新'}`;
 }
 
 function renderHistoryTimeline(current, older = false, background = true) {
@@ -98,7 +98,7 @@ function renderHistoryTimeline(current, older = false, background = true) {
   const expanded = new Map([...container.querySelectorAll('[data-history-entry] details')].map(detail => [detail.closest('[data-history-entry]').dataset.historyEntry, detail.open]));
   if (typeof renderChatTimeline === 'function') renderChatTimeline(current);
   else {
-    const markup = current.entries.length ? current.entries.map(renderHistoryEntry).join('') : `<p class="session-empty">${current.cursor ? '本页暂无消息或命令，可继续加载更早记录。' : '此会话尚无已保存的消息或命令记录。'}</p>`;
+    const markup = current.entries.length ? current.entries.map(renderHistoryEntry).join('') : `<p class="session-empty">${current.cursor ? '本页暂无消息或命令，可继续加载更早记录。' : '此对话尚无已保存的消息或命令记录。'}</p>`;
     if (current.savedHistoryMarkup !== markup) { container.innerHTML = markup; current.savedHistoryMarkup = markup; }
   }
   container.querySelectorAll('[data-history-entry] details').forEach(detail => {
@@ -190,11 +190,12 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
     panel.setAttribute('aria-labelledby', 'assistantChatTitle');
     window.WorkHubAssistant.open({
       workspace: {tasks: workspace.requirements, projects: workspace.projects},
-      task: context.target ? undefined : task, target: context.target, session: session ? cached || { id: session, name: '会话详情', cwd: '' } : null, environment, environmentName: environmentName(environment), readOnly: readonly, persistDraft: true,
+      task: context.target ? undefined : task, target: context.target, session: session ? cached || { id: session, name: '对话详情', cwd: '' } : null, environment, environmentName: environmentName(environment), readOnly: readonly, persistDraft: true,
       managed: (session, action) => window.dispatchEvent(new CustomEvent("workhub:session-managed", {detail:{session,action,environment}})),
       request: (path, options) => api(path, { ...options, environment }),
       stream: (path, signal) => fetch(path, { headers: { 'X-CSRF-Token': token, 'X-Environment-ID': environment }, signal }),
       close: () => closeSessionHistory(),
+      openWorkspace: (kind, id) => openConversationWorkspaceDetail(kind, id, environment),
       activity: (id, chat) => {
         updateSessionChatActivity(requirement, id, chat, environment);
       },
@@ -224,13 +225,13 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
   $('#newSessionProjectField').hidden = !!session;
   $('#refreshSessionHistory').hidden = !session;
   $('#resumeHistorySession').hidden = !session;
-  $('#sessionChatLabel').textContent = session ? '继续这个会话' : '第一条消息';
+  $('#sessionChatLabel').textContent = session ? '继续这个对话' : '第一条消息';
   $('#sessionChatInput').placeholder = session ? '补充说明、询问进展，或交代下一步…' : '描述你想完成的工作…';
   $('#sessionHistoryError').hidden = true;
   $('#loadOlderHistory').hidden = true;
   $('#sessionHistoryStatus').textContent = '';
   const cached = context.session || requirementSessions.get(requirement)?.sessions.find(s => s.id === session);
-  $('#sessionHistoryTitle').textContent = cached?.name || '会话详情';
+  $('#sessionHistoryTitle').textContent = cached?.name || '对话详情';
   $('#sessionHistoryMeta').textContent = cached ? cached.cwd + '\n' + session : session;
   $('#sessionHistoryEntries').textContent = '';
   const resume = $('#resumeHistorySession');
@@ -256,7 +257,6 @@ function openSessionHistoryPanel(requirement, session = null, context = {}) {
 }
 
 function closeSessionHistory(restoreFocus = true) {
-  if (restoreFocus && typeof conversationMode !== 'undefined' && conversationMode === 'modal') { closeConversationWorkspace(); return; }
   if (sessionHistoryState && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') window.dispatchEvent(new CustomEvent('workhub:chat-layout', { detail: { phase: 'before' } }));
   if (restoreFocus && typeof collapseTaskConversation === 'function' && taskWorkspaceCurrent) { collapseTaskConversation(); return; }
   closeCommandOutput();
@@ -274,7 +274,7 @@ function closeSessionHistory(restoreFocus = true) {
   if (restoreFocus && current) {
     const selector = current.session ? `[data-session-action="details"][data-requirement="${CSS.escape(current.requirement)}"][data-session="${CSS.escape(current.session)}"]` : `[data-session-action="new"][data-requirement="${CSS.escape(current.requirement)}"]`;
     const button = document.querySelector(selector);
-    (button || $('#pageTitle')).focus({ preventScroll: true });
+    (button || (typeof conversationMode !== 'undefined' && conversationMode === 'page' ? $('#sessionBrowserSearch') : $('#pageTitle'))).focus({ preventScroll: true });
   }
 }
 

@@ -1,3 +1,4 @@
+import { Files } from "lucide-react"
 import type { ComponentProps } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -27,28 +28,28 @@ function SessionActivity({ session: s }: { session: Session }) {
 export function SessionList({ task: q, data, readOnly }: { task: Task; data?: SessionsData; readOnly: boolean }) {
   const sessions = data?.sessions || []
   return <section id="requirementSessions" className="requirement-sessions task-session-controls shadcn-scope" aria-labelledby="sessionsTitle">
-    <div className="task-sessions-heading"><div><h2 id="sessionsTitle">会话 <StatusBadge kind="neutral">{sessions.length} 个</StatusBadge></h2></div>
-      {readOnly ? <Action action="launch" id={q.id} disabled={q.state !== "ready"}>终端新建 ↗</Action> : <SessionAction action="new" requirement={q.id} variant="default" disabled={q.state !== "ready"}>＋ 新建会话</SessionAction>}
+    <div className="task-sessions-heading"><div><h2 id="sessionsTitle">对话 <StatusBadge kind="neutral">{sessions.length} 个</StatusBadge></h2></div>
+      {readOnly ? <Action action="launch" id={q.id} disabled={q.state !== "ready"}>终端新建 ↗</Action> : <SessionAction action="new" requirement={q.id} variant="default" disabled={q.state !== "ready"}>＋ 新建对话</SessionAction>}
     </div>
-    <div className="task-session-menu-actions"><SessionAction action="refresh" requirement={q.id}>刷新会话</SessionAction><SessionAction action="picker" requirement={q.id}>关联已有会话</SessionAction></div>
-    {data?.error ? <Feedback variant="destructive">{data.error} 可点击刷新会话重试。</Feedback> : null}
-    {sessions.length ? <ul className="task-session-list" aria-label="关联会话">{sessions.map(s => <li key={s.id} data-session-row={s.id}>
+    <div className="task-session-menu-actions"><SessionAction action="refresh" requirement={q.id}>刷新对话</SessionAction><SessionAction action="picker" requirement={q.id}>关联已有对话</SessionAction></div>
+    {data?.error ? <Feedback variant="destructive">{data.error} 可点击刷新对话重试。</Feedback> : null}
+    {sessions.length ? <ul className="task-session-list" aria-label="关联对话">{sessions.map(s => <li key={s.id} data-session-row={s.id}>
       <button type="button" className="task-session-open" data-session-action="details" data-session={s.id} data-requirement={q.id} title={s.cwd}>
         <span className="task-session-row-heading"><span className="task-session-name">{s.name || "未命名对话"}</span><span data-session-indicators={s.id}><SessionActivity session={s} /></span></span>
         <span className="task-session-meta">{q.members.find(m => m.path === s.cwd)?.project_name || (s.cwd === q.path ? "任务工作区" : "外部工作目录")}{s.updated_at ? ` · ${sessionTime(s.updated_at)}` : ""}</span>
         {s.error ? <span className="table-message">{s.error}</span> : null}
       </button>
-    </li>)}</ul> : <p className="session-empty" role="status">{!data || data.loading ? "正在读取会话…" : data.error ? "暂时无法读取会话。" : "暂无关联会话，可新建或关联已有会话。"}</p>}
+    </li>)}</ul> : <p className="session-empty" role="status">{!data || data.loading ? "正在读取对话…" : data.error ? "暂时无法读取对话。" : "暂无关联对话，可新建或关联已有对话。"}</p>}
   </section>
 }
 export function SessionPicker({ sessions, linked }: { sessions: Session[]; linked: string[] }) {
-  if (!sessions.length) return <p className="session-empty">没有找到会话。可换一个标题搜索，或填写会话 ID。</p>
+  if (!sessions.length) return <p className="session-empty">没有找到对话。可换一个标题搜索，或填写对话 ID。</p>
   return <div className="grid gap-3">{sessions.map(s => <Card key={s.id} className="session-picker-row flex-row gap-4 rounded-lg p-4 shadow-none"><div><strong>{s.name || "未命名对话"}</strong><div className="path">{s.cwd}</div><small>{sessionTime(s.updatedAt)} · {s.id}</small></div><SessionAction action="link" session={s.id} disabled={linked.includes(s.id)}>{linked.includes(s.id) ? "已关联" : "关联"}</SessionAction></Card>)}</div>
 }
 export function SessionPickerDialog() {
-  return <><ModalHeader id="sessionDialogTitle" title="关联已有会话" eyebrow="CODEX SESSIONS" /><p className="dialog-description">优先查找任务工作目录中的会话，也可搜索当前环境的其他会话或填写 ID。关联后保留会话原有的工作目录和执行配置。</p>
-    <form id="sessionLinkForm" className="session-search"><Field id="sessionLinkID" label="会话 ID"><Input id="sessionLinkID" name="session_id" required maxLength={200} autoComplete="off" placeholder="粘贴会话 ID" /></Field><Button variant="outline" type="submit">关联 ID</Button></form>
-    <form id="sessionSearchForm" className="session-search"><Field id="sessionSearch" label="按标题查找"><Input id="sessionSearch" name="search" autoComplete="off" placeholder="搜索本地会话标题" /></Field><Button variant="outline" type="submit">搜索</Button></form>
+  return <><ModalHeader id="sessionDialogTitle" title="关联已有对话" eyebrow="CODEX SESSIONS" /><p className="dialog-description">优先查找任务工作目录中的对话，也可搜索当前环境的其他对话或填写 ID。关联后保留对话原有的工作目录和执行配置。</p>
+    <form id="sessionLinkForm" className="session-search"><Field id="sessionLinkID" label="对话 ID"><Input id="sessionLinkID" name="session_id" required maxLength={200} autoComplete="off" placeholder="粘贴对话 ID" /></Field><Button variant="outline" type="submit">关联 ID</Button></form>
+    <form id="sessionSearchForm" className="session-search"><Field id="sessionSearch" label="按标题查找"><Input id="sessionSearch" name="search" autoComplete="off" placeholder="搜索本地对话标题" /></Field><Button variant="outline" type="submit">搜索</Button></form>
     <Feedback id="sessionPickerError" variant="destructive" hidden /><div id="sessionPickerResults" aria-live="polite" />
     <div className="dialog-footer"><Button type="button" variant="outline" id="sessionPickerMore" hidden>加载更多</Button><Button type="button" variant="outline" className="close-dialog">关闭</Button></div>
   </>
@@ -62,16 +63,16 @@ export function CommandOutputDialog() {
 }
 export function SessionHistoryPanel() {
   return <><div id="assistantChatRoot" /><header className="session-history-header">
-    <div className="dialog-header"><div><Badge variant="secondary" id="sessionHistoryEyebrow" className="mb-3 rounded-md text-xs tracking-wider">SESSION HISTORY</Badge><h2 id="sessionHistoryTitle" className="m-0 text-lg font-semibold" tabIndex={-1}>会话详情</h2></div><Button type="button" variant="ghost" size="icon" id="closeSessionHistory" aria-label="关闭会话详情">×</Button></div>
+    <div className="dialog-header"><div><Badge variant="secondary" id="sessionHistoryEyebrow" className="mb-3 rounded-md text-xs tracking-wider">SESSION HISTORY</Badge><h2 id="sessionHistoryTitle" className="m-0 text-lg font-semibold" tabIndex={-1}>对话详情</h2></div><div className="session-history-heading-actions"><span id="sessionHistoryFilesSlot"><Button type="button" size="sm" variant="ghost" id="toggleConversationFiles" aria-label="查看对话工作目录的文件" aria-expanded={false} aria-controls="conversationFilesPane" disabled><Files aria-hidden="true" />文件</Button></span><Button type="button" variant="ghost" size="icon" id="closeSessionHistory" aria-label="关闭对话详情">×</Button></div></div>
     <details className="session-context"><summary>工作目录</summary><div id="sessionHistoryMeta" className="session-history-meta" /></details>
     <div id="newSessionProjectField" className="mt-4" hidden><Field id="newSessionProject" label="工作项目"><NativeSelect id="newSessionProject" aria-label="工作项目" /></Field></div>
     <div className="session-history-toolbar"><span id="sessionHistoryStatus" role="status" aria-live="polite" /><div><Button type="button" variant="outline" size="sm" id="refreshSessionHistory">刷新详情</Button><SessionAction action="resume" id="resumeHistorySession" variant="default">在终端继续 ↗</SessionAction></div></div>
     <Feedback id="sessionHistoryAttention" className="session-history-attention" role="alert" aria-live="polite" tabIndex={0} aria-label="终端待确认事项" hidden />
   </header>
-  <div id="sessionHistoryScroll" className="session-history-scroll" tabIndex={0} aria-label="会话历史记录"><Feedback id="sessionHistoryError" variant="destructive" hidden /><Button type="button" variant="outline" size="sm" id="loadOlderHistory" className="history-more mx-auto mb-5 flex w-fit" hidden>加载更早记录</Button><div id="sessionHistoryEntries" /><div id="sessionChatLiveEntries" /></div>
+  <div id="sessionHistoryScroll" className="session-history-scroll" tabIndex={0} aria-label="对话历史记录"><Feedback id="sessionHistoryError" variant="destructive" hidden /><Button type="button" variant="outline" size="sm" id="loadOlderHistory" className="history-more mx-auto mb-5 flex w-fit" hidden>加载更早记录</Button><div id="sessionHistoryEntries" /><div id="sessionChatLiveEntries" /></div>
   <div id="sessionChatApprovals" className="session-chat-approvals" aria-live="polite" />
   <form id="sessionChatForm" className="session-chat-form"><div id="sessionChatStatus" role="status" aria-live="polite" /><p id="sessionHandoffNotice" className="session-description" role="status" hidden /><Button type="button" variant="outline" size="sm" id="handoffSessionChat" hidden>切换到侧栏（等本轮结束）</Button><Feedback id="sessionChatError" variant="destructive" hidden />
-    <Label htmlFor="sessionChatInput" id="sessionChatLabel" className="text-xs text-muted-foreground">继续这个会话</Label><Textarea id="sessionChatInput" rows={2} maxLength={32000} placeholder="补充说明、询问进展，或交代下一步…" aria-label="会话消息" />
+    <Label htmlFor="sessionChatInput" id="sessionChatLabel" className="text-xs text-muted-foreground">继续这个对话</Label><Textarea id="sessionChatInput" rows={2} maxLength={32000} placeholder="补充说明、询问进展，或交代下一步…" aria-label="对话消息" />
     <div className="session-chat-actions"><div><Button type="button" variant="outline" size="sm" id="stopSessionChat" disabled>停止</Button><Button type="submit" size="sm" id="sendSessionChat" disabled>发送</Button></div></div>
   </form></>
 }

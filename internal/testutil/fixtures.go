@@ -20,6 +20,17 @@ type Server interface {
 	TestToken() string
 }
 
+// TempDir uses the same canonical directory spelling as Git and workspace.Open.
+// macOS's default temporary root contains a /var -> /private/var alias.
+func TempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	v, err := workspace.Git(context.Background(), dir, args...)
@@ -31,7 +42,7 @@ func Git(t *testing.T, dir string, args ...string) string {
 
 func Repo(t *testing.T, name, branch string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), name)
+	path := filepath.Join(TempDir(t), name)
 	if err := os.Mkdir(path, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +92,7 @@ func Create(t *testing.T, a Server, primary string, others []string, slug string
 func RemoteClone(t *testing.T) (seed, remote, clone string) {
 	t.Helper()
 	seed = Repo(t, "seed", "master")
-	root := t.TempDir()
+	root := TempDir(t)
 	remote = filepath.Join(root, "origin.git")
 	clone = filepath.Join(root, "checkout")
 	Git(t, seed, "branch", "codex/wsl-startup")

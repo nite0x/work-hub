@@ -33,7 +33,7 @@ func TestSessionHistoryIsReadOnlyScopedAndChronological(t *testing.T) {
 				}
 				return map[string]any{"thread": s}, nil
 			case "thread/items/list":
-				if params["sortDirection"] != "desc" || params["limit"] != 50 || params["cursor"] != "opaque cursor" {
+				if params["sortDirection"] != "desc" || params["limit"] != 200 || params["cursor"] != "opaque cursor" {
 					t.Fatal(params)
 				}
 				return map[string]any{"nextCursor": "older", "data": []any{
@@ -86,7 +86,7 @@ func TestSessionHistoryIsReadOnlyScopedAndChronological(t *testing.T) {
 
 func TestLegacySessionHistoryPaginationAndEmptyPages(t *testing.T) {
 	c := &fakeSessionClient{request: func(method string, params map[string]any) (any, error) {
-		if method != "thread/turns/list" || params["itemsView"] != "full" || params["limit"] != 5 || params["cursor"] != "older-turn" {
+		if method != "thread/turns/list" || params["itemsView"] != "full" || params["limit"] != 20 || params["cursor"] != "older-turn" {
 			t.Fatal(method, params)
 		}
 		return map[string]any{"data": []any{

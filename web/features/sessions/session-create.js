@@ -4,7 +4,7 @@ const newSessionProjects = new Map();
 
 function prepareNewSession(current) {
   if (current.target) {
-    $('#sessionHistoryTitle').textContent = '新建会话';
+    $('#sessionHistoryTitle').textContent = '新建对话';
     $('#newSessionProjectField').hidden = true;
     $('#sessionHistoryMeta').textContent = current.target.cwd || '';
     $('#sessionHistoryEntries').innerHTML = window.WorkHubUI.newSession('当前目录');
@@ -14,7 +14,7 @@ function prepareNewSession(current) {
   const q = state.requirements.find(q => q.id === current.requirement);
   const pending = newSessionRequests.get(q.id);
   const selected = newSessionProjects.get(q.id) || pending?.project_id || q.primary_project_id;
-  $('#sessionHistoryTitle').textContent = '新建会话';
+  $('#sessionHistoryTitle').textContent = '新建对话';
   $('#newSessionProject').innerHTML = q.members.map(m => `<option value="${esc(m.project_id)}" ${m.project_id === selected ? 'selected' : ''}>${esc(m.project_name)}${m.project_id === q.primary_project_id ? '（主项目）' : ''}</option>`).join('');
   $('#newSessionProject').value = q.members.some(m => m.project_id === selected) ? selected : q.primary_project_id;
   updateNewSessionProject(current);

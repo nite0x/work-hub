@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"worktree-hub/internal/codex"
+	"worktree-hub/internal/workspace"
 )
 
 // Opt-in real tool turn, isolated from existing user threads and projects.
@@ -98,7 +99,7 @@ func TestTerminalDetectionDistinguishesSandboxFromInteractiveCLI(t *testing.T) {
 				t.Fatal(err)
 			}
 			err := scanTerminalSessions(proc, tc.id, cwd)
-			if (err != nil) != tc.conflict {
+			if (err != nil) != tc.conflict || workspace.IsSessionConflict(err) != tc.conflict {
 				t.Fatalf("conflict=%t: %v", tc.conflict, err)
 			}
 		})

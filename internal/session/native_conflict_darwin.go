@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"worktree-hub/internal/workspace"
 )
 
 func nativeTerminalConflict(id, cwd string) error {
@@ -44,7 +46,7 @@ func nativeTerminalConflict(id, cwd string) error {
 		}
 		for _, arg := range args[1:] {
 			if arg == id {
-				return fmt.Errorf("此会话仍有 Codex 终端打开，请先退出终端中的 Codex")
+				return &workspace.SessionConflictError{Message: "此会话仍有 Codex 终端打开，请先退出终端中的 Codex"}
 			}
 		}
 	}

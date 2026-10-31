@@ -137,7 +137,7 @@ func TestTerminalLoginReusedByBackgroundFetchPullAndReopen(t *testing.T) {
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
 		t.Fatal("rejected credentials were not erased")
 	}
-	if got := testGit(t, clone, "config", "--get-all", "credential.helper"); got != "" {
+	if got := testGit(t, clone, "config", "--local", "--get-all", "credential.helper"); got != "" {
 		t.Fatal("application modified repository credential configuration")
 	}
 }

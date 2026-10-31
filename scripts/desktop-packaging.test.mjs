@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { desktopVersion, targets, packagePlan, bundleFiles, writeChecksums } from './desktop-lib.mjs';
+import { desktopVersion, targets, packagePlan, bundleFiles, writeChecksums, validateReleaseSource } from './desktop-lib.mjs';
 
 test('installer plans select native platform formats and reject accidental cross-OS builds', () => {
   for (const [triple, definition] of Object.entries(targets)) {
@@ -47,4 +47,13 @@ test('version drift is rejected and every exported installer has integrity metad
     assert.equal(writeChecksums(directory, ['installer'])[0].sha256, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
     assert.match(readFileSync(path.join(directory, 'SHA256SUMS'), 'utf8'), /  installer\n$/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('signed release packaging requires committed source and an optimized build', () => {
+  const plan = { requireSigning: true, debug: false };
+  assert.doesNotThrow(() => validateReleaseSource(plan, ''));
+  assert.throws(() => validateReleaseSource(plan, ' M internal/task/member_selection.go'), /clean Git working tree/);
+  assert.throws(() => validateReleaseSource(plan, '?? unexpected.go'), /clean Git working tree/);
+  assert.throws(() => validateReleaseSource({ ...plan, debug: true }, ''), /cannot use --debug/);
+  assert.doesNotThrow(() => validateReleaseSource({ requireSigning: false, debug: true }, ' M README.md'));
 });

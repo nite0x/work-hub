@@ -8,7 +8,6 @@ const taskReviewController = window.WorkHubUI.createTaskReviewController({
   mutation,
   toast,
   reviewMarkup: window.WorkHubUI.taskReview,
-  changesMarkup: window.WorkHubUI.changeFiles,
 });
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]');

@@ -14,25 +14,55 @@ import (
 // Only user-visible messages and command records cross the HTTP boundary.
 // Do not forward raw thread items (which can contain internal reasoning).
 type HistoryEntry struct {
-	LocalImages     map[string]string `json:"local_images,omitempty"`
-	LocalImagePaths []string          `json:"-"`
-	ID              string            `json:"id"`
-	TurnID          string            `json:"turn_id"`
-	Kind            string            `json:"kind"`
-	Text            string            `json:"text,omitempty"`
-	Command         string            `json:"command,omitempty"`
-	Cwd             string            `json:"cwd,omitempty"`
-	Status          string            `json:"status,omitempty"`
-	Output          *string           `json:"output"`
-	ExitCode        *int              `json:"exit_code"`
-	DurationMs      *int64            `json:"duration_ms"`
-	StartedAtMs     *int64            `json:"started_at_ms"`
-	CompletedAtMs   *int64            `json:"completed_at_ms"`
-	Tool            string            `json:"tool,omitempty"`
-	Images          []string          `json:"images,omitempty"`
-	Delivery        string            `json:"delivery,omitempty"`
-	Questions       []ChatQuestion    `json:"questions,omitempty"`
-	QuestionStatus  string            `json:"question_status,omitempty"`
+	FileChanges     []HistoryFileChange `json:"file_changes,omitempty"`
+	LocalImages     map[string]string   `json:"local_images,omitempty"`
+	LocalImagePaths []string            `json:"-"`
+	ID              string              `json:"id"`
+	TurnID          string              `json:"turn_id"`
+	Kind            string              `json:"kind"`
+	Text            string              `json:"text,omitempty"`
+	Command         string              `json:"command,omitempty"`
+	Cwd             string              `json:"cwd,omitempty"`
+	Status          string              `json:"status,omitempty"`
+	Output          *string             `json:"output"`
+	ExitCode        *int                `json:"exit_code"`
+	DurationMs      *int64              `json:"duration_ms"`
+	StartedAtMs     *int64              `json:"started_at_ms"`
+	CompletedAtMs   *int64              `json:"completed_at_ms"`
+	Tool            string              `json:"tool,omitempty"`
+	Images          []string            `json:"images,omitempty"`
+	Delivery        string              `json:"delivery,omitempty"`
+	Questions       []ChatQuestion      `json:"questions,omitempty"`
+	QuestionStatus  string              `json:"question_status,omitempty"`
+}
+
+// Keep file identities and counts separate from the bounded text preview.
+// A large patch must not hide the remaining files in the same operation.
+type HistoryFileChange struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+func historyFileChange(path, diff string) HistoryFileChange {
+	file := HistoryFileChange{Path: path}
+	inHunk := false
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if !inHunk && (strings.HasPrefix(line, "+++ ") || strings.HasPrefix(line, "--- ")) {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			file.Additions++
+		}
+		if strings.HasPrefix(line, "-") {
+			file.Deletions++
+		}
+	}
+	return file
 }
 
 type codexHistoryItem struct {
@@ -128,6 +158,7 @@ func visibleHistoryEntry(raw codexHistoryEntry) (HistoryEntry, bool) {
 	case "fileChange":
 		e.Kind, e.Status = "change", i.Status
 		for _, change := range i.Changes {
+			e.FileChanges = append(e.FileChanges, historyFileChange(change.Path, change.Diff))
 			e.Text += change.Path + "\n" + change.Diff + "\n"
 		}
 	case "plan":
@@ -170,7 +201,7 @@ func readSessionHistory(c codex.SessionClient, s codex.Session, cursor string) (
 		params["cursor"] = cursor
 	}
 	if s.HistoryMode == "paginated" {
-		params["limit"] = 50
+		params["limit"] = 200
 		var page struct {
 			Data       []codexHistoryEntry `json:"data"`
 			NextCursor *string             `json:"nextCursor"`
@@ -186,9 +217,9 @@ func readSessionHistory(c codex.SessionClient, s codex.Session, cursor string) (
 		}
 		history.NextCursor = page.NextCursor
 	} else {
-		// Legacy threads do not support item pagination. Page a small number of
+		// Legacy threads do not support item pagination. Page bounded batches of
 		// complete turns instead; items inside each turn are already chronological.
-		params["limit"], params["itemsView"] = 5, "full"
+		params["limit"], params["itemsView"] = 20, "full"
 		var page struct {
 			Data []struct {
 				ID    string             `json:"id"`

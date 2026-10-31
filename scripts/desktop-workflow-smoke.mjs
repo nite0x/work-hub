@@ -32,7 +32,11 @@ try {
   assert.equal(descriptor.read_only_sessions, false);
   const page = await (await fetch(host.url)).text();
   assert.match(page, /name="session-mode" content="interactive"/);
-  assert.match(page, /src="\/features\/sessions\/session-create.js"/);
+  assert.match(page, /id="workspaceTabBar"/);
+  assert.match(page, /src="\/core\/workspace-tabs.js"/);
+  const workPage = await (await fetch(host.url + '/?workspace-tab=workflow-verification')).text();
+  assert.match(workPage, /name="session-mode" content="interactive"/);
+  assert.match(workPage, /src="\/features\/sessions\/session-create.js"/);
   const headers = { 'X-CSRF-Token': descriptor.token, 'Content-Type': 'application/json' };
   const request = async (endpoint, method = 'GET', body, expected = 200) => {
     const response = await fetch(host.url + endpoint, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });

@@ -16,6 +16,7 @@ import (
 
 	"worktree-hub/internal/codex"
 	"worktree-hub/internal/model"
+	"worktree-hub/internal/workspace"
 )
 
 // Opt-in local UI fixture: exercises the production HTTP/SSE path with an
@@ -215,7 +216,7 @@ func TestBrowserChatFixture(t *testing.T) {
 	}
 	a.terminalConflict = func(string, string) error {
 		if _, err := os.Stat("/tmp/worktree-hub-chat-terminal-busy"); err == nil {
-			return fmt.Errorf("此工作目录仍有 Codex 终端打开，请先退出终端中的 Codex")
+			return &workspace.SessionConflictError{Message: "此工作目录仍有 Codex 终端打开，请先退出终端中的 Codex"}
 		}
 		return nil
 	}

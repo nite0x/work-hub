@@ -108,6 +108,9 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 			response := Response{ID: request.ID}
 			if err != nil {
 				response.Error = err.Error()
+				if IsSessionConflict(err) {
+					response.Code = "session_conflict"
+				}
 				if errors.Is(err, os.ErrNotExist) {
 					response.Code = "not_exist"
 				}
@@ -127,6 +130,11 @@ func RunAgent(input io.Reader, output io.Writer, hooks AgentHooks) error {
 
 func executeWorkspaceRequest(ctx context.Context, r Request) (any, error) {
 	switch r.Op {
+	case "browse-directory", "browse-file":
+		if len(r.Args) != 1 {
+			return nil, fmt.Errorf("文件路径无效")
+		}
+		return BrowseWorkspace(ctx, r.Path, r.Args[0], r.Op == "browse-file")
 	case "git-preview":
 		return RunGitPreview(ctx, r.Path, r.Args...)
 	case "write-generated":

@@ -177,13 +177,16 @@ function taskMemberReusesDirectory(m) { return window.WorkHubUI.reusesDirectory(
 
 
 const taskProjectFilters = new Map();
+function filteredRequirements() {
+  const text = $('#search').value.trim().toLowerCase();
+  return taskInventory.requirements.filter(q => window.WorkHubUI.taskMatches(q, $('#taskStatusFilter')?.value || 'all') && ($('#archiveFilter').checked || q.state !== 'archived') && `${q.name} ${q.description || ''} ${q.slug} ${q.branch} ${taskBranchSummary(q)} ${q.environment_name}`.toLowerCase().includes(text));
+}
 function renderRequirements() {
   if (!taskInventory.loaded) return '<div class="loading">正在读取全部环境的任务…</div>';
   if (!taskInventory.requirements.length) return empty('为下一项开发工作，创建一个任务', '选择项目及其工作目录，围绕同一个目标组织开发工作。', 'new-requirement', '创建第一个任务');
-  const text = $('#search').value.trim().toLowerCase();
-  const reqs = taskInventory.requirements.filter(q => window.WorkHubUI.taskMatches(q, $('#taskStatusFilter')?.value || 'all') && ($('#archiveFilter').checked || q.state !== 'archived') && `${q.name} ${q.description || ''} ${q.slug} ${q.branch} ${taskBranchSummary(q)} ${q.environment_name}`.toLowerCase().includes(text));
+  const reqs = filteredRequirements();
   if (!reqs.length) return empty('没有匹配的任务', '可以清除搜索与状态筛选，返回未归档任务列表。', 'clear-task-filters', '清除搜索与筛选');
-  return window.WorkHubUI.tasks(reqs);
+  return window.WorkHubUI.tasks(reqs, state.selectedRequirement, activeEnvironment);
 }
 
 function canOpenMember(m) {

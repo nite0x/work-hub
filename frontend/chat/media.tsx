@@ -4,7 +4,7 @@ import {MarkdownText} from "@/components/assistant-ui/elements/markdown-text";
 import {Image} from "@/components/assistant-ui/elements/image";
 import type {ChatController} from "./controller";
 import type {Entry} from "./model";
-import {ChatFileProvider, ChatMarkdownLink} from "./file-preview";
+import {ChatFileProvider, ChatMarkdownLink, ChatInlineCode} from "./file-preview";
 import {chatURLTransform} from "./links";
 
 type Media = {refs: Map<string, string>; load: (ref: string) => Promise<string>};
@@ -51,7 +51,7 @@ function ChatMarkdownImage({src, alt, title}: ImgHTMLAttributes<HTMLImageElement
   if (!loaded.image) return <span className="text-xs text-muted-foreground" role="status">正在加载{alt || "图片"}…</span>;
   return <img src={loaded.image} alt={alt} title={title} className="chat-history-image max-w-full rounded-lg" loading="lazy" />;
 }
-const markdownComponents = {img: ChatMarkdownImage, a: ChatMarkdownLink};
+const markdownComponents = {img: ChatMarkdownImage, a: ChatMarkdownLink, code: ChatInlineCode};
 export function ChatMessageText() {return <MarkdownText components={markdownComponents} urlTransform={chatURLTransform} />;}
 export const ChatUserImage: ImageMessagePartComponent = props => {
   const loaded = useLocalImage(props.image);

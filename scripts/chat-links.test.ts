@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {fileReference, chatURLTransform} from "../frontend/chat/links";
+import {fileReference, chatURLTransform, sourceFileReference} from "../frontend/chat/links";
 
 test("chat file links preserve native paths and line references", () => {
   for (const [href, path, line] of [
@@ -20,4 +20,12 @@ test("chat file links preserve native paths and line references", () => {
   assert.equal(chatURLTransform("javascript:alert(1)", "href"), "");
   assert.equal(chatURLTransform("data:text/html,hello", "href"), "");
   assert.equal(chatURLTransform("https://example.com", "href"), "https://example.com");
+});
+
+
+test("inline file names distinguish source references from commands, identifiers and API routes", () => {
+ for (const [value,path,line] of [["app.ts:42","app.ts",42],["src/app.ts:42-50","src/app.ts",42],["README.md","README.md",1],["C:\\repo\\app.go:7","C:\\repo\\app.go",7],["src/配置 file.go#L18","src/配置 file.go",18]] as const) {
+  assert.deepEqual(sourceFileReference(value),{path,line});
+ }
+ for(const value of ["npm test","const count = 1","module.call()","/api/projects","src/","https://example.com/file.ts","src/file.ts; rm file","javascript:alert(1)"]) assert.equal(sourceFileReference(value),null,value);
 });

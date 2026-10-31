@@ -18,5 +18,5 @@ export function conversationContext(cwd: string, workspace?: ConversationWorkspa
   const member = tasks.flatMap(t => t.members).find(m => matches(m.path));
   const branch = tree?.branch || member?.worktree?.branch;
   const kind = project ? matches(project.path) ? "项目目录" : "Worktree" : member ? "工作目录" : tasks.length ? "任务目录" : "外部目录";
-  return {tasks: tasks.map(t => ({id: t.id, name: t.name})), project: project?.name || member?.project_name, branch: tree?.detached || member?.worktree?.detached ? "detached HEAD" : branch, kind, cwd};
+  return {tasks: tasks.map(t => ({id: t.id, name: t.name})), project: project?.name || member?.project_name, projectID: project?.id || member?.project_id, branch: tree?.detached || member?.worktree?.detached ? "detached HEAD" : branch, kind, cwd};
 }

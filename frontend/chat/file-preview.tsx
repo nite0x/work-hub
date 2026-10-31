@@ -1,60 +1,32 @@
-import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type AnchorHTMLAttributes, type PropsWithChildren} from "react";
-import * as Dialog from "@radix-ui/react-dialog";
-import {XIcon} from "lucide-react";
+import {createContext, useCallback, useContext, useMemo, type AnchorHTMLAttributes, type HTMLAttributes, type PropsWithChildren} from "react";
+import {useIsMarkdownCodeBlock} from "@assistant-ui/react-markdown";
 import type {ChatController} from "./controller";
-import {fileReference, type FileReference} from "./links";
+import {fileReference, sourceFileReference, type FileReference} from "./links";
 
-interface FilePreview {path: string; lines: string[]; start_line: number; total_lines: number; line: number; requested_line: number}
-const LinkContext = createContext<{controller: ChatController; open: (ref: FileReference, trigger: HTMLElement) => void} | null>(null);
+const MarkdownAnchorContext = createContext(false);
+
+const LinkContext = createContext<{controller: ChatController; open: (ref: FileReference) => void} | null>(null);
 
 export function ChatFileProvider({controller, children}: PropsWithChildren<{controller: ChatController}>) {
-  const host = useRef<HTMLDivElement>(null);
-  const selectedLine = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLElement | null>(null);
-  const [target, setTarget] = useState<FileReference | null>(null);
-  const [result, setResult] = useState<{target: FileReference; file?: FilePreview; error?: string} | null>(null);
-  const open = useCallback((ref: FileReference, element: HTMLElement) => {trigger.current = element; setTarget(ref);}, []);
-  const links = useMemo(() => ({controller, open}), [controller, open]);
-  useEffect(() => {
-    if (!target) return;
-    const abort = new AbortController();
+  const open = useCallback((ref: FileReference) => {
     const session = controller.getSnapshot().session?.id;
-    if (!session) {setResult({target, error: "请先打开一个已保存的对话"}); return;}
-    void controller.options.request<FilePreview>(`/api/sessions/${encodeURIComponent(session)}/file?path=${encodeURIComponent(target.path)}&line=${target.line}`, {signal: abort.signal}).then(
-      file => {if (!abort.signal.aborted) setResult({target, file});},
-      error => {if (!abort.signal.aborted) setResult({target, error: (error as Error).message});},
-    );
-    return () => abort.abort();
-  }, [target, controller]);
-  const loaded = result?.target === target ? result : null;
-  const file = loaded?.file;
-  useEffect(() => {if (file) selectedLine.current?.scrollIntoView({block: "center"});}, [file]);
-  return <LinkContext.Provider value={links}><div ref={host} className="contents">
-    {children}
-    <Dialog.Root open={!!target} onOpenChange={open => {if (!open) setTarget(null);}}>
-      <Dialog.Portal container={host.current}>
-        <Dialog.Overlay className="chat-file-overlay" />
-        <Dialog.Content className="shadcn-scope assistant-chat-scope chat-file-dialog" onCloseAutoFocus={event => {event.preventDefault(); trigger.current?.focus();}}>
-          <header className="chat-file-heading">
-            <Dialog.Title className="text-sm font-semibold">文件预览</Dialog.Title>
-            <Dialog.Description className="text-xs text-muted-foreground break-all">{file?.path || target?.path}</Dialog.Description>
-            <Dialog.Close className="chat-file-close" aria-label="关闭文件预览"><XIcon className="size-4" /></Dialog.Close>
-          </header>
-          {!loaded && <p role="status" className="p-4 text-sm text-muted-foreground">正在读取文件…</p>}
-          {loaded?.error && <p role="alert" className="p-4 text-sm text-destructive">{loaded.error}</p>}
-          {file && <>
-            <p className="chat-file-meta">第 {file.start_line}–{file.start_line + file.lines.length - 1} 行，共 {file.total_lines} 行{file.line !== file.requested_line ? " · 引用行超出文件范围，已定位到末行" : ""}</p>
-            <div className="chat-file-source" tabIndex={0} aria-label="文件内容">
-              {file.lines.map((text, index) => {
-                const line = file.start_line + index;
-                return <div key={line} ref={line === file.line ? selectedLine : undefined} className="chat-file-line" data-selected={line === file.line || undefined}><span aria-hidden="true" className="chat-file-number">{line}</span><code>{text || " "}</code></div>;
-              })}
-            </div>
-          </>}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  </div></LinkContext.Provider>;
+    const event = new CustomEvent("workhub:open-file", {cancelable: true, detail: {...ref, session, environment: controller.options.environment}});
+    if (window.dispatchEvent(event)) controller.setError("无法打开文件：请确认文件位于当前对话的工作目录或附加目录中");
+  }, [controller]);
+  const links = useMemo(() => ({controller, open}), [controller, open]);
+  return <LinkContext.Provider value={links}>{children}</LinkContext.Provider>;
+}
+
+export function ChatFileButton({reference, children}: PropsWithChildren<{reference: FileReference}>) {
+  const links = useContext(LinkContext);
+  return <button type="button" className="chat-file-reference" title={`打开 ${reference.path}:${reference.line}`} disabled={!links} onClick={event => {event.preventDefault(); event.stopPropagation(); links?.open(reference);}}>{children}</button>;
+}
+
+export function ChatInlineCode({children, className, ...props}: HTMLAttributes<HTMLElement>) {
+  const block = useIsMarkdownCodeBlock();
+  const linked = useContext(MarkdownAnchorContext);
+  const reference = !block && !linked && typeof children === "string" ? sourceFileReference(children) : null;
+  return <code {...props} className={[!block ? "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]" : "",className].filter(Boolean).join(" ")}>{reference ? <ChatFileButton reference={reference}>{children}</ChatFileButton> : children}</code>;
 }
 
 export function ChatMarkdownLink({href, children, title}: AnchorHTMLAttributes<HTMLAnchorElement>) {
@@ -64,11 +36,11 @@ export function ChatMarkdownLink({href, children, title}: AnchorHTMLAttributes<H
   return <a href={file ? "#file-preview" : href} title={title || (file ? `${file.path}:${file.line}` : undefined)} className="aui-md-a text-primary hover:text-primary/80 underline underline-offset-2" target={file ? undefined : "_blank"} rel="noopener noreferrer" onClick={event => {
     event.preventDefault();
     if (!links) return;
-    if (file) links.open(file, event.currentTarget);
+    if (file) links.open(file);
     else if (/^https?:\/\//i.test(href) || href.startsWith("//")) {
       const url = new URL(href, window.location.href).href;
       const session = links.controller.getSnapshot().session?.id;
       void links.controller.options.request(`/api/sessions/${encodeURIComponent(session || "")}/open-link`, {method: "POST", body: JSON.stringify({url})}).catch(error => links.controller.setError((error as Error).message));
     }
-  }} onAuxClick={event => event.preventDefault()}>{children}</a>;
+  }} onAuxClick={event => event.preventDefault()}><MarkdownAnchorContext.Provider value={true}>{children}</MarkdownAnchorContext.Provider></a>;
 }

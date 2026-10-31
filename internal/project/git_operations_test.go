@@ -16,6 +16,41 @@ import (
 	"worktree-hub/internal/model"
 )
 
+func TestSelectedWorktreeResolvesParentAliasAndRejectsLinkedEntry(t *testing.T) {
+	a := testApp(t)
+	path := repo(t, "repo", "main")
+	id := register(t, a, "Repo", path)
+	p, err := a.RegisteredProject(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	alias := filepath.Join(root, "parent-alias")
+	if err := os.Symlink(filepath.Dir(path), alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	w, err := selectedWorktree(context.Background(), p, filepath.Join(alias, filepath.Base(path)))
+	if err != nil || w.Path != path {
+		t.Fatalf("directory alias: %+v %v", w, err)
+	}
+	linked := filepath.Join(root, "linked-entry")
+	if err := os.Symlink(path, linked); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{linked, linked + string(filepath.Separator), linked + string(filepath.Separator) + "."} {
+		if _, err := selectedWorktree(context.Background(), p, input); err == nil {
+			t.Fatalf("accepted a substituted worktree entry: %s", input)
+		}
+	}
+	if _, err := selectedWorktree(context.Background(), p, filepath.Join(path, ".git")); err == nil {
+		t.Fatal("accepted a repository subdirectory")
+	}
+	foreign := repo(t, "foreign", "main")
+	if _, err := selectedWorktree(context.Background(), p, foreign); err == nil {
+		t.Fatal("accepted another repository")
+	}
+}
+
 func TestFetchAuthenticationFailureExplainsTerminalRecovery(t *testing.T) {
 	t.Setenv("GIT_ASKPASS", "/bin/false")
 	a := testApp(t)

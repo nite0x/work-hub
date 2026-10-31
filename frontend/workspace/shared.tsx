@@ -37,11 +37,11 @@ export const expectedBranch = (m: Member, q: Task) => m.branch || q.branch
 export const canOpenMember = (m: Member) => m.state === "ready" && !m.error && !!m.worktree?.status_updated_at && !m.worktree.bare && !m.worktree.missing && !m.worktree.prunable && !m.worktree.error
 export const branchSummary = (q: Task) => [...new Set(q.members.map(m => m.worktree?.branch || m.branch || (reusesDirectory(m) ? "detached HEAD" : q.branch)).filter(Boolean))].join(" · ") || "使用已有工作目录"
 
-export function GitSyncStatus({ tree: t, compact = false }: { tree?: Worktree; compact?: boolean }) {
+export function GitSyncStatus({ tree: t, compact = false, minimal = false }: { tree?: Worktree; compact?: boolean; minimal?: boolean }) {
   if (!t?.status_updated_at || t.missing || t.error || t.prunable || t.bare) return null
   const differences = [t.sync_ahead ? `待推 ${t.sync_ahead}` : "", t.sync_behind ? `待拉 ${t.sync_behind}` : ""].filter(Boolean).join(" · ") || "已同步"
   return <div className="comparison space-y-1" title="同步数量基于本地最近获取的上游记录；获取远端后更新。">
-    <div>{t.detached ? "游离 HEAD" : !t.upstream ? compact ? "未设置上游" : "尚未设置上游 · 推送时发布分支" : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : compact ? <>上游 <code>{t.upstream}</code> · {differences}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</> : <>上游 {t.upstream}<br />待推送 {t.sync_ahead || 0} · 待拉取 {t.sync_behind || 0}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</>}</div>
+    {minimal && t.upstream && !t.detached ? <div className="project-sync-summary"><code title={t.upstream}>{t.upstream}</code>{t.sync_available ? <span className="project-sync-counts" aria-label={`待推送 ${t.sync_ahead || 0} 个提交，待拉取 ${t.sync_behind || 0} 个提交`} title={`↑ 待推送 ${t.sync_ahead || 0} · ↓ 待拉取 ${t.sync_behind || 0}${t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}`}><span data-active={!!t.sync_ahead}>↑{t.sync_ahead || 0}</span><span data-active={!!t.sync_behind}>↓{t.sync_behind || 0}</span></span> : <span title="上游不可用，请获取远端">暂不可用</span>}</div> : <div>{t.detached ? "游离 HEAD" : !t.upstream ? compact ? "未设置上游" : "尚未设置上游 · 推送时发布分支" : !t.sync_available ? `上游 ${t.upstream} 不可用，请获取远端` : compact ? <>上游 <code>{t.upstream}</code> · {differences}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</> : <>上游 {t.upstream}<br />待推送 {t.sync_ahead || 0} · 待拉取 {t.sync_behind || 0}{t.sync_ahead && t.sync_behind ? " · 已分歧" : ""}</>}</div>}
     {t.operation ? <div className="font-medium text-amber-800">{t.operation === "merge" ? `合并进行中${t.conflicts?.length ? ` · ${t.conflicts.length} 个冲突文件` : " · 等待完成提交"}` : `${t.operation} 进行中`}</div> : null}
   </div>
 }

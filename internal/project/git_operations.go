@@ -50,6 +50,8 @@ type GitAction struct {
 	ExpectedBranch string `json:"expected_branch"`
 	ExpectedHead   string `json:"expected_head"`
 	SourceCommit   string `json:"source_commit"`
+	Target         string `json:"target"`
+	TargetCommit   string `json:"target_commit"`
 	AllowShared    bool   `json:"allow_shared"`
 }
 
@@ -189,12 +191,23 @@ func selectedWorktree(ctx context.Context, p model.Project, path string) (model.
 	if path == "" {
 		path = p.Path
 	}
+	path = platform.CleanWorkspacePath(path)
+	// Resolve directory aliases at the API boundary, but never follow a
+	// substituted worktree entry. Git reports canonical paths on macOS.
+	st, err := workspace.Stat(ctx, path, false)
+	if err != nil || st.Mode()&os.ModeSymlink != 0 {
+		return model.Worktree{}, fmt.Errorf("所选 worktree 路径不可用或是符号链接")
+	}
+	path, err = workspace.Normalize(ctx, path)
+	if err != nil {
+		return model.Worktree{}, err
+	}
 	raw, err := workspace.Git(ctx, p.Path, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return model.Worktree{}, err
 	}
 	for _, t := range ParseWorktrees(raw) {
-		if t.Path == path {
+		if platform.SameWorkspacePath(t.Path, path) {
 			t = ScanWorktreeStatus(ctx, t)
 			if t.Bare || t.Missing || t.Prunable || t.Error != "" {
 				return model.Worktree{}, fmt.Errorf("所选 worktree 不可用，请先修复")
@@ -204,7 +217,7 @@ func selectedWorktree(ctx context.Context, p model.Project, path string) (model.
 				return model.Worktree{}, err
 			}
 			resolved, err := workspace.Eval(ctx, strings.TrimSpace(common))
-			if err != nil || resolved != p.CommonDir {
+			if err != nil || !platform.SameWorkspacePath(resolved, p.CommonDir) {
 				return model.Worktree{}, fmt.Errorf("所选目录已不属于该仓库")
 			}
 			return t, nil
@@ -454,6 +467,9 @@ func (a *Service) GitActionHandler(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--", in.Remote, "HEAD:refs/heads/"+in.Name)
 		output, err = a.GitNetwork(r.Context(), t.Path, args...)
 		message = "已推送 " + t.Branch + " → " + in.Remote + "/" + in.Name
+	case "merge_into_preview", "merge_into":
+		a.mergeIntoHandler(w, r, p, v, in)
+		return
 	case "merge_preview", "merge":
 		t, e := selectedWorktree(r.Context(), p, in.Path)
 		if e != nil {

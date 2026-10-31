@@ -95,6 +95,19 @@ func selectedMember(ctx context.Context, p model.Project, directory, branch stri
 			}
 			m.Path = platform.CleanWorkspacePath(selection.Path)
 		}
+		st, err := workspace.Stat(ctx, m.Path, false)
+		if err != nil {
+			return m, err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return m, fmt.Errorf("worktree 路径是符号链接，拒绝使用")
+		}
+		// Persist the execution environment's canonical path so later launch
+		// and cleanup checks compare the same directory identity as Git.
+		m.Path, err = workspace.Normalize(ctx, m.Path)
+		if err != nil {
+			return m, err
+		}
 		if err := VerifyMember(ctx, p, m, ""); err != nil {
 			return m, err
 		}
