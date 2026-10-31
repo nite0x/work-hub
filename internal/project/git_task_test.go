@@ -62,6 +62,8 @@ func TestTaskPushPublishesOnlySelectedBranchAndTracksUpstream(t *testing.T) {
 	before := testGit(t, remote, "rev-parse", q.Branch)
 	testGit(t, path, "reset", "--hard", "HEAD~1")
 	commitFile(t, path, "diverged.txt", "other")
+	// Rejection classification must use porcelain stdout, not optional hints.
+	testGit(t, path, "config", "advice.pushUpdateRejected", "false")
 	if code, raw := gitAction(t, a, id, in); code != 409 || !strings.Contains(string(raw), "push_rejected") {
 		t.Fatalf("%d %s", code, raw)
 	}

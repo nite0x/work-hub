@@ -46,6 +46,11 @@ func RunGit(ctx context.Context, dir string, timeout time.Duration, includeMessa
 			return "", fmt.Errorf("Git 操作超时或已取消")
 		}
 		msg := strings.TrimSpace(stderr.String())
+		if includeMessages {
+			// Porcelain commands can report failure details on stdout (for
+			// example push rejections); stderr may contain only a summary.
+			msg = strings.TrimSpace(out.String() + "\n" + stderr.String())
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
