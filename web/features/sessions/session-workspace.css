@@ -1,5 +1,5 @@
 /* One browser component is hosted by either the page or the native modal. */
-.sessions-page-open main { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: 12px 16px; }
+.sessions-page-open main { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: var(--workspace-page-padding); }
 .sessions-page-open .page-heading { display: none; }
 .sessions-page-open .page-heading h1 { font-size: 24px; margin: 0; }
 .sessions-page-open #eyebrow, .sessions-page-open .page-footer { display: none; }

@@ -92,7 +92,8 @@ async function refresh(force = false) {
     if (revision !== environmentRevision) return;
     state.refreshing = false; $('#refreshButton').disabled = false;
     if (!needsScopedState && (state.view !== 'requirements' || state.selectedRequirement)) nextRefresh = 0;
-    refreshTimer = setTimeout(() => { if (!document.hidden) refresh(); }, nextRefresh);
+    refreshTimer = setTimeout(() => { if (!document.hidden && window.WorkHubTab?.active !== false) refresh(); }, nextRefresh);
+    window.dispatchEvent(new CustomEvent('workhub:workspace-refreshed'));
   }
 }
 
@@ -261,9 +262,10 @@ $('#taskStatusFilter')?.addEventListener('change', changeListFilters);
 document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (dialog.hasAttribute('data-block-close')) event.preventDefault(); }));
 
 $('#copyCommand').addEventListener('click', () => copy($('#commandText').value));
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   readRoute();
   render();
-  refresh();
+  await refresh();
+  window.dispatchEvent(new CustomEvent('workhub:workspace-ready'));
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

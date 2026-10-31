@@ -12,7 +12,7 @@ export function useChatReading(controller: ChatController) {
     let frame = 0;
     let restoring = false;
     let initialized = false;
-    const visible = () => !viewport.closest('[hidden]');
+    const visible = () => !document.documentElement.hasAttribute('data-workspace-inactive') && !viewport.closest('[hidden]');
     const messages = () => [...viewport.querySelectorAll<HTMLElement>('[data-chat-message-id]')];
     const record = () => {
       if (restoring || !initialized || !visible()) return;

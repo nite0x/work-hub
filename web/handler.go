@@ -16,7 +16,14 @@ func Handler(token string, readOnly bool) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		b, _ := Assets.ReadFile("index.html")
+		pageName := "workspace.html"
+		if r.URL.Query().Get("workspace-tab") != "" {
+			pageName = "index.html"
+			// Only the internal workspace page may be framed by this origin.
+			// The outer window retains frame-ancestors 'none'.
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+		}
+		b, _ := Assets.ReadFile(pageName)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		page := strings.ReplaceAll(string(b), "__CSRF_TOKEN__", token)
 		mode := "interactive"

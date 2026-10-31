@@ -33,6 +33,8 @@ func (a *App) handler() http.Handler {
 	mux.HandleFunc("GET /api/task-inventory", a.taskInventoryHandler)
 	mux.HandleFunc("GET /api/shortcut-pins", a.shortcutPinsHandler)
 	mux.HandleFunc("PUT /api/shortcut-pins", a.shortcutPinsHandler)
+	mux.HandleFunc("GET /api/workspace-tabs", a.workspaceTabsHandler)
+	mux.HandleFunc("PUT /api/workspace-tabs", a.workspaceTabsHandler)
 	a.Projects.RegisterRoutes(mux)
 	a.Tasks.RegisterRoutes(mux, a.Projects.InvalidateStateAfter)
 	a.Sessions.RegisterRoutes(mux)

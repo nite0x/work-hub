@@ -1,0 +1,29 @@
+:root{font-family:Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#334155;background:#f8f9fd;font-size:13px;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;height:100dvh;overflow:hidden;user-select:none;--workspace-sidebar-width:244px;--workspace-tabs-top:0px}
+button{font:inherit;cursor:pointer}
+[hidden]{display:none!important}
+.workspace-tabbar{position:absolute;z-index:20;top:var(--workspace-tabs-top);left:var(--workspace-sidebar-width);right:0;height:40px;padding:8px 16px 0;background:#f8f9fd}
+.workspace-tabbar-content{height:100%;display:flex;align-items:center;min-width:0;gap:8px}
+.workspace-tabs-root{min-width:0;flex:0 1 auto;height:100%;overflow:hidden}
+.workspace-tab-list[data-slot]{height:100%;max-width:100%;display:flex;align-items:stretch;gap:4px;overflow-x:auto;scrollbar-width:none}
+.workspace-tab-list::-webkit-scrollbar{display:none}
+.workspace-tab-item{position:relative;display:flex;align-items:center;height:100%;width:180px;min-width:180px;max-width:180px;flex:0 0 180px;padding:0 6px 0 2px;border:0;border-radius:7px;transition:background-color .12s}
+.workspace-tab-item:not(:last-child)::after{content:"";position:absolute;right:-2px;top:8px;bottom:8px;width:1px;background:#c6cee0;pointer-events:none}
+.workspace-tab-item:hover{background:#eef0fa}
+.workspace-tab-item[data-active=true]{background:#e4eaff}
+.workspace-tab-trigger[data-slot]{display:flex;align-items:center;height:100%;min-width:0;flex:1;justify-content:flex-start;gap:7px;padding:0 9px;font-size:13px;line-height:1;font-weight:400;border:0;border-radius:7px;color:#71809a;box-shadow:none;background:transparent}
+.workspace-tab-trigger[data-state=active]{color:#454b9b;font-weight:500}
+.workspace-tab-type{width:14px;height:14px;flex:none;color:#8993aa;stroke-width:1.7}
+.workspace-tab-item[data-active=true] .workspace-tab-type{color:#5964b3}
+.workspace-tab-label{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-tab-close[data-slot]{width:20px;height:20px;flex:none;border-radius:4px;color:#8d97ad;opacity:0;transition:opacity .12s,background-color .12s}
+.workspace-tab-close[data-slot] svg{width:12px;height:12px}
+.workspace-tab-item:is(:hover,:focus-within,[data-active=true]) .workspace-tab-close{opacity:1}
+.workspace-tab-actions{display:flex;align-items:center;gap:3px;flex:none}
+.workspace-tab-actions [data-slot]{color:#8993a5;width:26px;height:26px}
+.workspace-tab-actions [data-slot] svg{width:15px;height:15px}
+.workspace-pages{position:absolute;inset:0;min-height:0}
+.workspace-page{position:absolute;inset:0;width:100%;height:100%;border:0;background:#f8f9fd}
+@media(pointer:coarse){.workspace-tab-close[data-slot]{opacity:1}}
+@media(max-width:760px){body{--workspace-sidebar-width:0px}.workspace-tabbar{padding-inline:12px}}

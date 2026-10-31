@@ -9,7 +9,7 @@ const { JSDOM } = require('jsdom');
 const web = path.join(__dirname, '../web');
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 
-async function harness(t, readOnly = true, {origin = 'http://localhost:4317', pins = {}, storage = {}, storageUnavailable = false, intercept: initialIntercept} = {}) {
+async function harness(t, readOnly = true, {origin = 'http://localhost:4317', pins = {}, storage = {}, storageUnavailable = false, intercept: initialIntercept, tabHost, width = 1024} = {}) {
   const tree = (path, branch) => ({ path, branch, dirty: 0, status_updated_at: '2026-10-23T06:00:00Z' });
   const app = { id: 'app', name: 'App', folder: 'app', path: '/repo/app', worktrees: [tree('/repo/app', 'master'), tree('/workspace/task/app', 'feature/task')] };
   const backend = { id: 'backend', name: 'Backend', folder: 'backend', path: '/repo/backend', worktrees: [tree('/repo/backend', 'master')] };
@@ -31,8 +31,10 @@ async function harness(t, readOnly = true, {origin = 'http://localhost:4317', pi
   ] });
   const dom = new JSDOM(fs.readFileSync(path.join(web, 'index.html'), 'utf8').replace('__SESSION_MODE__', readOnly ? 'read-only' : 'interactive'), { url: origin + '/#/requirements/task', runScripts: 'outside-only', pretendToBeVisual: true });
   const channels = [];
-  t.after(() => { dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); for (const channel of channels) { channel.port1.close(); channel.port2.close(); } });
+  t.after(() => { if (dom.window.WorkHubTab) dom.window.WorkHubTab.dispose(); else dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); for (const channel of channels) { channel.port1.close(); channel.port2.close(); } });
   const { window } = dom;
+  if (tabHost) Object.defineProperty(window, 'parent', {value:tabHost});
+  Object.defineProperty(window, 'innerWidth', {value:width,configurable:true,writable:true});
   for (const [key, value] of Object.entries(storage)) window.localStorage.setItem(key, value);
   if (storageUnavailable) Object.defineProperty(window, 'localStorage', {get() {throw new Error('Storage unavailable');}});
   const document = window.document;
@@ -2050,4 +2052,92 @@ test('failed conversation refresh retains cached results but a new directory nev
   assert.match(h.$('#sessionBrowserCount').textContent, /数量暂不可用/);
   assert.doesNotMatch(h.$('#sessionBrowserCount').textContent, /0 个对话/);
   assert.equal(h.$('#sessionBrowserList').textContent, '');
+});
+
+function tabHost(t) {
+  const dom = new JSDOM('', {url:'http://localhost:4317/'});
+  t.after(()=>dom.window.close());
+  const messages=[];
+  dom.window.postMessage=message=>messages.push(message);
+  return {window:dom.window,messages};
+}
+
+test('workspace tab bridge keeps a sidebar new-tab icon available with the keyboard shortcut', async t => {
+  const host=tabHost(t);
+  const h=await harness(t,false,{tabHost:host.window,width:1440});
+  const route=h.window.location.hash;
+  const button=h.$('.sidebar-new-tab');
+  assert(button);
+  assert.match(button.title,/Ctrl\+T/);
+  assert.equal(button.getAttribute('aria-label'),'新建标签页');
+  h.click('.sidebar-new-tab');await settle();
+  const opened=host.messages.filter(message=>message.type==='workhub:tab-open');
+  assert.equal(opened.length,1);
+  assert.equal(opened[0].snapshot.environment,'local');
+  assert.equal(opened[0].snapshot.conversation,undefined);
+  assert.equal(h.window.location.hash,route);
+  h.click('.sidebar-toggle');await settle();
+  assert(h.document.body.classList.contains('sidebar-collapsed'));
+  h.click('.sidebar-new-tab');await settle();
+  assert.equal(host.messages.filter(message=>message.type==='workhub:tab-open').length,2);
+  h.$('.sidebar-new-tab').dispatchEvent(new h.window.KeyboardEvent('keydown',{key:'t',ctrlKey:true,bubbles:true,cancelable:true}));
+  assert.equal(host.messages.findLast(message=>message.type==='workhub:tab-key').key.key,'t');
+});
+
+test('workspace tab bridge reclaims the bar space and announces layout changes without navigating', async t => {
+  const host=tabHost(t);
+  const h=await harness(t,false,{tabHost:host.window});
+  const root=h.document.documentElement;
+  const route=h.window.location.hash;
+  const events=[];
+  h.window.addEventListener('workhub:chat-layout',event=>events.push(event.detail));
+  const layout=(height,source=host.window)=>h.window.dispatchEvent(new h.window.MessageEvent('message',{source,origin:'http://localhost:4317',data:{type:'workhub:tab-layout',height}}));
+  layout(40);
+  assert.equal(root.style.getPropertyValue('--workspace-tab-height'),'40px');
+  assert(root.hasAttribute('data-workspace-tabs-visible'));
+  assert.equal(events[0].phase,'before');
+  const count=events.length;
+  layout(40);layout(99);layout(0,h.window);
+  assert.equal(events.length,count);
+  layout(0);
+  assert.equal(root.style.getPropertyValue('--workspace-tab-height'),'0px');
+  assert(!root.hasAttribute('data-workspace-tabs-visible'));
+  assert.equal(h.window.location.hash,route);
+  assert.equal(h.requests.some(request=>request.url.endsWith('/chat/stop')),false);
+});
+
+test('workspace tab bridge opens another conversation without changing the source selection or its filters', async t => {
+  const host=tabHost(t);
+  const h=await harness(t,false,{tabHost:host.window});
+  h.sessions.push({...h.sessions[0],id:'session-2',name:'Backend review'});h.links.get('task').add('session-2');
+  h.window.dispatchEvent(new h.window.MessageEvent('message',{source:host.window,origin:'http://localhost:4317',data:{type:'workhub:tab-restore',active:true,snapshot:{route:'/sessions',environment:'local',conversation:{scope:{kind:'task',id:'task'},selected:'session-1',pane:'detail'}}}}));
+  await settle();await settle();
+  assert.equal(h.window.WorkHubTab.snapshot().conversation.selected,'session-1');
+  const other=[...h.document.querySelectorAll('[data-conversation-session]')].find(button=>button.dataset.conversationSession==='session-2');
+  assert(other);
+  other.dispatchEvent(new h.window.MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true}));
+  await settle();
+  const opened=host.messages.find(message=>message.type==='workhub:tab-open');
+  assert.equal(opened.snapshot.conversation.selected,'session-2');
+  assert.equal(opened.snapshot.conversation.scope.id,'task');
+  assert.equal(h.window.WorkHubTab.snapshot().conversation.selected,'session-1');
+  assert.equal(h.currentSession().session,'session-1');
+  assert.equal(h.requests.some(request=>request.url.endsWith('/chat/stop')),false);
+});
+
+test('workspace tab bridge restores project detail and search while normal navigation stays in the current tab', async t => {
+  const host=tabHost(t);
+  const h=await harness(t,false,{tabHost:host.window});
+  h.window.dispatchEvent(new h.window.MessageEvent('message',{source:host.window,origin:'http://localhost:4317',data:{type:'workhub:tab-restore',active:true,snapshot:{route:'/projects',environment:'local',project:{id:'backend',detail:true,filter:'all'},search:'Backend'}}}));
+  await settle();await settle();
+  assert.equal(h.window.WorkHubTab.snapshot().project.id,'backend');
+  assert.equal(h.$('#search').value,'Backend');
+  h.click('[data-view="sessions"]');await settle();
+  assert.equal(h.window.location.hash,'#/sessions');
+  assert.equal(host.messages.filter(message=>message.type==='workhub:tab-open').length,0);
+  h.window.dispatchEvent(new h.window.MessageEvent('message',{source:host.window,origin:'http://localhost:4317',data:{type:'workhub:tab-active',active:false}}));
+  assert.equal(h.window.WorkHubTab.active,false);
+  assert(h.document.documentElement.hasAttribute('data-workspace-inactive'));
+  h.window.WorkHubTab.dispose();
+  assert.equal(h.requests.some(request=>request.url.endsWith('/chat/stop')),false);
 });

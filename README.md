@@ -445,3 +445,9 @@ WSL 默认检测 `/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.ex
 聊天界面直接采用 assistant-ui 官方 registry 的 `Thread`、Composer、Markdown、工具调用和历史分页组件，保留现有 Codex external-store runtime。来源及少量适配记录在 `frontend/components/assistant-ui/README.md`；任务信息和应用审批复用现有 shadcn 组件。`chat:build` 会独立编译 Tailwind 样式，不依赖先构建工作台页面。
 
 聊天前端检查：`npm run chat:check && npm run chat:test && npm run chat:build`。组件集成回归覆盖草稿保留、快捷键发送、Markdown 和命令输出折叠。后端与远程协议检查：`go test ./...`。远程对话回归使用独立测试进程，覆盖创建、512 个连续回复增量、审批、续聊和停止，不调用真实模型。
+
+首页由 `web/workspace.html` 提供统一标签栏。每个标签用同源独立页面实例加载 `web/index.html`，保留原控制器、对话草稿、阅读位置和文件面板；普通导航与固定入口仅作用于当前标签。侧栏收起按钮旁常驻“新建标签页”图标，只有一个标签时也可使用，悬停显示 ⌘/Ctrl+T 快捷键。点击标签栏 `＋` 也可新建页面，任务、项目和对话支持右键“在新标签页打开”、⌘/Ctrl 点击及中键打开。关闭标签不停止后台对话；关闭最后一个标签后保留一个可用页面。标签及其导航范围、选中对话和筛选条件通过 `/api/workspace-tabs` 存入本机数据库，后台更换端口后仍可恢复；localStorage 仅作当前来源的离线恢复副本。隐藏标签暂停工作台状态轮询，并且不会把后台对话标为已读。关闭前仍会检查正在提交的前台操作。桌面版 ⌘/Ctrl+T 新建、⌘/Ctrl+W 关闭当前标签，⌘/Ctrl+Shift+W 关闭窗口并保留后台。
+
+`core/workspace-tabs.js` 管理标签容器和同源消息，`core/workspace-tab.js` 连接每个页面的导航状态，只接受外层窗口的消息。外层首页禁止被嵌入，仅带 `workspace-tab` 参数的内部页面允许同源嵌入；脚本和 API 的原有来源限制保持生效。页面会话与 Git 数据仍由后台服务共享，页面实例不复制仓库或后台运行任务。
+
+标签栏由 `frontend/workspace/tabbar.tsx` 渲染，复用基于现有 Radix UI 的 shadcn 风格 `Tabs`、`Button` 和 Lucide 图标。标签栏放在右侧工作区内，对齐内容边距，并跟随侧栏宽度和收起状态；选中态沿用现有浅紫导航。只有一个标签时隐藏整条栏并收回空间，仍可通过快捷键或右键打开新标签；多个标签之间用细线分隔，与内容间距为 8px。每个标签固定 180px，长标题省略，悬停查看全名，标题更新不重排其他标签；可见标签信息未变化时不更新标签栏。构建时生成独立的 `ui/workspace-tabs.js`，不加载工作页面的表单组件。Radix 负责方向键切换与焦点，关闭按钮独立于标签按钮。

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { PanelLeftClose, PanelLeftOpen, ListTodo, FolderGit2, MessagesSquare } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, ListTodo, FolderGit2, MessagesSquare, SquarePlus } from "lucide-react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 const storageKey = "workhub:sidebar-collapsed:v1"
@@ -17,10 +17,16 @@ function SidebarToggle() {
     return () => window.removeEventListener("resize", resize)
   }, [])
   const label = collapsed ? "展开侧栏" : "收起侧栏"
-  return <button type="button" className="sidebar-toggle" aria-label={label} title={label} aria-expanded={!collapsed} aria-controls="workspaceSidebar"
+  return <>
+    {window.parent !== window && <button type="button" className="sidebar-control sidebar-new-tab" aria-label="新建标签页" title="新建标签页（⌘/Ctrl+T）" aria-keyshortcuts="Meta+T Control+T"
+      onClick={() => window.dispatchEvent(new CustomEvent("workhub:tab-command", {detail:"new"}))}>
+      <SquarePlus aria-hidden="true" />
+    </button>}
+    <button type="button" className="sidebar-control sidebar-toggle" aria-label={label} title={label} aria-expanded={!collapsed} aria-controls="workspaceSidebar"
     onClick={() => setCollapsed(current => { const next = !current; try { localStorage.setItem(storageKey, String(next)) } catch { /* Keep the current window preference. */ } return next })}>
     {collapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
   </button>
+  </>
 }
 export function mountWorkspaceSidebar() {
   const sidebar = document.querySelector<HTMLElement>(".sidebar")

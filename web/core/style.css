@@ -47,3 +47,13 @@ main { flex: 1; min-height: 0; width: 100%; overflow: auto; overscroll-behavior:
 @media (max-width: 760px) {
   .sidebar { flex-shrink: 0; max-height: 45dvh; }
 }
+
+/* All workspace pages use the conversation page spacing. */
+html[data-workspace-tab] .shell { padding-top:var(--workspace-tab-height,0px); }
+html[data-workspace-tabs-visible] { --workspace-page-padding:8px 16px 12px; }
+.workspace-tab-menu{position:fixed;z-index:1000;min-width:174px;padding:4px;border:1px solid #e2e6f0;border-radius:7px;background:#fff;box-shadow:0 6px 20px #1e293b20}
+.workspace-tab-menu button{width:100%;padding:8px 10px;border:0;border-radius:4px;background:none;text-align:left;font-size:13px;color:#334155}
+.workspace-tab-menu button:hover{background:#eef2fc}
+:root { --workspace-page-padding: 12px 16px; }
+@media (max-width: 760px) { :root { --workspace-page-padding: 12px; } }
+@media (max-width: 760px) { html[data-workspace-tabs-visible] { --workspace-page-padding:8px 12px 12px; } }

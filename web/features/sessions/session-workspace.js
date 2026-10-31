@@ -46,7 +46,7 @@ function conversationTaggedSession(session, environment) {
 function conversationVisible() { return conversationMode !== 'hidden' && !conversationHost.hidden; }
 function conversationReadingSession(id, environment = activeEnvironment) {
   const width = conversationHost.getBoundingClientRect().width;
-  return !document.hidden && conversationVisible() && !conversationView?.creating && conversationView?.selected === conversationEnvironmentKey(environment, id) && (conversationView.pane === 'detail' || !width || width > 620);
+  return !document.hidden && window.WorkHubTab?.active !== false && conversationVisible() && !conversationView?.creating && conversationView?.selected === conversationEnvironmentKey(environment, id) && (conversationView.pane === 'detail' || !width || width > 620);
 }
 function conversationItems(environment) { return environment ? [...(conversationIndex.get(environment)?.values() || [])] : conversationEnvironments().flatMap(e => [...(conversationIndex.get(e.id)?.values() || [])]); }
 function pinnedTaskIDs(environment = activeEnvironment) {

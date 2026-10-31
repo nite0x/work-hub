@@ -13,7 +13,7 @@ func (a *App) secureHandler(next http.Handler) http.Handler {
 		if a.Workspace.Remote != nil {
 			r = r.WithContext(workspace.WithClient(r.Context(), a.Workspace.Remote))
 		}
-		if a.environments != nil && strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/api/environments") && r.URL.Path != "/api/task-inventory" && r.URL.Path != "/api/dialogs/directory" && r.URL.Path != "/api/shortcut-pins" {
+		if a.environments != nil && strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/api/environments") && r.URL.Path != "/api/task-inventory" && r.URL.Path != "/api/dialogs/directory" && r.URL.Path != "/api/shortcut-pins" && r.URL.Path != "/api/workspace-tabs" {
 			if id := r.Header.Get("X-Environment-ID"); id != "" && id != "local" {
 				app, err := a.environments.get(id)
 				if err != nil {

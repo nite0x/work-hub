@@ -29,7 +29,7 @@
 #projectPicker, #requirementProjectPicker { border: 0; display: grid; gap: 10px; max-height: 420px; }
 
 /* The task keeps its identity fixed while project sites scroll independently. */
-.task-detail-page main { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: 18px 24px 20px; }
+.task-detail-page main { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: var(--workspace-page-padding); }
 .task-detail-page .workspace-back { align-self: flex-start; margin-bottom: 8px; font-size: 13px; }
 .task-detail-page .page-heading { flex-shrink: 0; align-items: center; margin-bottom: 16px; gap: 16px; }
 .task-detail-page .page-heading > div:first-child { min-width: 0; }

@@ -7,7 +7,7 @@
   },
   "scripts": {
     "web:build": "node scripts/build-frontend.mjs",
-    "web:watch": "vite build --watch",
+    "web:watch": "node scripts/build-frontend.mjs --watch",
     "web:check": "tsc --noEmit",
     "web:test": "npm run web:check && npm run web:build && npm run workspace:test && node --test scripts/*.test.cjs",
     "desktop:prepare": "node scripts/prepare-desktop.mjs",

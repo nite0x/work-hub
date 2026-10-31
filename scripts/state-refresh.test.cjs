@@ -28,7 +28,8 @@ function harness({ fullPage = false, readOnly = false } = {}) {
         value: '', checked: false, hidden: false, writes: 0, scrollTop: 0, dataset: {},
         style: {setProperty() {}}, getBoundingClientRect() { return {width: 0}; },
         setAttribute() {}, removeAttribute() {}, getAttribute() { return null; },
-        querySelector: element, contains() { return false; }, closest() { return null; },
+        querySelector: element,
+      getElementById: id => element('#' + id), contains() { return false; }, closest() { return null; },
         classList: { toggle() {}, remove() {} }, addEventListener() {}, querySelectorAll() { return []; },
         get innerHTML() { return html; },
         set innerHTML(value) { html = value; this.writes++; }
@@ -46,6 +47,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
     document: {
       body: element('body'),
       querySelector: element,
+      getElementById: id => element('#' + id),
       querySelectorAll: selector => selector === '#content time[data-status-path]' ? times : [],
       addEventListener() {}
     },
@@ -66,6 +68,7 @@ function harness({ fullPage = false, readOnly = false } = {}) {
       return { ok: true, json: async () => structuredClone(result) };
     }
   });
+  context.document.defaultView = context.window;
   const scripts = fullPage
     ? [...fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8').matchAll(/<script src="\/([^"]+)" defer(?: data-ui-bundle)?><\/script>/g)]
       // This VM exercises business scripts; component mounting is checked in a browser.
