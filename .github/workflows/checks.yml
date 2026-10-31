@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: npm ci
+      - run: npm run web:build && npm run chat:build
       - run: go test ./...
       - run: go vet ./...
       - name: Isolated task workflow
